@@ -1013,3 +1013,177 @@ def matoub_train(
     }
     _emit("done", **payload)
     return payload
+
+
+@app.function(
+    image=matoub_image,
+    gpu=MATOUB_GPU,
+    cpu=MATOUB_CPU,
+    volumes={str(DATA_PATH): data_volume},
+    timeout=10 * 60,
+)
+def matoub_infer(
+    text: str = "Azul fell-awen, amek i telliḍ?",
+    voice: str = "kab_male",
+    arm: str = "restored",
+    stage: str = STAGE1,
+    checkpoint: str = "",
+    limit: int = 0,
+    output_filename: str = "sample_stage1.wav",
+) -> dict[str, object]:
+    """Inference over a trained Stage 1 or Stage 2 checkpoint on the volume.
+
+    Stage 1 runs in reference-cloning mode, extracting the speaker style embedding
+    from a reference clip on the volume. Synthesised 24 kHz audio is written to
+    `/data/tts/matoub/samples/`.
+    """
+    _configure_logging()
+    import soundfile as sf
+    import torch
+    import yaml
+
+    # PyTorch 2.6+ defaults weights_only=True which breaks legacy StyleTTS2 checkpoints
+    _orig_torch_load = torch.load
+    def _safe_load(*args: object, **kwargs: object) -> object:
+        if "weights_only" not in kwargs:
+            kwargs["weights_only"] = False
+        return _orig_torch_load(*args, **kwargs)
+    torch.load = _safe_load
+
+    from agbalu.tts import kokoro
+    from agbalu.tts.g2p import phonemize
+
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    root = work_root(arm, limit=limit)
+    logs_dir = root / "logs" if stage == STAGE1 else root / "logs" / voice
+
+    ckpt_path = Path(checkpoint) if checkpoint else (logs_dir / "first_stage.pth")
+    if not ckpt_path.is_file():
+        message = f"no checkpoint at {ckpt_path}; has Stage 1/2 trained yet?"
+        raise RuntimeError(message)
+
+    # 1. G2P Phonemization
+    vocabulary = Vocabulary.load()
+    ipa = kokoro.fold(phonemize(text))
+    token_ids = [vocabulary.symbols[char] for char in ipa if char in vocabulary.symbols]
+    if not token_ids:
+        token_ids = [vocabulary.pad_index]
+    tokens = torch.LongTensor(token_ids).unsqueeze(0).to(device)
+
+    # 2. Config & Auxiliary Models
+    config_file = root / "config_stage1.yml" if stage == STAGE1 else root / "config_stage2.yml"
+    if not config_file.is_file():
+        config_file = root / "config.yml"
+    config = yaml.safe_load(config_file.read_text(encoding="utf-8")) if config_file.is_file() else {}
+
+    from models import build_model, load_ASR_models, load_F0_models
+    from munch import munchify
+    from Utils.PLBERT.util import load_plbert
+
+    asr_config = str(STYLETTS2_PATH / "Utils" / "ASR" / "config.yml")
+    asr_path = str(STYLETTS2_PATH / "Utils" / "ASR" / "epoch_00080.pth")
+    text_aligner = load_ASR_models(asr_path, asr_config)
+
+    f0_path = str(STYLETTS2_PATH / "Utils" / "JDC" / "bst.t7")
+    pitch_extractor = load_F0_models(f0_path)
+
+    bert_path = str(STYLETTS2_PATH / "Utils" / "PLBERT")
+    plbert = load_plbert(bert_path)
+
+    model_params = munchify(config.get("model_params", {}))
+    model = build_model(model_params, text_aligner, pitch_extractor, plbert)
+
+    for key, module in model.items():
+        if isinstance(module, torch.nn.Module):
+            module.to(device)
+            module.eval()
+
+    # 3. Load Checkpoint into Sub-modules
+    state_dict = torch.load(ckpt_path, map_location=device)
+    net_dict = state_dict.get("net", state_dict)
+    for key in model:
+        if key in net_dict and hasattr(model[key], "load_state_dict"):
+            try:
+                model[key].load_state_dict(net_dict[key], strict=False)
+            except Exception as e:
+                log.warning("could not load state_dict for %s: %s", key, e)
+
+    # 4. Reference Audio & Style Vector
+    voice_dir = CORPUS_ROOT / voice / arm
+    wav_files = sorted(voice_dir.glob("*.wav"))
+    if not wav_files:
+        message = f"no reference audio clips found in {voice_dir}"
+        raise RuntimeError(message)
+    ref_wav_path = wav_files[0]
+
+    import librosa
+    import torchaudio
+    from utils import length_to_mask
+
+    wave, sr = librosa.load(str(ref_wav_path), sr=24000)
+    audio_trimmed, _ = librosa.effects.trim(wave, top_db=30)
+
+    to_mel = torchaudio.transforms.MelSpectrogram(
+        n_fft=2048,
+        win_length=1200,
+        hop_length=300,
+        n_mels=80,
+        f_min=0,
+        f_max=8000,
+    )
+    mel_tensor = to_mel(torch.from_numpy(audio_trimmed).float().unsqueeze(0))
+    mel_tensor = torch.log(torch.clamp(mel_tensor, min=1e-5)).to(device)
+
+    # 5. End-to-End Synthesis
+    with torch.no_grad():
+        ref_s = model["style_encoder"](mel_tensor.unsqueeze(1))
+        input_lengths = torch.LongTensor([tokens.shape[1]]).to(device)
+        text_mask = length_to_mask(input_lengths).to(device)
+        t_en = model["text_encoder"](tokens, input_lengths, text_mask)
+
+        d = model["predictor"].text_encoder(t_en, ref_s, input_lengths, text_mask)
+        x, _ = model["predictor"].lstm(d)
+        duration = model["predictor"].duration_proj(x)
+        duration = torch.sigmoid(duration).sum(axis=-1)
+        pred_dur = torch.round(duration.squeeze()).clamp(min=1)
+
+
+        total_frames = int(pred_dur.sum().item()) if pred_dur.dim() > 0 else int(pred_dur.item())
+        pred_aln_trg = torch.zeros(input_lengths.item(), total_frames)
+        c_frame = 0
+        for i in range(pred_aln_trg.size(0)):
+            dur_i = int(pred_dur[i].item()) if pred_dur.dim() > 0 else int(pred_dur.item())
+            pred_aln_trg[i, c_frame : c_frame + dur_i] = 1
+            c_frame += dur_i
+
+        aln = pred_aln_trg.unsqueeze(0).to(device)
+        en = d.transpose(-1, -2) @ aln
+        f0_pred, n_pred = model["predictor"].F0Ntrain(en, ref_s)
+        asr = t_en @ aln
+        out_wav = model["decoder"](asr, f0_pred, n_pred, ref_s.squeeze().unsqueeze(0))
+        out_audio = out_wav.squeeze().cpu().numpy()
+
+    samples_dir = root / "samples"
+    samples_dir.mkdir(parents=True, exist_ok=True)
+    out_path = samples_dir / output_filename
+
+    sf.write(out_path, out_audio, 24000)
+    data_volume.commit()
+
+    payload = {
+        "text": text,
+        "ipa": ipa,
+        "token_count": len(token_ids),
+        "voice": voice,
+        "stage": stage,
+        "checkpoint": str(ckpt_path),
+        "reference_clip": str(ref_wav_path),
+        "output_audio": str(out_path),
+        "duration_seconds": round(len(out_audio) / 24000, 2),
+        "sample_rate": 24000,
+    }
+    _emit("infer_done", **payload)
+    return payload
+
+

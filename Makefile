@@ -331,6 +331,13 @@ modal-matoub-stage2:
 		$(if $(BATCH),--batch $(BATCH),) \
 		$(if $(LIMIT),--limit $(LIMIT),) $(if $(RUN),--run-name $(RUN),)
 
+modal-matoub-infer:
+	modal run -m modal_app.matoub::matoub_infer $(if $(TEXT),--text "$(TEXT)",) \
+		$(if $(VOICE),--voice $(VOICE),) $(if $(ARM),--arm $(ARM),) \
+		$(if $(STAGE),--stage $(STAGE),) $(if $(CHECKPOINT),--checkpoint $(CHECKPOINT),) \
+		$(if $(LIMIT),--limit $(LIMIT),)
+
+
 modal-tifinagh: ## Juba-27M on GPU — deploy, spawn, tail. TASK=train|evaluate. RUN STEPS SPLIT LIMIT FORCE
 	$(call deploy,tifinagh)
 	$(PY) -m modal_app.launch --function tifinagh_$(or $(TASK),train) \
