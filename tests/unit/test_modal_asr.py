@@ -12,6 +12,7 @@ import json
 import math
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -323,6 +324,15 @@ class TestSpeechUploads:
         opened.add(f"/{REMOTE_SPEECH.name}/{VOCABULARY_FILE}")
         opened.add(f"/{REMOTE_SPEECH.name}/{REMOTE_LM_FILE}")
         assert set(uploads) == opened
+
+    def test_the_map_does_not_depend_on_what_is_on_this_disk(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The language model was listed only when it already existed locally, so on a
+        machine that had not built it `upload_speech` uploaded everything else, reported
+        nothing missing, and the evaluation died inside kenlm on the volume."""
+        monkeypatch.setattr("modal_app.asr.LOCAL_LM_BINARY", Path("artifacts/asr/absent.klm"))
+        assert f"/{REMOTE_SPEECH.name}/{REMOTE_LM_FILE}" in speech_uploads()
 
     def test_the_sources_are_where_the_build_targets_write(self) -> None:
         uploads = speech_uploads()

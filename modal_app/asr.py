@@ -1432,8 +1432,7 @@ def speech_uploads() -> dict[str, Path]:
         f"/{REMOTE_SPEECH.name}/{split}.jsonl": LOCAL_SPEECH / f"{split}.jsonl" for split in SPLITS
     }
     remote[f"/{REMOTE_SPEECH.name}/{VOCABULARY_FILE}"] = LOCAL_VOCABULARY
-    if LOCAL_LM_BINARY.exists():
-        remote[f"/{REMOTE_SPEECH.name}/{REMOTE_LM_FILE}"] = LOCAL_LM_BINARY
+    remote[f"/{REMOTE_SPEECH.name}/{REMOTE_LM_FILE}"] = LOCAL_LM_BINARY
     return remote
 
 
