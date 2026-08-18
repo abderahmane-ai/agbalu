@@ -77,7 +77,7 @@ dev = [
 ]
 
 [project.urls]
-Repository = "https://github.com/abdoumagico/agbalu"
+Repository = "https://github.com/abderahmane-ai/agbalu"
 
 [tool.hatch.version]
 path = "src/agbalu/_about.py"

@@ -110,7 +110,7 @@ OPUS_API: Final = "https://opus.nlpl.eu/opusapi/"
 WIKIMEDIA_DUMPS: Final = "https://dumps.wikimedia.org"
 
 USER_AGENT: Final = (
-    f"AGBALU/{__version__} (Kabyle NLP corpus; +https://github.com/abdoumagico/agbalu)"
+    f"AGBALU/{__version__} (Kabyle NLP corpus; +https://github.com/abderahmane-ai/agbalu)"
 )
 """Wikimedia's User-Agent policy rejects generic agents with HTTP 403, and it is
 the courteous thing to send to every provider regardless."""
