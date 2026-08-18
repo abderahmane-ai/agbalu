@@ -1,0 +1,20 @@
+{
+  "title": "The Art of War",
+  "kabyle_title": "Taẓuri n Ṭṭraḍ",
+  "author": "Sun Tzu",
+  "translator": "Lionel Giles",
+  "year": 1910,
+  "language": "eng",
+  "licence": "public-domain",
+  "source": "https://www.gutenberg.org/cache/epub/17405/pg17405.txt",
+  "retrieved": "2026-08-12",
+  "retrieved_note": "the date the document was staged into this tree; the original fetch date was not recorded, so re-running `reproduce` is what re-establishes the bytes",
+  "boilerplate": "Project Gutenberg header and footer stripped; the PG licence covers those, not the original text.",
+  "prepared": "Illustration tags, emphasis underscores, edition colophons, tables of contents and publisher adverts removed after the boilerplate strip, and runs of blank lines collapsed to two. `sha256` is of the prepared text, not of the fetched file.",
+  "reproduce": "curl -L -o data/documents/eng/the-art-of-war.txt https://www.gutenberg.org/cache/epub/17405/pg17405.txt  # then strip between the START/END OF THIS PROJECT GUTENBERG EBOOK markers",
+  "sha256": "ee87455f82636b6ba941104cda0126baa2560dc03bb7ffab608fb24215daec30",
+  "bytes": 60947,
+  "characters": 60805,
+  "words": 10876,
+  "paragraphs": 28
+}

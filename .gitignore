@@ -1,0 +1,98 @@
+# Working notes, phase records, design documents and the agent instruction file are
+# private and do not go to the public remote. docs/cards/ is the exception: those are
+# the model and dataset cards already published verbatim on the Hub, and the release
+# targets copy them from here, so a clone that lacks them cannot run `make release`.
+docs/**
+!docs/cards/
+!docs/cards/*.md
+CLAUDE.md
+
+# Data — never committed. Provenance lives in resources/corpus_registry.yaml,
+# reproduction lives in the pipeline. Bytes stay out of git.
+data/raw/**
+data/interim/**
+data/processed/**
+data/tasks/**
+# Whole documents run end-to-end through the MT stack, one directory per source
+# language. Bytes never go in git; the sidecar beside each one records where it came
+# from and how to fetch it again. The directory rule is what lets git descend far
+# enough to see the sidecars at all.
+data/documents/**
+!data/documents/**/
+!data/documents/**/*.meta.json
+!data/**/.gitkeep
+!data/**/README.md
+!data/**/dataset_info.json
+
+# Model checkpoints, weights, exports, logs
+artifacts/**
+!artifacts/.gitkeep
+*.ckpt
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.onnx
+*.gguf
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+wheels/
+
+# Environments
+.venv/
+venv/
+env/
+.env
+.envrc
+
+# Tool caches — deleted before every commit, ignored as a safety net.
+# .tokenizer-cache holds community tokenizers downloaded by
+# tools/benchmark_tokenizers.py; they are third-party weights, not our artifacts.
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.hypothesis/
+.tokenizer-cache/
+
+# Experiment tracking / cloud
+wandb/
+mlruns/
+.modal/
+outputs/
+lightning_logs/
+
+# Secrets
+*.pem
+*.key
+secrets.yaml
+.hf_token
+credentials.json
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# LaTeX build products
+paper/**/*.aux
+paper/**/*.log
+paper/**/*.out
+paper/**/*.bbl
+paper/**/*.blg
+paper/**/*.synctex.gz
+paper/**/*.fdb_latexmk
+paper/**/*.fls

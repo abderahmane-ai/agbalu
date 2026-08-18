@@ -1,0 +1,210 @@
+# AƔBALU homoglyph confusion table
+#
+# Characters from other scripts that are visually identical or near-identical to
+# Kabyle letters, with the canonical Kabyle codepoint they must be folded to.
+#
+# Primary source: `kabyle-orthography-specs.md` v0.2-draft (Athmane Mokraoui,
+# 2026-07-30), consulted from `data/raw/git.kabyle-specs/`. Every mapping below was
+# then checked against the AƔBALU corpus; where corpus evidence contradicted the
+# spec, the corpus won and the disagreement is recorded in `docs/orthography.md`.
+#
+# `confidence: certain`  -> applied automatically by the normaliser.
+# `confidence: review`   -> flagged, never substituted. Ambiguous or collides with
+#                           legitimate loanwords/proper nouns.
+#
+# Validated by: make normalise-validate
+
+version: "1.0.0"
+spec_source: kabyle-orthography-specs v0.2-draft (2026-07-30)
+reviewed: 2026-08-06
+
+# ---------------------------------------------------------------------------
+# The six primary families. Together these are ~97% of all corruption measured
+# in the seed corpora (25,206 of 791,018 monolingual sentences, 3.19%).
+# ---------------------------------------------------------------------------
+primary:
+  - from: "ε"        # ε GREEK SMALL LETTER EPSILON
+    to: "ɛ"          # ɛ LATIN SMALL LETTER OPEN E
+    confidence: certain
+    source_script: Greek
+    note: >-
+      The single largest defect in Kabyle text. 25,421 occurrences in the seed
+      monolingual corpus against 90,922 correct ɛ — 21.9% of all open-e
+      characters are wrong. Greek epsilon sits one keystroke from ɛ on layouts
+      that lack it.
+
+  - from: "Σ"        # Σ GREEK CAPITAL LETTER SIGMA
+    to: "Ɛ"          # Ɛ LATIN CAPITAL LETTER OPEN E
+    confidence: certain
+    source_script: Greek
+    note: 1,453 occurrences in the seed corpus.
+
+  - from: "γ"        # γ GREEK SMALL LETTER GAMMA
+    to: "ɣ"          # ɣ LATIN SMALL LETTER GAMMA
+    confidence: certain
+    source_script: Greek
+    note: >-
+      Only 222 occurrences against 531,253 correct ɣ (0.04%). The asymmetry with
+      epsilon is a keyboard story: ɣ is present in most Berber layouts, ɛ is not.
+
+  - from: "Γ"        # Γ GREEK CAPITAL LETTER GAMMA
+    to: "Ɣ"          # Ɣ LATIN CAPITAL LETTER GAMMA
+    confidence: certain
+    source_script: Greek
+    note: 129 occurrences in the seed corpus.
+
+  - from: "Ԑ"        # Ԑ CYRILLIC CAPITAL LETTER REVERSED ZE
+    to: "Ɛ"          # Ɛ LATIN CAPITAL LETTER OPEN E
+    confidence: certain
+    source_script: Cyrillic
+    note: 578 occurrences in the seed corpus.
+
+  - from: "ԑ"        # ԑ CYRILLIC SMALL LETTER REVERSED ZE
+    to: "ɛ"          # ɛ LATIN SMALL LETTER OPEN E
+    confidence: certain
+    source_script: Cyrillic
+    note: 8 occurrences in the seed corpus.
+
+# ---------------------------------------------------------------------------
+# Secondary families: letters from Turkish, Czech, Polish, Romanian, Maltese and
+# Esperanto that shadow the eleven Kabyle-specific letters.
+# ---------------------------------------------------------------------------
+secondary:
+  # -> ǧ U+01E7
+  - { from: "ğ", to: "ǧ", confidence: certain, source_script: Turkish }      # ğ
+  - { from: "ĝ", to: "ǧ", confidence: certain, source_script: Esperanto }    # ĝ
+  - { from: "ģ", to: "ǧ", confidence: certain, source_script: Latvian }      # ģ
+  - { from: "ġ", to: "ǧ", confidence: certain, source_script: Maltese }      # ġ
+  - { from: "ǵ", to: "ǧ", confidence: certain, source_script: Polish }       # ǵ
+  - { from: "Ğ", to: "Ǧ", confidence: certain, source_script: Turkish }      # Ğ
+
+  # -> č U+010D
+  - { from: "ć", to: "č", confidence: certain, source_script: Polish }       # ć
+  - { from: "ĉ", to: "č", confidence: certain, source_script: Esperanto }    # ĉ
+  - { from: "Ć", to: "Č", confidence: certain, source_script: Polish }       # Ć
+
+  # -> ṭ U+1E6D. NOTE: U+0163 ţ is deliberately ABSENT here; see `preserve` below.
+  - { from: "ť", to: "ṭ", confidence: certain, source_script: Czech }        # ť
+  - { from: "ț", to: "ṭ", confidence: certain, source_script: Romanian }     # ț
+  - { from: "ṫ", to: "ṭ", confidence: certain, source_script: dot-above }    # ṫ
+  - { from: "Ț", to: "Ṭ", confidence: certain, source_script: Romanian }     # Ț
+
+  # -> ḍ U+1E0D
+  - { from: "ď", to: "ḍ", confidence: certain, source_script: Czech }        # ď
+  - { from: "đ", to: "ḍ", confidence: certain, source_script: Croatian }     # đ
+  - { from: "ð", to: "ḍ", confidence: certain, source_script: Icelandic }    # ð
+  - { from: "ḑ", to: "ḍ", confidence: certain, source_script: cedilla }      # ḑ
+
+  # -> ṣ U+1E63
+  - { from: "š", to: "ṣ", confidence: certain, source_script: Czech }        # š
+  - { from: "ś", to: "ṣ", confidence: certain, source_script: Polish }       # ś
+  - { from: "ş", to: "ṣ", confidence: certain, source_script: Turkish }      # ş
+  - { from: "ș", to: "ṣ", confidence: certain, source_script: Romanian }     # ș
+  - { from: "ṡ", to: "ṣ", confidence: certain, source_script: dot-above }    # ṡ
+
+  # -> ẓ U+1E93
+  - { from: "ž", to: "ẓ", confidence: certain, source_script: Czech }        # ž
+  - { from: "ź", to: "ẓ", confidence: certain, source_script: Polish }       # ź
+  - { from: "ż", to: "ẓ", confidence: certain, source_script: Polish }       # ż
+  - { from: "ƶ", to: "ẓ", confidence: certain, source_script: z-stroke }     # ƶ
+
+  # -> ṛ U+1E5B
+  - { from: "ř", to: "ṛ", confidence: certain, source_script: Czech }        # ř
+  - { from: "ŕ", to: "ṛ", confidence: certain, source_script: Polish }       # ŕ
+  - { from: "ṙ", to: "ṛ", confidence: certain, source_script: dot-above }    # ṙ
+  - { from: "ŗ", to: "ṛ", confidence: certain, source_script: Latvian }      # ŗ
+
+  # -> i / I. Turkish dotless and dotted capital.
+  - { from: "ı", to: "i", confidence: certain, source_script: Turkish }           # ı
+  - { from: "İ", to: "I", confidence: certain, source_script: Turkish }           # İ
+
+# ---------------------------------------------------------------------------
+# French and other Latin diacritics that are not in the Kabyle inventory. These
+# fold to their base letter in formal text.
+# ---------------------------------------------------------------------------
+diacritics:
+  - { from: "áàâäãå", to: "a", confidence: certain }
+  - { from: "éèêë",   to: "e", confidence: certain }
+  - { from: "íìîï",   to: "i", confidence: certain }
+  - { from: "óòôöõ",  to: "o", confidence: certain }
+  - { from: "úùûü",   to: "u", confidence: certain }
+  - { from: "ýÿ",     to: "y", confidence: certain }
+  - { from: "ñ",      to: "n", confidence: certain }
+  - { from: "ÁÀÂÄÃÅ", to: "A", confidence: certain }
+  - { from: "ÉÈÊË",   to: "E", confidence: certain }
+  - { from: "ÍÌÎÏ",   to: "I", confidence: certain }
+  - { from: "ÓÒÔÖÕ",  to: "O", confidence: certain }
+  - { from: "ÚÙÛÜ",   to: "U", confidence: certain }
+  - { from: "Ñ",      to: "N", confidence: certain }
+
+# ---------------------------------------------------------------------------
+# Characters the corpus proves must NOT be folded, against the spec's advice.
+# Removing one of these destroys a distinction the writing system carries.
+# ---------------------------------------------------------------------------
+preserve:
+  - char: "ţ"        # ţ LATIN SMALL LETTER T WITH CEDILLA
+    spec_says: >-
+      kabyle-orthography-specs v0.2 lists ţ as a Romanian legacy false friend and
+      maps it to ṭ U+1E6D with severity "Critique".
+    corpus_says: >-
+      The mapping is wrong and would corrupt 3,030 tokens. Of 1,407 word types
+      containing ţ, only 10 (0.7%) have a ţ->ṭ counterpart anywhere in the corpus,
+      while 479 (34%) have a ţ->t counterpart and 603 (43%) a ţ->tt one. Every
+      frequent ţ word confirms it: neţţa is netta "he" (2,790 as t, ZERO as ṭ),
+      tideţ is tidet "truth" (4,492), ţxil-k is ttxil-k "please" (932).
+    reason: >-
+      ţ is the older Dallet-tradition notation for the spirantised/tense t that
+      modern INALCO orthography writes t or tt. It is not Romanian and not
+      emphatic. Folding it to ṭ merges two distinct phonemes: /t/ with /tˤ/.
+    action: >-
+      Preserve the character; flag the token for review. Do not substitute
+      automatically — t and tt are both attested continuations and the corpus
+      does not disambiguate them (34% vs 43%).
+
+  - char: "̧"        # COMBINING CEDILLA
+    spec_says: not addressed
+    corpus_says: appears in combining sequences that NFC does not always precompose
+    reason: >-
+      Folding it blindly would destroy ţ (see above) as a decomposed sequence.
+    action: Normalise to NFC first, then treat any surviving ţ under the rule above.
+
+# ---------------------------------------------------------------------------
+# Rejected outright: present in no Kabyle word and never a plausible target.
+# The normaliser flags rather than deletes — see docs/orthography.md 5.
+# ---------------------------------------------------------------------------
+reject:
+  - { char: "ç", name: c-cedilla, source_script: French }        # ç
+  - { char: "Ç", name: C-cedilla, source_script: French }        # Ç
+  - { char: "ħ", name: h-stroke, source_script: Maltese }        # ħ
+  - { char: "ø", name: o-slash, source_script: Scandinavian }    # ø
+  - { char: "æ", name: ae, source_script: Latin }                # æ
+  - { char: "œ", name: oe, source_script: French }               # œ
+  - { char: "ß", name: eszett, source_script: German }           # ß
+  - { char: "þ", name: thorn, source_script: Icelandic }         # þ
+  - { char: "ʷ", name: modifier-w, source_script: IPA }          # ʷ
+
+# ---------------------------------------------------------------------------
+# Whitespace and punctuation. Canonical forms per the spec 6.
+# ---------------------------------------------------------------------------
+whitespace:
+  - { from: " ", to: " ", name: NO-BREAK SPACE }
+  - { from: " ", to: " ", name: NARROW NO-BREAK SPACE }
+  - { from: " ", to: " ", name: FIGURE SPACE }
+  - { from: " ", to: " ", name: THIN SPACE }
+  - { from: " ", to: " ", name: EN SPACE }
+  - { from: " ", to: " ", name: EM SPACE }
+  - { from: "​", to: "",  name: ZERO WIDTH SPACE }
+  - { from: "‌", to: "",  name: ZERO WIDTH NON-JOINER }
+  - { from: "‍", to: "",  name: ZERO WIDTH JOINER }
+  - { from: "﻿", to: "",  name: ZERO WIDTH NO-BREAK SPACE / BOM }
+
+punctuation:
+  - { from: "‐", to: "-", name: HYPHEN }
+  - { from: "‑", to: "-", name: NON-BREAKING HYPHEN }
+  - { from: "–", to: "-", name: EN DASH }
+  - { from: "—", to: "-", name: EM DASH }
+  - { from: "“", to: "\"", name: LEFT DOUBLE QUOTATION MARK }
+  - { from: "”", to: "\"", name: RIGHT DOUBLE QUOTATION MARK }
+  - { from: "‘", to: "'", name: LEFT SINGLE QUOTATION MARK }
+  - { from: "’", to: "'", name: RIGHT SINGLE QUOTATION MARK }
+  - { from: "ʼ", to: "'", name: MODIFIER LETTER APOSTROPHE }

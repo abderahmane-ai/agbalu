@@ -1,0 +1,20 @@
+{
+  "title": "Le Comte de Monte-Cristo",
+  "author": "Alexandre Dumas",
+  "first_published": 1844,
+  "language": "fra",
+  "licence": "public-domain",
+  "why_this_book": "One of the most celebrated French novels, extremely well-known to Kabyle speakers through French education. Rich narrative prose with diverse registers — action, dialogue, legal/formal language, intrigue. Tome I (of 2) is used here. An ideal benchmark for fra-kab translation quality given its cultural familiarity.",
+  "source": "https://www.gutenberg.org/cache/epub/17989/pg17989.txt",
+  "retrieved": "2026-08-11",
+  "boilerplate": "Project Gutenberg header and footer stripped; the PG licence covers those, not the 1844 text.",
+  "prepared": "Illustration tags, emphasis underscores, edition colophons, tables of contents and publisher adverts removed after the boilerplate strip, and runs of blank lines collapsed to two. `sha256` is of the prepared text, not of the fetched file.",
+  "reproduce": "curl -L -o /tmp/monte-cristo-raw.txt https://www.gutenberg.org/cache/epub/17989/pg17989.txt  # then strip between the START/END OF THIS PROJECT GUTENBERG EBOOK markers into data/documents/fra/le-comte-de-monte-cristo.txt",
+  "sha256": "23f5ef46aa5ccadd7d1b80870441f9daada767a7e3ad9b0f8dc38bb68d787266",
+  "bytes": 746819,
+  "characters": 726484,
+  "words": 121427,
+  "paragraphs": 4195,
+  "longest_paragraph_characters": 1875,
+  "kabyle_title": "Lkont n Monte-Cristo"
+}

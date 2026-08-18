@@ -1,0 +1,530 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agbalu"
+dynamic = ["version"]
+description = "AƔBALU — Kabyle (Taqbaylit) NLP corpus and model stack"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Abderahmane Ainouche" }]
+keywords = ["kabyle", "taqbaylit", "tamazight", "berber", "nlp", "low-resource"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "huggingface-hub>=0.34",
+    "pydantic>=2.9",
+    "pyyaml>=6.0",
+    "requests>=2.32",
+    # 2.x is the floor: 1.x has no scoring signature, and a metric without its
+    # signature is not comparable, which is the whole disease Phase 7 treats.
+    "sacrebleu>=2.4",
+    # 0.2 is the floor: `seed_sentencepieces_file` is what makes the §11.5 seeded
+    # initialization expressible at all. Core rather than an extra — AƔBALU-Tok is a
+    # deliverable, and the wheel is a small C++ extension, not a training stack.
+    "sentencepiece>=0.2",
+]
+
+[project.optional-dependencies]
+# Baseline inference for the benchmark. Kept out of the core dependencies so the
+# corpus pipelines install without a 2 GB deep-learning stack.
+models = [
+    "torch>=2.4",
+    "transformers>=4.44",
+    # A training checkpoint is not a release: `tools.export_release` writes the weights
+    # alone in safetensors. It arrives transitively with transformers, but the export
+    # imports it directly, and an undeclared import is one that breaks on a lean install.
+    "safetensors>=0.4",
+    # `tools.stage_hub` builds the published `tokenizer.json` files directly against the
+    # Rust backend. It arrives transitively with transformers, but an undeclared import is
+    # one that breaks on a lean install.
+    "tokenizers>=0.20",
+    # Task 7.4 scores two fastText language identifiers. `fasttext-numpy2`
+    # rather than `fasttext`: upstream 0.9.3 calls `np.array(..., copy=False)`,
+    # which numpy 2 raises on, so `predict` is unusable on any current install.
+    # It provides the same `fasttext` module.
+    "fasttext-numpy2>=0.10.4",
+]
+# Local decoding with a released Fadhma directory. Separate from `models`: the benchmark
+# inference stack has no reason to grow an audio decoder, and `soundfile` and `librosa` were
+# previously declared nowhere at all — they existed only inside the Modal ASR image, so
+# `agbalu.speech.transcribe` would have been an undeclared import on every lean install.
+speech = [
+    "soundfile>=0.12",
+    "librosa>=0.10",
+    "pyctcdecode>=0.5",
+    "kenlm>=0.2",
+    # `agbalu.tts.restore` calls `torchaudio.compliance.kaldi.fbank`, which is the
+    # filterbank the restoration checkpoints were traced against. Declared rather than
+    # left to the container: an undeclared import is one that breaks on a lean install.
+    "torchaudio>=2.4",
+]
+dev = [
+    "mypy>=1.11",
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "hypothesis>=6.100",
+    "ruff>=0.6",
+    "types-PyYAML>=6.0",
+    "types-requests>=2.32",
+]
+
+[project.urls]
+Repository = "https://github.com/abdoumagico/agbalu"
+
+[tool.hatch.version]
+path = "src/agbalu/_about.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agbalu"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests", "tools", "modal_app"]
+
+[tool.ruff.lint]
+select = [
+    "A",    # flake8-builtins
+    "ANN",  # flake8-annotations
+    "ARG",  # flake8-unused-arguments
+    "B",    # flake8-bugbear
+    "C4",   # flake8-comprehensions
+    "E",    # pycodestyle errors
+    "EM",   # flake8-errmsg
+    "F",    # pyflakes
+    "I",    # isort
+    "N",    # pep8-naming
+    "PERF", # perflint
+    "PL",   # pylint
+    "PT",   # flake8-pytest-style
+    "PTH",  # flake8-use-pathlib
+    "RET",  # flake8-return
+    "RUF",  # ruff-specific
+    "S",    # flake8-bandit
+    "SIM",  # flake8-simplify
+    "SLF",  # flake8-self
+    "T20",  # flake8-print
+    "TID",  # flake8-tidy-imports
+    "TRY",  # tryceratops
+    "UP",   # pyupgrade
+    "W",    # pycodestyle warnings
+]
+ignore = [
+    "RUF001", # ambiguous-unicode-character-string: Kabyle orthography needs ɣ/ɛ/ḥ...
+    "RUF002", # ... including inside docstrings
+    "RUF003", # ... and comments
+]
+
+[tool.ruff.lint.per-file-ignores]
+# T20: a command-line entry point reports to stdout; that is the whole of its job. The
+#      library modules it calls stay print-free, and the rule still applies to them.
+"src/agbalu/**/cli.py" = ["T20"]
+# `src/agbalu/hub/**` is copied verbatim into the published repositories and loaded there
+# by `transformers` with `trust_remote_code=True`, so its shape is that library's contract
+# rather than this project's.
+# TID252: custom code on the Hub resolves siblings by relative import. It is what the
+#         documented layout uses and what every published example does; an absolute
+#         `agbalu.hub.*` import is exactly the dependency these files exist to avoid.
+# ARG002: `attention_mask` and `**kwargs` are `transformers`' calling convention. Juba
+#         accepts a mask and ignores it because the published weights were evaluated
+#         attending over padding, and dropping the parameter changes how the library
+#         dispatches rather than tidying anything.
+# PLR0913: a configuration class is its fields. Collapsing them into a container is the
+#          one shape `PreTrainedConfig` cannot serialise.
+# ANN401: `PreTrainedConfig.__init__` declares some forty differently-typed keyword
+#         parameters and a saved config may carry any of them, so `Any` is the correct
+#         annotation for what is forwarded, not a way around writing one — `object` does
+#         not type-check against that signature.
+# RUF012: `_tied_weights_keys` is declared as an instance variable on `PreTrainedModel`,
+#         so annotating the override `ClassVar` is a mypy error. The two rules disagree
+#         and the library decides.
+"src/agbalu/hub/**" = ["ANN401", "ARG002", "PLR0913", "RUF012", "TID252"]
+# PLC0415: `torch`, `transformers`, `soundfile`, `librosa` and `pyctcdecode` are the optional
+#          `models` and `speech` extras. `audio_files` and `read_vocabulary` are what a test
+#          exercises without any of them, and a module-scope import would make the whole
+#          speech CLI — `corpus`, `vocabulary`, `lm`, `release` — need an audio stack.
+"src/agbalu/speech/transcribe.py" = ["PLC0415"]
+# PLC0415: `torch`, `transformers`, `tokenizers` and `sentencepiece` are the optional
+#          `models` extra. Imported at module scope, staging a release would be
+#          unimportable on an install that has only the corpus pipelines.
+# S105, S106: `[PAD]`, `[UNK]`, `[CLS]`, `[SEP]`, `[MASK]` are special-token names. The
+#             rule reads any string assigned to a `*_token` argument as a credential.
+"tools/stage_hub.py" = ["PLC0415", "S105", "S106"]
+# S105, S106: the vocabularies here are `[PAD]`, `[UNK]`, `[CLS]`, `[MASK]` and `|`, and
+#             the rule reads any string named `*_token` as a credential.
+"tests/**" = ["S101", "PLR2004", "SLF001", "S311", "S105", "S106"]
+# PLR0913: `profile_for` builds a `ClipProfile`, which is eighteen measurements. A test
+#          factory takes one keyword per field it varies, and bundling them into a config
+#          object would hide which measurement a case is actually about.
+"tests/unit/test_tts_corpus.py" = ["PLR0913"]
+# PLC0415: `transformers` is the optional `models` extra and `write_config` imports it
+#          lazily, so the module must stay importable on an install without it. A
+#          top-level import here would break collection of the whole unit suite.
+"tests/unit/test_speech_release.py" = ["PLC0415"]
+# ARG002: the Protocol-conforming fakes must accept the parameters they are handed, and
+#         the keyword names are part of the contract under test, so they cannot be
+#         renamed to the dummy pattern.
+"tests/unit/test_bench_translate.py" = ["ARG002"]
+# ARG001: a pytest hook's signature is pytest's, not this file's — the parameters are how
+#         the plugin is dispatched and renaming or dropping one unregisters the hook.
+# SLF001: `os._exit` is the whole point. A normal exit runs the C finalisers that were
+#         crashing the interpreter after every test had already passed.
+"tests/conftest.py" = ["ARG001", "SLF001"]
+# S603: the git fetcher runs a resolved absolute `git` with a fixed argument list
+#       and no shell. The only external value is a registry URI, which is
+#       schema-validated and passed as an argv element, never interpolated.
+"src/agbalu/acquire/fetch.py" = ["S603"]
+# TRY400: a source failing to fetch is an expected, handled outcome recorded as a
+#         deferral, not a crash. One line per failure keeps a 62-source run
+#         readable (CLAUDE.md 3.7); the traceback is logged at DEBUG.
+"src/agbalu/acquire/cli.py" = ["TRY400"]
+# PLC0415: `agbalu.bench.taggers` imports torch and transformers, the optional
+#          `models` extra. Importing it at module scope would break `audit`,
+#          `contamination` and `score` on an install without them.
+"src/agbalu/bench/cli.py" = ["PLC0415"]
+# PLC0415: same reason — `fasttext` is the optional `models` extra, imported at
+#          load time so the gate and every other bench command run without it.
+"src/agbalu/bench/lid_systems.py" = ["PLC0415"]
+# S311: `random.Random` draws the LID evaluation sample. It is seeded precisely so
+#       the draw is reproducible and auditable; a cryptographic generator would
+#       make the eval set unreproducible, which is the opposite of what is wanted.
+# S314: `xml.etree` parses the Shawiya Wiktionary dump. The bytes are not
+#       untrusted input: they are fetched from dumps.wikimedia.org by
+#       `agbalu.acquire`, SHA-256 recorded in the manifest, and re-hashed by
+#       `make acquire-verify` before any read.
+"src/agbalu/bench/lid.py" = ["S311", "S314"]
+# PLC0415: `likelihoods` imports torch at call time, so `measure`, `prepare` and every
+#          figure derived from them stay importable on an install without a training stack.
+# PLR0913: it takes the population, the tokenizer, the model, the two special ids, the
+#          device and the two loop bounds. The special ids belong to the tokenizer that was
+#          injected, not to a config object, and bundling them would hide the one decision
+#          this function exists to keep in one place — what is padding and what is scored.
+"src/agbalu/llm/baseline.py" = ["PLC0415", "PLR0913"]
+# PLC0415: `make_identity`, `expand` and `plan_for` import torch at call time, so the
+#          identity recipe and the architecture gate stay importable — and readable — on an
+#          install with no training stack. The module is what says which tensors a copied
+#          block must zero, which is worth being able to consult without one.
+"src/agbalu/llm/expand.py" = ["PLC0415"]
+# PLC0415: here the deferred import *is* the feature. `available()` exists to probe for an
+#          optional package, which cannot be done at module scope without making it
+#          mandatory — and the module must stay importable without a training stack, because
+#          it is what states the loss's definition: the causal shift and gemma-4's softcap.
+"src/agbalu/llm/loss.py" = ["PLC0415"]
+# PLR0913: `select` takes the pool, the two exclusion sets, the size and the three
+#          constants that define the set's shape — length floor, speaker cap and seed.
+#          Each is a separate decision a reviewer has to be able to see and a test has to
+#          be able to vary; bundling them into a config object would satisfy the counter
+#          and hide what the prompt set is.
+# S311:    `random.Random(seed)` draws the prompt set. It is seeded precisely so the draw
+#          reproduces — a cryptographic generator would make the published number
+#          unrepeatable, which is the opposite of the property being bought.
+"src/agbalu/tts/prompts.py" = ["PLR0913", "S311"]
+# PLC0415: `numpy` is reached only by `apply`, which cuts and gains a waveform. Everything
+#          else here — the verdicts, the level target, the splits, the lists — is what
+#          decides the corpus, and it must stay importable and testable without an audio
+#          stack, because those decisions are the deliverable and the audio is their output.
+# S311:    `random.Random(seed)` draws the held-out sets. Seeded precisely so the split
+#          reproduces; a cryptographic generator would make the corpus unrepeatable.
+"src/agbalu/tts/corpus.py" = ["PLC0415", "S311"]
+# PLC0415: `torch`, `torchaudio`, `librosa` and `huggingface_hub` are the container's
+#          stack. At module scope the constants this file exists to state — the traced
+#          checkpoints, their licence, and the filterbank parameterisation the feature
+#          predictor was fitted to — would be unreadable without a GPU image installed.
+"src/agbalu/tts/restore.py" = ["PLC0415"]
+# S311:    `random.Random(seed)` interleaves the two voices for the multi-speaker Stage 1
+#          list. Seeded so the merged corpus reproduces; the alternative is voice order,
+#          which is what makes a loss curve track the speaker rather than the model.
+# PLR0913: `select_ood` takes one keyword per decision it makes, and two of them —
+#          the exclusion set and the length floor — are what decide whether the artifact
+#          is contaminated or hangs the recipe's sampler. A config object would hide both.
+"src/agbalu/tts/training.py" = ["S311", "PLR0913"]
+# S311: `random.Random(seed)` draws the OOD reservoir over the whole text corpus. Seeded so
+#       the set reproduces; the alternative already bit once — a prefix returned 5,179 rows
+#       from a single source, which is one register of Kabyle rather than a sample of it.
+"src/agbalu/tts/cli.py" = ["S311"]
+# S105: `[PAD]` and `[UNK]` are `Wav2Vec2CTCTokenizer`'s literal special tokens, and the
+#       names are fixed by that class rather than chosen here. A constant ending in
+#       `_TOKEN` is an ASR vocabulary entry in this package, never a credential.
+"src/agbalu/speech/vocabulary.py" = ["S105"]
+# PLR0913: `build` takes both inputs, the destination, the epoch count, the held-out rate
+#          and the counting batch. The rate is the corpus's other half — `holdout` takes the
+#          same one — and the batch is what a test varies to prove it changes nothing.
+"src/agbalu/llm/mixture.py" = ["PLR0913"]
+# PLC0415: `require_tensor` imports torch at call time for one `isinstance`, so prompt
+#          assembly, shot sampling and hypothesis extraction stay importable — and unit
+#          testable — on an install with no training stack.
+"src/agbalu/llm/prompting.py" = ["PLC0415"]
+# PLC0415: `HubEncoder` and `SentencePieceEncoder` import `transformers` and
+#          `sentencepiece` at construction, so `--help` and argument errors work on an
+#          install without the `models` extra. Only the encoder actually asked for is built.
+"src/agbalu/llm/cli.py" = ["PLC0415", "T20"]
+# PLC0415: same reason — `generate` imports torch at call time so `audit`, `contamination`
+#          and `score` keep working on an install without the `models` extra.
+# PLR0913: `generate` takes the batch, both collaborators, the forced target token, the
+#          device and the batch size. Bundling the model with its tokenizer would satisfy
+#          the counter without making the call site clearer.
+"src/agbalu/bench/translate.py" = ["PLC0415", "PLR0913"]
+# PLR0913: `ProbeTagger.fit` takes the frozen encoder, its tokenizer, the training
+#          sentences, the device, the checkpoint step it reports as `revision`, and the
+#          hyperparameters — which are already bundled into `ProbeConfig`. The remaining
+#          six are each a distinct collaborator, and folding any two would hide one.
+"src/agbalu/bench/probe.py" = ["PLR0913"]
+# PLC0415: `agbalu.model.trainer` pulls in torch. Importing it at module scope would break
+#          `data`, which is the command you run *before* deciding whether to install a
+#          training stack at all.
+"src/agbalu/model/cli.py" = ["PLC0415"]
+# PLC0415: same reason — `model`, `train` and `infer` pull in torch, while `corpus` builds
+#          the splits with the corpus pipelines alone. A top-level import would make the one
+#          subcommand that needs no training stack the one that cannot run without it.
+# TRY400: a missing corpus or tokenizer is an operator error with a one-line remedy in the
+#         message. A traceback for "run `make punctuation TASK=corpus` first" is noise.
+"src/agbalu/punctuation/cli.py" = ["PLC0415", "TRY400"]
+# PLR0913: `Trainer.__init__` takes the two corpora, the settings, the run directory and the
+#          device separately because they have different lifetimes — folding them into one
+#          container would put a torch device inside a frozen settings object, and the
+#          settings are what a resumed run must compare against the checkpoint.
+"src/agbalu/punctuation/train.py" = ["PLR0913"]
+# PLR0913: batch size and max length are properties of the call, not of the checkpoint, so
+#          they belong in the signature rather than in the model.
+"src/agbalu/punctuation/infer.py" = ["PLR0913"]
+# PLC0415: `trim_model` imports torch at call time so `coverage` and `Remap` — the parts
+#          that decide *what* to trim — stay importable without a training stack.
+"src/agbalu/mt/vocab.py" = ["PLC0415"]
+# PLR0913: `iter_batches` takes six arguments because resumption needs all of them —
+#          epoch, start_batch and drop_last are not defaultable away without hiding the
+#          validation bug they exist to prevent.
+"src/agbalu/model/data.py" = ["PLR0913"]
+# PLR0913: `Trainer` takes both splits, a destination and two optional collaborators.
+#          Bundling the splits into a wrapper type would satisfy the counter and carry
+#          no meaning.
+"src/agbalu/model/trainer.py" = ["PLR0913"]
+# S603:    `follow` runs the `modal` CLI resolved through `shutil.which`, with a fixed
+#          argument list, no shell, and no value from outside this module. The app name is
+#          a module constant.
+"modal_app/launch.py" = ["S603"]
+# T20:     Modal local entrypoints report to the operator's terminal; that is their job.
+# PLC0415: the training imports must happen inside the container, not at local import
+#          time — `modal run` imports this file on a laptop that need not have torch.
+# PLR0913: a Modal function's parameters are its CLI and its RPC surface. Each one is a
+#          separate knob the operator sets from the shell (`--steps`, `--compile-model`,
+#          `--schedule-start`); bundling them into an object would satisfy the counter and
+#          take the flags away.
+# S311: `random.Random(state.epoch)` fixes the batch order so a resumed run replays the
+#       order it was interrupted in. A cryptographic generator would make the resume
+#       irreproducible, which is the opposite of the property being bought.
+"modal_app/**" = ["T20", "PLC0415", "PLR0913", "S311"]
+# PLR0913: `stage` takes the source, the destination, the card, the extra files, the
+#          architecture and which key suffixes are derived. Each is a separate decision the
+#          release recipe makes in the Makefile, and bundling any two would hide what a
+#          published directory is actually made of.
+"tools/export_checkpoint.py" = ["PLR0913"]
+# T20: standalone scripts report to stdout by design.
+# PLC0415: deferred imports are intentional — tools may depend on optional extras
+#          (e.g. `tokenizers`) and must still run, and fail cleanly, without them.
+"tools/**" = ["T20", "PLC0415", "BLE001"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.mypy]
+python_version = "3.12"
+files = ["src", "tests", "tools", "modal_app"]
+strict = true
+warn_unreachable = true
+warn_no_return = true
+disallow_any_unimported = true
+disallow_any_generics = true
+no_implicit_reexport = true
+show_error_codes = true
+pretty = true
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_decorators = false
+
+# `tokenizers` ships no py.typed marker and has no stubs on PyPI. It is an optional
+# extra used only by tools/benchmark_tokenizers.py, never by the package.
+[[tool.mypy.overrides]]
+module = ["tokenizers.*"]
+ignore_missing_imports = true
+
+# Both spellings: `tools/` has no `__init__.py`, so mypy names the module differently
+# depending on whether it is reached by path or by package.
+[[tool.mypy.overrides]]
+module = ["tools.benchmark_tokenizers", "benchmark_tokenizers"]
+disallow_any_unimported = false
+
+# `sentencepiece` ships no py.typed marker and no stubs on PyPI, so every processor and
+# trainer call is untyped at the boundary. Confined to the two modules that own it.
+[[tool.mypy.overrides]]
+module = ["sentencepiece.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["agbalu.tokenizer.train", "agbalu.tokenizer.evaluate", "tools.vocabulary_evidence"]
+disallow_untyped_calls = false
+disallow_any_unimported = false
+
+# `cut-cross-entropy` ships no py.typed marker and no stubs on PyPI, and it only installs
+# where Triton does — so it is absent on the laptop the gate runs on. Confined to the one
+# module that imports it; `loss.require_tensor` states what is expected back.
+[[tool.mypy.overrides]]
+module = ["cut_cross_entropy.*"]
+ignore_missing_imports = true
+
+# `pyarrow` ships no py.typed marker and no stubs on PyPI.
+[[tool.mypy.overrides]]
+module = ["pyarrow.*"]
+ignore_missing_imports = true
+
+
+# `soundfile` and `librosa` ship no py.typed marker and no stubs on PyPI. Both are the
+# ASR image only, and `_load_audio` states the array type it returns.
+[[tool.mypy.overrides]]
+module = ["soundfile.*", "librosa.*"]
+ignore_missing_imports = true
+
+# `torchaudio.compliance.kaldi` ships no py.typed marker. It is reached from one function,
+# which states the tensor shape it returns; the filterbank parameters are named constants
+# beside it rather than inferred from a signature.
+[[tool.mypy.overrides]]
+module = ["torchaudio.*"]
+ignore_missing_imports = true
+
+# `torch.jit.load` carries no annotations, so loading a traced module is an untyped call in
+# a typed context. Confined to the one module that loads the restoration checkpoints; what
+# they return is narrowed by `Restorer.restore`, not silenced.
+[[tool.mypy.overrides]]
+module = ["agbalu.tts.restore"]
+disallow_untyped_calls = false
+
+# `Wav2Vec2ForCTC.freeze_feature_encoder` carries no annotations, so calling it is an
+# untyped call in a typed context. Confined to the one module that constructs the CTC
+# model. The other transformers boundary — `PreTrainedModel.to`, whose decorator types
+# its argument as the model — is narrowed in the code rather than silenced here.
+[[tool.mypy.overrides]]
+module = ["modal_app.asr"]
+disallow_untyped_calls = false
+
+# `pyarrow.parquet.read_table` and `write_table` carry no annotations, so calling either is
+# an untyped call in a typed context. Confined to the modules that touch parquet directly;
+# what comes back is narrowed in the code, not silenced.
+[[tool.mypy.overrides]]
+module = [
+    "agbalu.extract.readers",
+    "agbalu.lexicon.readers",
+    "agbalu.bench.lid",
+    "agbalu.bench.tifinagh",
+    "agbalu.bench.inflect",
+    "tools.build_kabinflect",
+    "tools.build_kabtifinagh",
+    "tools.export_datasets",
+    "tests.unit.test_lexicon_readers",
+]
+disallow_untyped_calls = false
+disallow_any_unimported = false
+
+# `fasttext` ships no py.typed marker and no stubs on PyPI. Confined to the one
+# module that loads it; `_FastTextModel` states the surface actually used.
+[[tool.mypy.overrides]]
+module = ["fasttext.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["tools.character_census", "character_census"]
+disallow_untyped_calls = false
+
+# `torch.distributed.checkpoint` and `torch.multiprocessing` ship a `py.typed` marker but
+# re-export `save`, `load`, `get_state_dict`, `set_state_dict` and `spawn` through runtime
+# `__getattr__`, so mypy sees the modules as having no such attributes and the calls as
+# untyped. `get_state_dict` additionally declares its return as the concrete dict shape the
+# distributed checkpointer wants, which no faithful caller can construct by hand. Confined
+# to the one module that trains under FSDP; what it actually promises — that a resumed run
+# continues rather than restarting — is checked by test.
+[[tool.mypy.overrides]]
+module = ["modal_app.jugurtha"]
+disallow_untyped_calls = false
+disable_error_code = ["attr-defined", "arg-type", "no-any-return"]
+
+# The `transformers` boundary. Its `py.typed` marker promises more than the annotations
+# deliver: `PreTrainedConfig.__init_subclass__`, `PreTrainedModel.post_init` and
+# `nn.Module.eval` carry none, so subclassing or constructing a model is an untyped call;
+# the model-output dataclasses annotate their fields as `torch.FloatTensor`, a deprecated
+# alias no torch operation returns; and `forward` and `get_encoder` are declared on the
+# base with `Any` returns and variable signatures, so any faithful override is reported as
+# incompatible. Confined to the modules that subclass the library. What these modules
+# actually promise is checked by test, not by annotation: `tests/unit/test_hub_*.py`
+# asserts they produce the training modules' outputs tensor for tensor.
+[[tool.mypy.overrides]]
+module = [
+    "agbalu.hub.*",
+    "agbalu.speech.release",
+    "tools.stage_hub",
+    "stage_hub",
+]
+disallow_untyped_calls = false
+disable_error_code = ["arg-type", "override"]
+
+# The same boundary from the test side, plus two codes the library forces there:
+# `generate` is declared with `self: GenerativePreTrainedModel`, which mypy does not accept
+# a faithful subclass as, and it returns a five-way union of which only `LongTensor` has a
+# shape. Confined to the tests that drive a real `generate`.
+[[tool.mypy.overrides]]
+module = [
+    "tests.unit.test_hub_belaid",
+    "tests.unit.test_hub_juba",
+    "tests.unit.test_hub_masinissa",
+    "tests.unit.test_stage_hub",
+    "tests.unit.test_speech_release",
+    "tests.integration.test_hub_release_directories",
+]
+disallow_untyped_calls = false
+disable_error_code = ["arg-type", "override", "misc", "union-attr"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = [
+    "-q",
+    "--strict-markers",
+    "--strict-config",
+    "--tb=short",
+]
+markers = [
+    "integration: touches the filesystem, network, or real corpus files",
+    "slow: takes more than a second",
+]
+# The suite writes 2.7 GB of `tmp_path` a session — checkpoints, tokenizers, corpora. Under
+# the default `all` policy that is kept for three sessions and pruned from an `atexit`
+# handler, and `tests/conftest.py` leaves through `os._exit`, which runs no such handler: the
+# temp root reached 24 GB over eleven runs and a full volume then killed a run with a bus
+# error inside an mmap. Under `failed` each directory is removed in the fixture's teardown,
+# during the session, and a green run removes the session root as well.
+tmp_path_retention_policy = "failed"
+filterwarnings = [
+    "error",
+    # sentencepiece's SWIG bindings emit these while the C extension is still
+    # initialising. Under `error` the exception is raised inside the module init and
+    # **segfaults the interpreter** rather than failing a test, which is how the MT
+    # harness first appeared to be broken. Third-party and unfixable from here.
+    "ignore:builtin type SwigPy.* has no __module__ attribute:DeprecationWarning",
+    "ignore:builtin type swigvarlink has no __module__ attribute:DeprecationWarning",
+]
+
+[tool.coverage.run]
+source = ["src/agbalu"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = ["pragma: no cover", "if TYPE_CHECKING:", "raise NotImplementedError"]

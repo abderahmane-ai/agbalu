@@ -1,0 +1,20 @@
+{
+  "title": "Alice's Adventures in Wonderland",
+  "author": "Lewis Carroll",
+  "first_published": 1865,
+  "language": "eng",
+  "licence": "public-domain",
+  "why_this_book": "Requested book was Le Petit Prince, still under copyright in the US until 2039 and in France. This is a children's novel of comparable length and register that is public domain worldwide, so a translation of it can live in the repository.",
+  "source": "https://www.gutenberg.org/cache/epub/11/pg11.txt",
+  "retrieved": "2026-08-11",
+  "boilerplate": "Project Gutenberg header and footer stripped; the PG licence covers those, not the 1865 text.",
+  "prepared": "Illustration tags, emphasis underscores, edition colophons, tables of contents and publisher adverts removed after the boilerplate strip, and runs of blank lines collapsed to two. `sha256` is of the prepared text, not of the fetched file.",
+  "reproduce": "curl -L -o data/documents/eng/alice-in-wonderland.txt https://www.gutenberg.org/cache/epub/11/pg11.txt  # then strip between the START/END OF THIS PROJECT GUTENBERG EBOOK markers",
+  "sha256": "ee51222be9216a276c4473772859b0062a2bb4d3cc15b8a37165c70478cd9291",
+  "bytes": 148948,
+  "characters": 142459,
+  "words": 26446,
+  "paragraphs": 1,
+  "longest_paragraph_characters": 980,
+  "kabyle_title": "Tirmit n Alice deg Tmurt n Lɛeǧayeb"
+}

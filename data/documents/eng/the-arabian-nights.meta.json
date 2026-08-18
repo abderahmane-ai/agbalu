@@ -1,0 +1,15 @@
+{
+  "title": "The Arabian Nights",
+  "kabyle_title": "Alf Yiḍ d Yiḍ",
+  "author": "Anonymous / Andrew Lang",
+  "language": "eng",
+  "licence": "public-domain",
+  "retrieved": "2026-08-12",
+  "retrieved_note": "the date the document was staged into this tree; the original fetch date was not recorded, so re-running `reproduce` is what re-establishes the bytes",
+  "sha256": "fb8217c0cabc763a0e87188ff9184e6c27269f6eb21505a7649d5378f43e3bfa",
+  "bytes": 589746,
+  "characters": 589746,
+  "words": 110510,
+  "paragraphs": 2,
+  "prepared": "Illustration tags, emphasis underscores, edition colophons, tables of contents and publisher adverts removed after the boilerplate strip, and runs of blank lines collapsed to two. `sha256` is of the prepared text, not of the fetched file."
+}

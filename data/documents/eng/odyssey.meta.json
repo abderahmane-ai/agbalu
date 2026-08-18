@@ -1,0 +1,15 @@
+{
+  "title": "The Odyssey",
+  "kabyle_title": "ASIKEL N ULISES",
+  "author": "Homer",
+  "language": "eng",
+  "licence": "public-domain",
+  "retrieved": "2026-08-12",
+  "retrieved_note": "the date the document was staged into this tree; the original fetch date was not recorded, so re-running `reproduce` is what re-establishes the bytes",
+  "sha256": "2acf676bdf589a37f6544f679bc4b376adeb706c9a8bd58c7b625200b5b5a0b1",
+  "bytes": 647551,
+  "characters": 636333,
+  "words": 110991,
+  "paragraphs": 3,
+  "prepared": "Illustration tags, emphasis underscores, edition colophons, tables of contents and publisher adverts removed after the boilerplate strip, and runs of blank lines collapsed to two. `sha256` is of the prepared text, not of the fetched file."
+}

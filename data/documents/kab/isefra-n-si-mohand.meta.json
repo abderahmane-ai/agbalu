@@ -1,0 +1,17 @@
+{
+  "title": "Isefra n Si Mohand u Mhand",
+  "english_title": "The Poems of Si Mohand u Mhand",
+  "author": "Si Mohand u Mhand",
+  "year": 1904,
+  "language": "kab",
+  "licence": "public-domain",
+  "source": "Digitized Archive - Poèmes Kabyles Anciens (Mouloud Mammeri)",
+  "retrieved": "2026-08-12",
+  "retrieved_note": "the date the document was staged into this tree; the original fetch date was not recorded, so re-running `reproduce` is what re-establishes the bytes",
+  "sha256": "9371288bc44d79e7ebd2e703f81044f15f949ddcd9f33193105d0ba8c43527cd",
+  "bytes": 3875,
+  "characters": 3603,
+  "words": 619,
+  "paragraphs": 20,
+  "prepared": "Illustration tags, emphasis underscores, edition colophons, tables of contents and publisher adverts removed after the boilerplate strip, and runs of blank lines collapsed to two. `sha256` is of the prepared text, not of the fetched file."
+}

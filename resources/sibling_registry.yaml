@@ -1,0 +1,133 @@
+# AƔBALU sibling-language registry
+#
+# Berber languages that are NOT Kabyle, registered for the task-7.4 language
+# identification benchmark. Held in a separate file, under a separate root model
+# (`SiblingRegistry`), because CLAUDE.md §1 forbids merging these into the Kabyle
+# corpus: `SiblingSource` refuses any source declaring `kab`, and no extract,
+# parallel or lexicon pipeline can read this file.
+#
+# These bytes exist to be classified against, never to be ingested.
+#
+# Scope is Latin script only. Every sibling that FLORES+ or GlotCC carries in
+# Tifinagh is separable from Latin-script Kabyle on the encoding alone, which
+# would measure the script and report it as language identification.
+#
+# Sizes are what the provider reported at `retrieved`, queried on 2026-08-09 via
+# the HuggingFace tree API (paginated — the tree endpoint caps at 1,000 entries
+# and GlotCC has 1,252 partitions) and the Wikimedia dumps index.
+#
+# Validated by: make sibling-registry
+
+version: "1.0.0"
+surveyed: 2026-08-09
+
+sources:
+
+  # =========================================================================
+  # GlotCC-V1 — CC0, web-crawled, the only source with four siblings in Latin
+  # =========================================================================
+  - id: hf.glotcc-v1-shi
+    name: GlotCC-V1 — Tashelhit (Latin)
+    modality: text
+    tier: reference
+    access: hf
+    uri: https://huggingface.co/datasets/cis-lmu/GlotCC-V1
+    licence: cc0-1.0
+    languages: [shi_Latn]
+    size: { bytes: 86420 }
+    retrieved: 2026-08-09
+    notes: >-
+      Tashelhit (Taclḥit), Southern Morocco. Partition v1.0/shi-Latn, 1 parquet
+      file. Largest Latin-script sibling partition available anywhere surveyed.
+      GlotCC labels are themselves GlotLID output, so this is silver, not gold —
+      which is exactly why the confusion matrix is the deliverable and not an
+      accuracy claim about GlotCC.
+
+  - id: hf.glotcc-v1-rif
+    name: GlotCC-V1 — Tarifit (Latin)
+    modality: text
+    tier: reference
+    access: hf
+    uri: https://huggingface.co/datasets/cis-lmu/GlotCC-V1
+    licence: cc0-1.0
+    languages: [rif_Latn]
+    size: { bytes: 62912 }
+    retrieved: 2026-08-09
+    notes: >-
+      Tarifit (Tmaziɣt n Arif), Northern Morocco. Partition v1.0/rif-Latn, 2
+      parquet files. A rif-Tfng partition also exists and is deliberately not
+      registered: script alone separates it from Kabyle.
+
+  - id: hf.glotcc-v1-taq
+    name: GlotCC-V1 — Tamasheq (Latin)
+    modality: text
+    tier: reference
+    access: hf
+    uri: https://huggingface.co/datasets/cis-lmu/GlotCC-V1
+    licence: cc0-1.0
+    languages: [taq_Latn]
+    size: { bytes: 30230 }
+    retrieved: 2026-08-09
+    notes: >-
+      Tamasheq (Tuareg), Mali and Niger. Southern Berber, so the most distant of
+      the six siblings and the expected easiest contrast. Partition
+      v1.0/taq-Latn.
+
+  - id: hf.glotcc-v1-tzm
+    name: GlotCC-V1 — Central Atlas Tamazight (Latin)
+    modality: text
+    tier: reference
+    access: hf
+    uri: https://huggingface.co/datasets/cis-lmu/GlotCC-V1
+    licence: cc0-1.0
+    languages: [tzm_Latn]
+    size: { bytes: 46130 }
+    retrieved: 2026-08-09
+    notes: >-
+      Central Atlas Tamazight, Middle Atlas. The only Latin-script tzm text found
+      in the survey: FLORES+ carries tzm in Tifinagh only, and the datasets
+      labelled "Tamazight" that mix tzm with Kabyle are the specific hazard this
+      benchmark exists to quantify.
+
+  # =========================================================================
+  # FLORES+ — the one controlled contrast: identical sentences, both languages
+  # =========================================================================
+  - id: hf.flores-plus-taq
+    name: FLORES+ — Tamasheq (Latin)
+    modality: text
+    tier: reference
+    access: hf
+    uri: https://huggingface.co/datasets/openlanguagedata/flores_plus
+    licence: cc-by-sa-4.0
+    languages: [taq_Latn]
+    size: { sentences: 2009 }
+    retrieved: 2026-08-09
+    notes: >-
+      997 dev + 1,012 devtest, the same English source sentences as kab_Latn.
+      The only Berber pair in FLORES+ that shares a script, and therefore the
+      only contrast where content is held constant and the classifier cannot win
+      on topic. taq_Tfng, tzm_Tfng and zgh_Tfng are not registered (script).
+      Inherits the FLORES+ contamination constraint: never ingested, never
+      trained on.
+
+  # =========================================================================
+  # Shawiya — the ṯ contamination lead (CLAUDE.md §6.2)
+  # =========================================================================
+  - id: wikimedia.shywiktionary
+    name: Shawiya Wiktionary (shy.wiktionary.org)
+    modality: text
+    tier: reference
+    access: wikimedia
+    uri: https://dumps.wikimedia.org/shywiktionary/
+    licence: cc-by-sa-4.0
+    languages: [shy]
+    size: { bytes: 559338 }
+    retrieved: 2026-08-09
+    notes: >-
+      Shawiya (Tacawit), Aurès. The ONLY live Shawiya Wikimedia project — there
+      is no shy.wikipedia — confirmed against the Meta sitematrix API on
+      2026-08-09. Registered because AƔBALU-Text v1 carries 5,273 occurrences of
+      `ṯ` U+1E6F in lines shaped like shy.wiktionary.org URLs (CLAUDE.md §6.2),
+      and that lead cannot be settled without the text it points at. Dump
+      20260801, pages-articles. No sibling appears in GlotCC for shy, so this is
+      the only acquirable Shawiya text in the survey.

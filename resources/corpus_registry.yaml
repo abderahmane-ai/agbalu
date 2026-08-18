@@ -1,0 +1,1367 @@
+# AƔBALU corpus registry
+#
+# Every Kabyle data source known to the project, with the size the provider
+# reported at `retrieved` and the licence it declares. Figures were obtained by
+# querying the HuggingFace, OPUS, Common Voice, Wikimedia and GitHub APIs on
+# 2026-08-05 — none are estimates. See docs/corpus_landscape.md for the analysis.
+#
+# tier: core          -> enters the released corpus
+#       supplementary -> enters licence-compatible cuts only
+#       reference     -> consulted, never ingested (benchmarks, specs, models)
+#       excluded      -> deliberately left out; `notes` records why
+#
+# Validated by: make registry
+#
+# LICENCE AUDIT, Phase 1 task 1.6 (2026-08-06). All 12 unresolved licences were
+# re-checked against the HuggingFace API, repository LICENSE files and GitHub's
+# licence endpoint. Ten remain genuinely unresolvable because upstream itself is
+# vague: `cc` is not a licence (no variant, so CC0 and CC BY-NC-SA are both
+# consistent with it), `other` is unspecified, and three declare nothing at all.
+# They stay at their declared value and therefore classify as `unclear`, which
+# already excludes them from a permissive release cut.
+# Two were resolved and acted on:
+#   git.sferhah.digitized-dallet  core -> reference (underlying 1982 work in copyright)
+#   git.kabyle-specs              no LICENSE file at all; all rights reserved by
+#                                 default. Already `reference`, so never ingested.
+# Per-source detail: docs/phases/phase-01-acquisition.md
+#
+# 1.9.0 (2026-08-15, task 12.3). hf.boffire.tughalin-n-weqcic-ijahen was registered
+# `text` and holds no text at all — 229 WAVs and no transcript — so it was fetched for
+# its modality tag and kept for a content it does not have. Measured synthetic; re-tiered
+# `supplementary -> excluded`, `text -> speech`. The tag deciding what gets fetched has
+# now cut both ways: f5tts-kabyle-dataset's audio was tagged `speech` and never fetched.
+
+version: "1.9.0"
+surveyed: 2026-08-11
+
+sources:
+
+  # =========================================================================
+  # Seed — already in repo
+  # =========================================================================
+  - id: local.tatoeba-kab-eng
+    name: Tatoeba Kabyle-English sentence pairs (local export)
+    modality: parallel
+    tier: core
+    access: manual
+    uri: data/raw/tatoeba/tatoeba_kab_eng_2026-08-05.tsv
+    licence: cc-by-2.0
+    languages: [kab, eng]
+    size: { rows: 140324, bytes: 11168376, sentences: 128845, tokens: 672097 }
+    retrieved: 2026-08-05
+    checksum: e18a846b36b6b00a273a53eff197d712c0575a68f7902b5493f466f08d1280a2
+    notes: >-
+      Seed corpus. UTF-8 with BOM, CRLF. 2.60% of rows carry homoglyph corruption
+      (Greek epsilon for Latin open-e, Greek gamma for Latin gamma). Tatoeba is
+      CC BY 2.0 FR at the collection level; individual sentences vary.
+
+  - id: local.tatoeba-kab-mono
+    name: Tatoeba Kabyle monolingual sentences (local export)
+    modality: text
+    tier: core
+    access: manual
+    uri: data/raw/tatoeba/tatoeba_kab_mono_2026-08-05.tsv
+    licence: cc-by-2.0
+    languages: [kab]
+    size: { rows: 791018, bytes: 35172949, sentences: 791018, tokens: 3733626 }
+    retrieved: 2026-08-05
+    checksum: e72c70a576029f955c6ce54b85a95c9f69f3771909ef081d3fcad889183deffa
+    notes: >-
+      Seed corpus. UTF-8 no BOM, LF. 3 columns: id, lang (always kab), sentence.
+      All 791,018 ids and sentence strings are distinct. 662,613 of them have NO
+      English pair, making this ~6x more Kabyle text than the paired export and
+      the largest single monolingual source held locally. 3.19% of rows carry
+      homoglyph corruption; 21.9% of all open-e characters are Greek U+03B5
+      instead of Latin U+025B. 498 ids present in the paired export are absent
+      here — reconcile in Phase 1.
+
+  # =========================================================================
+  # Speech — Kabyle's strongest resource
+  # =========================================================================
+  - id: cv.common-voice-26-kab
+    name: Mozilla Common Voice v26.0 — Kabyle
+    modality: speech
+    tier: core
+    access: http
+    uri: https://commonvoice.mozilla.org/en/datasets
+    licence: cc0-1.0
+    languages: [kab]
+    size: { hours: 693.88, rows: 747410, bytes: 18718590707 }
+    retrieved: 2026-08-05
+    notes: >-
+      571.29 validated hours of 693.88 total; 1,607 speakers; released 2026-06-12.
+      Kabyle ranks 10th of 294 locales. Splits: train 152,608 / dev 15,004 /
+      test 15,004 / validated 615,368 / other 111,915. 53% male, 20% female.
+      NOT FETCHABLE BY `acquire`, verified 2026-08-11: the uri is a consent-gated
+      landing page and Common Voice moved exclusively to Mozilla Data Collective
+      in October 2025, so retrieval needs an account and an API key. `access`
+      stays `http` because the enum has no value for a source behind an account;
+      `manual` demands a checksum we cannot have until it is downloaded.
+      NOT on the ASR critical path: hf.fsicoli.common-voice-22-kab carries
+      570.37 of these 571.29 validated hours. What v26 buys is the ~395 validated
+      hours outside train/dev/test, whose audio no mirror ships.
+      docs/asr_design.md §2.
+
+  - id: hf.fsicoli.common-voice-22-kab
+    name: Common Voice v22.0 — Kabyle, community mirror
+    modality: speech
+    tier: core
+    access: hf
+    uri: https://huggingface.co/datasets/fsicoli/common_voice_22_0
+    licence: cc0-1.0
+    languages: [kab]
+    size: { hours: 693.35, rows: 746990, bytes: 18638653109 }
+    retrieved: 2026-08-11
+    notes: >-
+      The route that actually works. Public, ungated, CC0, 103 languages;
+      release 22.0.0 dated 2025-06-20, read from its own release_stats.py:
+      570.37 validated hours of 693.35, 746,990 clips, 1,588 speakers, Kabyle
+      9th of 137 locales. Against v26 that is 0.92 validated hours — Kabyle
+      contribution has plateaued, so the MDC account buys almost nothing.
+      What the mirror ships is the bucketed splits only, 7.89 GiB of the 18.6 GB
+      release: train 152,479 / dev 15,002 / test 15,003 (175.52 h, verified
+      speaker-disjoint across all three pairs), plus other 112,446 and
+      invalidated 20,042. The 432,018 validated clips outside train/dev/test
+      have no audio here.
+      FETCH_PATTERNS restricts acquisition to transcript/kab/*: the audio goes
+      to the Modal volume, since nothing local reads it.
+
+  - id: hf.boffire.f5tts-kabyle-dataset
+    name: F5-TTS Kabyle dataset
+    modality: speech
+    tier: core
+    access: hf
+    uri: https://huggingface.co/datasets/boffire/f5tts-kabyle-dataset
+    licence: cc-by-4.0
+    languages: [kab]
+    size: { rows: 59462, bytes: 6542900000 }
+    retrieved: 2026-08-05
+    notes: TTS-ready audio/text pairs. Dual-licensed cc-by-4.0 and "other"; verify before release.
+
+  - id: hf.boffire.tatoeba-kabyle-audio
+    name: Tatoeba Kabyle audio
+    modality: speech
+    tier: core
+    access: hf
+    uri: https://huggingface.co/datasets/boffire/tatoeba-kabyle-audio
+    licence: cc-by-4.0
+    languages: [kab]
+    size: { rows: 47789, bytes: 842100000 }
+    retrieved: 2026-08-05
+    notes: Aligns with the Tatoeba seed corpus; a join key into local.tatoeba-kab-eng.
+
+  - id: hf.tutlaytai.kabyle-asr
+    name: TutlaytAI Kabyle ASR
+    modality: speech
+    tier: core
+    access: hf
+    uri: https://huggingface.co/datasets/TutlaytAI/kabyle_asr
+    licence: cc
+    languages: [kab]
+    size: { rows: 46877, bytes: 815400000 }
+    retrieved: 2026-08-05
+    notes: Train 32.8k / test 14.1k. Licence declared only as "cc"; must be pinned before release.
+
+  - id: hf.boffire.kabyle-ljspeech-22khz
+    name: Kabyle LJSpeech-format corpus, 22 kHz
+    modality: speech
+    tier: supplementary
+    access: hf
+    uri: https://huggingface.co/datasets/boffire/kabyle-ljspeech-22khz
+    licence: cc0-1.0
+    languages: [kab]
+    size: { rows: 1 }
+    retrieved: 2026-08-05
+    notes: >-
+      Size API reports 0 rows — the data is likely in loose files rather than
+      parquet. Must be inspected manually before ingestion.
+
+  - id: hf.boffire.bejaia
+    name: Bejaia regional speech
+    modality: speech
+    tier: supplementary
+    access: hf
+    uri: https://huggingface.co/datasets/boffire/bejaia
+    licence: apache-2.0
+    languages: [kab]
+    size: { rows: 647, bytes: 2384000000 }
+    retrieved: 2026-08-05
+    notes: Regional variety (Béjaïa). Valuable for dialectal coverage; verify speaker consent.
+
+  - id: hf.boffire.bouira
+    name: Bouira regional speech
+    modality: speech
+    tier: supplementary
+    access: hf
+    uri: https://huggingface.co/datasets/boffire/bouira
+    licence: apache-2.0
+    languages: [kab]
+    size: { rows: 395, bytes: 1223100000 }
+    retrieved: 2026-08-05
+    notes: Regional variety (Bouira).
+
+  - id: hf.boffire.rradyu-tis-snat
+    name: Rradyu Tis Snat (Radio 2) recordings
+    modality: speech
+    tier: supplementary
+    access: hf
+    uri: https://huggingface.co/datasets/boffire/rradyu-tis-snat
+    licence: mit
+    languages: [kab]
+    size: { rows: 35 }
+    retrieved: 2026-08-05
+    notes: Broadcast Kabyle. Small but a rare spontaneous-speech register. Check broadcaster rights.
+
+  - id: wikimedia.lingualibre-kab
+    name: Lingua Libre pronunciations — Kabyle
+    modality: speech
+    tier: excluded
+    access: wikimedia
+    uri: https://commons.wikimedia.org/wiki/Category:Lingua_Libre_pronunciation-kab
+    licence: cc-by-sa-4.0
+    languages: [kab]
+    size: { rows: 20 }
+    retrieved: 2026-08-05
+    notes: >-
+      Only 20 recordings. Too small to matter next to Common Voice; recorded here
+      so the decision not to ingest it is auditable.
+
+  # =========================================================================
+  # Monolingual text — Kabyle's weakest resource
+  # =========================================================================
+  - id: wikimedia.kabwiki
+    name: Kabyle Wikipedia
+    modality: text
+    tier: core
+    access: wikimedia
+    uri: https://dumps.wikimedia.org/kabwiki/
+    licence: cc-by-sa-3.0
+    languages: [kab]
+    size: { articles: 7155, tokens: 983793 }
+    retrieved: 2026-08-05
+    notes: >-
+      18,201 pages total, 7,155 articles, 116,869 edits, 16,827 registered users
+      but only 18 active. Monthly dumps; 20260801 was the latest at survey time.
+      Share-alike: keeps this out of a permissive-only release.
+
+  - id: hf.imsidag.kabyle-corpus-ummto
+    name: Imsidag Kabyle corpus — UMMTO
+    modality: text
+    tier: core
+    access: hf
+    uri: https://huggingface.co/datasets/Imsidag-community/kabyle-corpus-ummto
+    licence: cc-by-sa-4.0
+    languages: [kab]
+    size: { rows: 690917, bytes: 60100000 }
+    retrieved: 2026-08-05
+    notes: >-
+      Largest single Kabyle monolingual text collection found. From Université
+      Mouloud Mammeri de Tizi Ouzou. Academic register; likely the highest-quality
+      edited Kabyle prose available.
+
+  - id: hf.imsidag.kabyle-corpus-ubouira
+    name: Imsidag Kabyle corpus — Université de Bouira
+    modality: text
+    tier: core
+    access: hf
+    uri: https://huggingface.co/datasets/Imsidag-community/kabyle-corpus-ubouira
+    licence: cc-by-sa-4.0
+    languages: [kab]
+    size: { rows: 336982, bytes: 29800000 }
+    retrieved: 2026-08-05
+    notes: Academic register. Overlap with the UMMTO corpus is unmeasured.
+
+  - id: hf.imsidag.kabyle-corpus-hca
+    name: Imsidag Kabyle corpus — HCA
+    modality: text
+    tier: core
+    access: hf
+    uri: https://huggingface.co/datasets/Imsidag-community/kabyle-corpus-hca
+    licence: cc-by-sa-4.0
+    languages: [kab]
+    size: { rows: 188620, bytes: 19300000 }
+    retrieved: 2026-08-05
+    notes: >-
+      Haut Commissariat à l'Amazighité — the Algerian state body for Amazigh.
+      Institutional register, likely the closest thing to a standardised norm.
+
+  - id: hf.imsidag.kabyle-raw-text
+    name: Imsidag Kabyle raw text
+    modality: text
+    tier: core
+    access: hf
+    uri: https://huggingface.co/datasets/Imsidag-community/kabyle-raw-text
+    licence: cc
+    languages: [kab]
+    size: { rows: 207058, bytes: 24300000 }
+    retrieved: 2026-08-05
+    notes: Licence declared only as "cc"; must be pinned before release.
+
+  - id: hf.boffire.tatoeba-kabyle-mono-cleaned
+    name: Tatoeba Kabyle monolingual, cleaned
+    modality: text
+    tier: supplementary
+    access: hf
+    uri: https://huggingface.co/datasets/boffire/tatoeba-kabyle-mono-cleaned
+    licence: mit
+    languages: [kab]
+    size: { rows: 756774, bytes: 34500000 }
+    retrieved: 2026-08-05
+    notes: >-
+      Derived from Tatoeba, so heavily overlapping with local.tatoeba-kab-eng.
+      Useful as a cleaning baseline to compare our normalisation against, not as
+      an independent source.
+
+  - id: hf.hplt2-cleaned-kab
+    name: HPLT v2.0 cleaned — kab_Latn
+    modality: text
+    tier: core
+    access: hf
+    uri: https://huggingface.co/datasets/HPLT/HPLT2.0_cleaned
+    licence: cc0-1.0
+    languages: [kab_Latn]
+    size: { rows: 15100, bytes: 35969035 }
+    retrieved: 2026-08-05
+    notes: Web crawl, document level, already filtered. CC0 makes it safe for any release.
+
+  - id: hf.fineweb2-kab
+    name: FineWeb-2 — kab_Latn
+    modality: text
+    tier: core
+    access: hf
+    uri: https://huggingface.co/datasets/HuggingFaceFW/fineweb-2
+    licence: odc-by
+    languages: [kab_Latn]
+    size: { rows: 11659, bytes: 14705520 }
+    retrieved: 2026-08-05
+    notes: >-
+      Train 11,541 / test 118 documents. The entire clean Kabyle web crawl is under
+      15 MB — this single number is why the project exists.
+
+  - id: hf.glotcc-v1-kab
+    name: GlotCC v1 — Kabyle
+    modality: text
+    tier: core
+    access: hf
+    uri: https://huggingface.co/datasets/cis-lmu/GlotCC-V1
+    licence: cc0-1.0
+    languages: [kab]
+    size: { rows: 1 }
+    retrieved: 2026-08-05
+    notes: >-
+      Document-level web crawl with GlotLID language labels. Kabyle subset size not
+      exposed by the size API; must be measured on download.
+
+  - id: hf.boffire.adlis-pdfs
+    name: Adlis — Kabyle book PDFs
+    modality: text
+    tier: core
+    access: hf
+    uri: https://huggingface.co/datasets/boffire/adlis-pdfs
+    licence: mit
+    languages: [kab]
+    size: { rows: 288, bytes: 743500000 }
+    retrieved: 2026-08-05
+    notes: >-
+      288 book-length PDFs — by volume the largest edited-prose source available.
+      Needs OCR/text extraction; a Kabyle-aware OCR pass is a project in itself.
+      Copyright status of the underlying books is not settled by the MIT tag.
+
+  - id: hf.boffire.ayamun-pdfs
+    name: Ayamun — Kabyle cyber-review PDFs
+    modality: text
+    tier: core
+    access: hf
+    uri: https://huggingface.co/datasets/boffire/ayamun-pdfs
+    licence: mit
+    languages: [kab]
+    size: { rows: 230 }
+    retrieved: 2026-08-05
+    notes: Long-running Kabyle literary review. Same OCR and copyright caveats as adlis-pdfs.
+
+  - id: hf.boffire.timucuha-kabyle-tales
+    name: Timucuha — Kabyle folk tales
+    modality: text
+    tier: supplementary
+    access: hf
+    uri: https://huggingface.co/datasets/boffire/timucuha-kabyle-tales
+    licence: cc-by-nc-4.0
+    languages: [kab]
+    size: { rows: 920, bytes: 200000 }
+    retrieved: 2026-08-05
+    notes: Non-commercial. Oral-tradition register, unavailable elsewhere. Keep separable.
+
+  - id: hf.boffire.tughalin-n-weqcic-ijahen
+    name: Tughalin n Weqcic Ijahen
+    modality: speech
+    tier: excluded
+    access: hf
+    uri: https://huggingface.co/datasets/boffire/Tughalin_n_Weqcic_Ijahen
+    licence: cc-by-4.0
+    languages: [kab]
+    size: { rows: 229, bytes: 72800000 }
+    retrieved: 2026-08-05
+    notes: >-
+      Carries no text: 229 WAV files, 25.26 min, 24 kHz mono, and no transcript.
+      Synthetic — its card tags it so, every file peaks at exactly 0.5000, leading
+      silence is 0.191 s across the whole set, and the top octave sits 36.6 dB below
+      the spectral peak against a 5,080 Hz rolloff. Measured 2026-08-15 with
+      agbalu.tts.acoustics. Training a voice on it would distil whichever system
+      produced it, so it is excluded rather than supplementary.
+
+  # =========================================================================
+  # Parallel text
+  # =========================================================================
+  - id: opus.nllb-kab
+    name: OPUS NLLB — Kabyle pairs
+    modality: parallel
+    tier: supplementary
+    access: opus
+    uri: https://opus.nlpl.eu/NLLB/corpus/version/NLLB
+    licence: other
+    languages: [kab, eng, fra]
+    size: { rows: 5155186 }
+    retrieved: 2026-08-05
+    notes: >-
+      en-kab alone is 4,123,481 pairs — 84% of all OPUS Kabyle parallel data. But
+      it is bitext-mined from web crawl, not human-authored: high recall, low and
+      unmeasured precision. Treat as a candidate pool requiring quality estimation,
+      never as gold. Measuring its actual precision is a genuine contribution.
+
+  - id: opus.bible-uedin-kab
+    name: OPUS bible-uedin — Kabyle pairs
+    modality: parallel
+    tier: core
+    access: opus
+    uri: https://opus.nlpl.eu/bible-uedin/corpus/version/bible-uedin
+    licence: cc-by-4.0
+    languages: [kab, eng, fra]
+    size: { rows: 793841 }
+    retrieved: 2026-08-05
+    notes: >-
+      en-kab 15,857 pairs; the rest spread over ~280 other languages, making Kabyle
+      massively multi-parallel here. Human-translated and verse-aligned, so
+      alignment quality is high, but the register is narrow and archaic.
+
+  - id: opus.tatoeba-kab
+    name: OPUS Tatoeba — Kabyle pairs
+    modality: parallel
+    tier: core
+    access: opus
+    uri: https://opus.nlpl.eu/Tatoeba/corpus/version/Tatoeba
+    licence: cc-by-2.0
+    languages: [kab, eng, fra]
+    size: { rows: 159569 }
+    retrieved: 2026-08-05
+    notes: >-
+      v2026-07-08. en-kab 58,674 pairs here versus 140,324 rows in the local direct
+      export — OPUS deduplicates the many-to-many link structure. Reconciling the
+      two is a Phase 1 task.
+
+  - id: opus.translatewiki-kab
+    name: OPUS translatewiki — Kabyle pairs
+    modality: parallel
+    tier: core
+    access: opus
+    uri: https://opus.nlpl.eu/translatewiki/corpus/version/translatewiki
+    licence: cc-by-3.0
+    languages: [kab, eng]
+    size: { rows: 11992 }
+    retrieved: 2026-08-05
+    notes: Software UI strings. Short, formulaic, placeholder-heavy; needs its own filter.
+
+  - id: opus.wikimedia-kab
+    name: OPUS wikimedia — Kabyle pairs
+    modality: parallel
+    tier: core
+    access: opus
+    uri: https://opus.nlpl.eu/wikimedia/corpus/version/wikimedia
+    licence: cc-by-sa-3.0
+    languages: [kab, eng, fra]
+    size: { rows: 2495 }
+    retrieved: 2026-08-05
+    notes: Small. Share-alike.
+
+  - id: hf.ayymen.weblate-translations
+    name: Weblate translations (multilingual)
+    modality: parallel
+    tier: supplementary
+    access: hf
+    uri: https://huggingface.co/datasets/ayymen/Weblate-Translations
+    licence: other
+    languages: [kab, eng]
+    size: { rows: 11745911, bytes: 1351900000 }
+    retrieved: 2026-08-05
+    notes: >-
+      Row count is all languages, not Kabyle. Licence is per-upstream-project and
+      genuinely mixed — this needs per-project licence resolution before any use.
+      Tamazight-NLP/Weblate-Translations (23,167,039 rows) is a larger sibling.
+
+  - id: hf.ayymen.pontoon-translations
+    name: Pontoon translations (Mozilla L10n)
+    modality: parallel
+    tier: supplementary
+    access: hf
+    uri: https://huggingface.co/datasets/ayymen/Pontoon-Translations
+    licence: mpl-2.0
+    languages: [kab, eng]
+    size: { rows: 3559829, bytes: 442300000 }
+    retrieved: 2026-08-05
+    notes: >-
+      Row count is all languages. Mozilla localisation strings — the same
+      community that built Common Voice Kabyle, so quality should be good.
+
+  - id: hf.sifal.kabyle-french
+    name: Kabyle-French pairs
+    modality: parallel
+    tier: core
+    access: hf
+    uri: https://huggingface.co/datasets/Sifal/Kabyle-French
+    licence: cc
+    languages: [kab, fra]
+    size: { rows: 115269, bytes: 10300000 }
+    retrieved: 2026-08-05
+    notes: >-
+      French is the high-resource language Kabyle speakers actually pivot through;
+      kab-fr is under-served relative to kab-en. FrancophonIA/Kabyle-French-pairs
+      (115,270 rows) appears to be the same data. Licence "cc" must be pinned.
+
+  - id: hf.boffire.kabyle-english-tm
+    name: Kabyle-English translation memory
+    modality: parallel
+    tier: core
+    access: hf
+    uri: https://huggingface.co/datasets/boffire/kabyle-english-TM
+    licence: cc-by-4.0
+    languages: [kab, eng]
+    size: { rows: 121725, bytes: 22000000 }
+    retrieved: 2026-08-05
+    notes: Translation-memory format. Provenance of the underlying translations is unstated.
+
+  - id: hf.tutlaytai.kabyle-asr-en-translation
+    name: Kabyle ASR to English translation
+    modality: parallel
+    tier: excluded
+    access: hf
+    uri: https://huggingface.co/datasets/TutlaytAI/Kabyle_ASR-En_Translation
+    licence: unknown
+    languages: [kab, eng]
+    size: { rows: 29144, bytes: 505200000 }
+    retrieved: 2026-08-05
+    notes: >-
+      Removed from local disk 2026-08-06: 482 MB of ASR transcripts that yielded one
+      sentence not already present. Speech-aligned material; Phase 5 re-fetches it to
+      the remote volume where the audio lives.
+
+  - id: hf.tutlaytai.multilang-to-kabyle
+    name: Multilingual to Kabyle translation
+    modality: parallel
+    tier: supplementary
+    access: hf
+    uri: https://huggingface.co/datasets/TutlaytAI/Multilang-to-Kabyle-Translation
+    licence: unknown
+    languages: [kab, eng, fra]
+    size: { rows: 325085, bytes: 16900000 }
+    retrieved: 2026-08-05
+    notes: No licence declared. Composition and source of the target side are unstated.
+
+  - id: hf.michsethowusu.eng-kab-mt560
+    name: English-Kabyle pairs from MT560
+    modality: parallel
+    tier: supplementary
+    access: hf
+    uri: https://huggingface.co/datasets/michsethowusu/english-kabyle_sentence-pairs_mt560
+    licence: cc-by-4.0
+    languages: [kab, eng]
+    size: { rows: 38018, bytes: 3600000 }
+    retrieved: 2026-08-05
+    notes: MT560 is largely religious and localisation text; expect heavy overlap with bible-uedin.
+
+  - id: hf.abdelhaqueidali.kab-latn-tfng
+    name: Kabyle Latin-to-Tifinagh parallel corpus
+    modality: parallel
+    tier: core
+    access: hf
+    uri: https://huggingface.co/datasets/abdelhaqueidali/Kabyle-Latin-to-Tifinagh-Parallel-Corpus
+    licence: cc-by-2.0
+    languages: [kab_Latn, kab_Tfng]
+    size: { rows: 1122628, bytes: 133500000 }
+    retrieved: 2026-08-05
+    notes: >-
+      Script transliteration, not translation. Large. Enables serving the Tifinagh
+      script community and gives a free consistency check on Latin orthography,
+      since a rule-based round-trip must be lossless.
+
+  - id: hf.cohere.xp3x-kab
+    name: xP3x — Kabyle instructions
+    modality: parallel
+    tier: excluded
+    access: hf
+    uri: https://huggingface.co/datasets/CohereLabs/xP3x
+    licence: apache-2.0
+    languages: [kab, eng]
+    size: { rows: 1350000 }
+    retrieved: 2026-08-05
+    notes: >-
+      Removed from local disk 2026-08-06: 653 MB of machine-templated instruction
+      prompts wrapped around Tatoeba and FLORES text. It contributed 8,326 sentences
+      the corpus already holds from their originals, and it embeds FLORES, so
+      ingesting it contaminates the only Kabyle MT benchmark (2.7 rule 4).
+
+  # =========================================================================
+  # Lexicon and morphology
+  # =========================================================================
+  - id: hf.boffire.kabyle-verbs
+    name: Kabyle verb inflection tables
+    modality: lexicon
+    tier: core
+    access: hf
+    uri: https://huggingface.co/datasets/boffire/kabyle-verbs
+    licence: cc-by-4.0
+    languages: [kab]
+    size: { rows: 695688, bytes: 22800000 }
+    retrieved: 2026-08-05
+    notes: >-
+      695,688 inflected verb forms. Kabyle verb morphology (aorist / preterite /
+      intensive aorist, plus clitics) is the hardest part of the language for NLP;
+      this is the single most valuable non-corpus resource found.
+
+  - id: hf.boffire.kabyle-g2p-training-data
+    name: Kabyle grapheme-to-phoneme training data
+    modality: lexicon
+    tier: core
+    access: hf
+    uri: https://huggingface.co/datasets/boffire/kabyle-g2p-training-data
+    licence: cc0-1.0
+    languages: [kab]
+    size: { rows: 59461 }
+    retrieved: 2026-08-05
+    notes: CC0. Directly usable for TTS front-end and for phonology-aware normalisation.
+
+  - id: hf.boffire.hunspell-kab
+    name: Hunspell Kabyle dictionary
+    modality: lexicon
+    tier: core
+    access: hf
+    uri: https://huggingface.co/datasets/boffire/hunspell-kab
+    licence: mit
+    languages: [kab]
+    size: { rows: 1 }
+    retrieved: 2026-08-05
+    notes: >-
+      Size API returns an error — stored as .dic/.aff, not parquet. A Hunspell
+      affix file is a compact morphological grammar; valuable as a spell-check
+      oracle for corpus quality scoring.
+
+  - id: hf.abdelhaqueidali.amawal-net
+    name: Amawal.net lexicon
+    modality: lexicon
+    tier: core
+    access: hf
+    uri: https://huggingface.co/datasets/abdelhaqueidali/Amawal.net-Dataset
+    licence: other
+    languages: [kab]
+    size: { rows: 10958, bytes: 2900000 }
+    retrieved: 2026-08-05
+    notes: >-
+      Amawal is the reference neologism dictionary tradition (Mammeri). Licence
+      "other" needs resolving.
+
+  - id: hf.boffire.kabyle-toponyms
+    name: Kabyle toponyms
+    modality: lexicon
+    tier: core
+    access: hf
+    uri: https://huggingface.co/datasets/boffire/kabyle-toponyms
+    licence: odbl
+    languages: [kab]
+    size: { rows: 8849, bytes: 1000000 }
+    retrieved: 2026-08-05
+    notes: >-
+      OpenStreetMap-derived (ODbL, share-alike for derived databases — read it
+      before mixing). Feeds NER and normalisation of place names.
+
+  - id: git.sferhah.digitized-dallet
+    name: Dallet Kabyle-French dictionary, digitized
+    modality: lexicon
+    tier: reference
+    access: git
+    uri: https://github.com/sferhah/DigitizedDallet
+    licence: unknown
+    languages: [kab, fra]
+    size: { rows: 1 }
+    retrieved: 2026-08-05
+    notes: >-
+      Dallet (1982) is the scholarly reference Kabyle-French dictionary, based on
+      the At-Mangellat variety. Structured and data-modelled here.
+      RE-TIERED core -> reference in Phase 1 (2026-08-06). The repository ships an
+      MIT LICENSE.txt whose template placeholders are unedited ("Copyright (c)
+      [year] [fullname]"), and an MIT tag on a digitisation cannot license the
+      underlying work: Dallet died 1972 and the dictionary was completed and
+      published in 1982 by Allain, Lanfry and Reesink, so both the authorial and
+      the editorial copyrights are live (France, life+70). Consult for the Phase 6
+      lexicon; never ingest or redistribute without written permission.
+
+  # =========================================================================
+  # Annotation — the thinnest layer of all
+  # =========================================================================
+  - id: git.ud-kabyle-adpt
+    name: UD_Kabyle-ADPT dependency treebank
+    modality: annotation
+    tier: core
+    access: git
+    uri: https://github.com/UniversalDependencies/UD_Kabyle-ADPT
+    licence: cc-by-sa-4.0
+    languages: [kab]
+    size: { sentences: 1930, tokens: 23761 }
+    retrieved: 2026-08-05
+    notes: >-
+      Data exists ONLY on the `dev` branch (train 1,085 sents / 13,580 tokens;
+      test 845 / 10,181) and carries a `not-to-release` marker, so it has never
+      appeared in an official UD release and universaldependencies.org 404s for it.
+      Genre nonfiction news; XPOS manual, everything else converted from manual.
+      Contributor Lakhdar Aliane. This is the only Kabyle treebank in existence.
+
+  - id: hf.boffire.kabyle-named-entities
+    name: Kabyle named entities
+    modality: annotation
+    tier: core
+    access: hf
+    uri: https://huggingface.co/datasets/boffire/kabyle-named-entities
+    licence: cc-by-4.0
+    languages: [kab]
+    size: { rows: 292 }
+    retrieved: 2026-08-05
+    notes: 292 rows. Far too small to train or evaluate NER — this is a seed, not a corpus.
+
+  - id: hf.michsethowusu.kabyle-sentiments
+    name: Kabyle sentiment corpus
+    modality: annotation
+    tier: supplementary
+    access: hf
+    uri: https://huggingface.co/datasets/michsethowusu/kabyle-sentiments-corpus
+    licence: mit
+    languages: [kab]
+    size: { rows: 4887, bytes: 100000 }
+    retrieved: 2026-08-05
+    notes: >-
+      4,887 rows, identical count to the emotions corpus from the same uploader —
+      likely the same text with two label sets, and likely machine-translated.
+      Verify before trusting as evaluation data.
+
+  - id: hf.michsethowusu.kabyle-emotions
+    name: Kabyle emotion corpus
+    modality: annotation
+    tier: supplementary
+    access: hf
+    uri: https://huggingface.co/datasets/michsethowusu/kabyle-emotions-corpus
+    licence: mit
+    languages: [kab]
+    size: { rows: 4887, bytes: 100000 }
+    retrieved: 2026-08-05
+    notes: See hf.michsethowusu.kabyle-sentiments — same caveat.
+
+  # =========================================================================
+  # Prior-art tooling — assessed in docs/prior_art.md, never ingested as data
+  # =========================================================================
+  - id: hf.boffire.kabyle-bpe-tokenizer-v2
+    name: Kabyle BPE Tokenizer v2
+    modality: tool
+    tier: reference
+    access: hf
+    uri: https://huggingface.co/boffire/Kabyle-BPE-Tokenizer-v2
+    licence: apache-2.0
+    languages: [kab]
+    size: { rows: 48000 }
+    retrieved: 2026-08-05
+    notes: >-
+      Best published Kabyle tokenizer. Metaspace (not ByteLevel), NFC, hyphen kept
+      as a morphological marker, CLDR-grounded atomic alphabet. Adopt all four
+      decisions. Measured fertility 1.645 on a 50k sample of our corpus, UNK 0.089%.
+      Two defects: Greek epsilon is an atomic vocab token (corruption baked in,
+      +19.4% tokens on affected sentences) and CLDR omits t-cedilla, which occurs
+      3,744x in our corpus.
+
+  - id: hf.boffire.bpe-tokenizer-for-kabyle
+    name: BPE Tokenizer for Kabyle (v1)
+    modality: tool
+    tier: reference
+    access: hf
+    uri: https://huggingface.co/boffire/bpe-tokenizer-for-kabyle
+    licence: mit
+    languages: [kab]
+    size: { rows: 48011 }
+    retrieved: 2026-08-05
+    notes: >-
+      Lowest measured fertility (1.397 on our 50k sample) but absorbs punctuation
+      into word tokens, hiding punctuation boundaries. Also carries Greek epsilon
+      in vocab (+21.3% tokens on corrupted sentences). NFKC + lowercase.
+
+  - id: hf.boffire.kabyle-gpt2-tokenizer
+    name: Kabyle GPT-2 tokenizer
+    modality: tool
+    tier: excluded
+    access: hf
+    uri: https://huggingface.co/boffire/kabyle-gpt2-tokenizer
+    licence: unknown
+    languages: [kab]
+    size: { rows: 50257 }
+    retrieved: 2026-08-05
+    notes: >-
+      EXCLUDED — unusable for Kabyle. ByteLevel BPE: none of the characters
+      ɛ ɣ ḥ ḍ ṣ ṭ ẓ ṛ ǧ ţ exist as atomic tokens, output is byte mojibake, measured
+      fertility 2.389 (a 71% penalty over the best alternative). Recorded so the
+      decision to reject it is auditable; worth an upstream deprecation note.
+      UNAVAILABLE since 2026-08-08: HTTP 401, never fetched, so its row in
+      docs/prior_art.md §3.2 can no longer be reproduced.
+
+  - id: hf.boffire.marianmt-en-kab
+    name: MarianMT English-to-Kabyle
+    modality: tool
+    tier: reference
+    access: hf
+    uri: https://huggingface.co/boffire/marianmt-en-kab
+    licence: mit
+    languages: [kab, eng]
+    size: { rows: 1 }
+    retrieved: 2026-08-05
+    notes: >-
+      Reports BLEU 23.77 / chrF 48.60, but the model-index names the eval set
+      "Your Dataset Name" / "my-dataset-name" — unfilled template placeholders, so
+      the number is uninterpretable and is not FLORES. A Phase 7 baseline candidate
+      once re-evaluated on AƔBALU-Bench.
+      UNAVAILABLE since 2026-08-08: HTTP 401, and the bytes were never fetched, so
+      task 7.7 cannot score it. See docs/corpus_landscape.md on the boffire outage.
+
+  - id: hf.boffire.kabyle-pos-v2
+    name: Kabyle POS tagger v2 (XLM-R)
+    modality: tool
+    tier: reference
+    access: hf
+    uri: https://huggingface.co/boffire/kabyle-pos-v2
+    licence: mit
+    languages: [kab]
+    size: { rows: 1 }
+    retrieved: 2026-08-05
+    notes: >-
+      17 UD labels, reports 94.8% accuracy — but on a held-out split of its own
+      silver data, labelled by projection from a 214k-entry lexicon. No gold
+      evaluation exists; the UD treebank was not used. Re-evaluate on gold in
+      Phase 9.
+
+  - id: hf.boffire.kabyle-sentence-transformer-mpnet
+    name: Kabyle sentence transformer (MPNet)
+    modality: tool
+    tier: reference
+    access: hf
+    uri: https://huggingface.co/boffire/kabyle-sentence-transformer-mpnet
+    licence: apache-2.0
+    languages: [kab, eng]
+    size: { rows: 1 }
+    retrieved: 2026-08-05
+    notes: >-
+      Trained on ~2.5M pairs, ~2.35M of them unverified NLLB bitext. Reports
+      "avg cosine similarity 0.278 -> 0.857", which measures the training objective
+      rather than performance. No retrieval or bitext-mining score. Phase 4 quality
+      estimation would directly improve any retrain.
+
+  - id: hf.facebook.nllb-200-distilled-600m
+    name: NLLB-200 distilled 600M
+    modality: tool
+    tier: reference
+    access: hf
+    uri: https://huggingface.co/facebook/nllb-200-distilled-600M
+    licence: cc-by-nc-4.0
+    languages: [kab, eng, fra]
+    size: { rows: 256204 }
+    retrieved: 2026-08-08
+    notes: >-
+      Only the tokenizer files are held; the weights are not. Supports kab_Latn and
+      is the MT baseline for task 7.7 now that hf.boffire.marianmt-en-kab is
+      unreachable. Measured on a 50k sample of our corpus: fertility 2.452, 11.52
+      tokens/sentence, UNK 0.011% (64 tokens, all typographic punctuation) — 1.76x
+      the tokens per word of the best Kabyle tokenizer. Its vocabulary carries both
+      spellings of every homoglyph pair as single pieces, and its Kabyle merges
+      (aɣ, taɣ, iɣ, ṭṭut) are the CORRECT ones, so the homoglyph corruption was not
+      baked into it the way it was into the community Kabyle tokenizers. Licence is
+      non-commercial: anything fine-tuned from these weights inherits that.
+
+  # =========================================================================
+  # Prior-art data discovered in the boffire assessment
+  # =========================================================================
+  - id: hf.boffire.adlis-pdfs-ocr-kab
+    name: Adlis PDFs, OCR output
+    modality: text
+    tier: supplementary
+    access: hf
+    uri: https://huggingface.co/datasets/boffire/adlis-pdfs-ocr-kab
+    licence: mit
+    languages: [kab]
+    size: { rows: 42 }
+    retrieved: 2026-08-05
+    notes: >-
+      Only 42 rows against 288 source books in hf.boffire.adlis-pdfs — roughly 85%
+      of the largest edited-prose reservoir in Kabyle is still unextracted. Useful
+      as an OCR quality reference and as a head start for Phase 3.2.
+
+  - id: hf.boffire.kabyle-wikipedia
+    name: Kabyle Wikipedia extraction
+    modality: text
+    tier: supplementary
+    access: hf
+    uri: https://huggingface.co/datasets/boffire/kabyle-wikipedia
+    licence: mit
+    languages: [kab]
+    size: { rows: 1 }
+    retrieved: 2026-08-05
+    notes: >-
+      Pre-extracted kabwiki text. Size API errors, so contents unmeasured. Licence
+      tagged MIT but Wikipedia is CC BY-SA — the tag is wrong and the upstream
+      share-alike terms govern. Prefer extracting from the dump ourselves.
+
+  - id: hf.boffire.common-voice-scripted-speech-kab-26-huge
+    name: Common Voice 26 Kabyle, repackaged
+    modality: speech
+    tier: supplementary
+    access: hf
+    uri: https://huggingface.co/datasets/boffire/common-voice-scripted-speech-kab-26-huge
+    licence: cc0-1.0
+    languages: [kab]
+    size: { rows: 567727, bytes: 14559900000 }
+    retrieved: 2026-08-05
+    notes: >-
+      Parquet repackaging of CV26 Kabyle. GONE: HTTP 404 to an authenticated
+      request on 2026-08-11, with facebook/flores returning 200 as the control,
+      so this is deletion rather than gating. Never fetched, so it is a lost
+      bookmark, not lost bytes — hf.fsicoli.common-voice-22-kab supersedes it.
+
+  - id: hf.boffire.kabyle-piper-22khz
+    name: Kabyle Piper TTS dataset, 22 kHz
+    modality: speech
+    tier: core
+    access: hf
+    uri: https://huggingface.co/datasets/boffire/kabyle-piper-22khz
+    licence: unknown
+    languages: [kab]
+    size: { rows: 59462, bytes: 6057500000 }
+    retrieved: 2026-08-05
+    notes: >-
+      Piper-format TTS corpus, same 59,462 utterance count as the F5-TTS set —
+      almost certainly the same audio in a second format. No licence declared.
+
+  # =========================================================================
+  # Reference — benchmarks and tooling, never ingested as training data
+  # =========================================================================
+  - id: hf.flores-plus-kab
+    name: FLORES+ — Kabyle
+    modality: parallel
+    tier: reference
+    access: hf
+    uri: https://huggingface.co/datasets/openlanguagedata/flores_plus
+    licence: cc-by-sa-4.0
+    languages: [kab_Latn, eng, fra, arb, spa, deu]
+    size: { sentences: 2009 }
+    retrieved: 2026-08-05
+    notes: >-
+      997 dev + 1,012 devtest, human-translated from English Wikipedia. THE Kabyle
+      MT benchmark. Must be excluded from every training set — decontamination
+      against it is mandatory. Audited in task 7.0: 326 of 2,009 kab_Latn sentences
+      (16.2%) carry homoglyph corruption and the split was never revised upstream.
+      fra_Latn added for the kab-fra direction of the Phase 7 MT harness; arb_Arab,
+      spa_Latn and deu_Latn for the pivot-synthesis directions, which have no
+      Kabyle bitext and are scored source-side only.
+
+  - id: hf.sib200-kab
+    name: SIB-200 — Kabyle topic classification
+    modality: annotation
+    tier: reference
+    access: hf
+    uri: https://huggingface.co/datasets/mteb/sib200
+    licence: cc-by-sa-4.0
+    languages: [kab_Latn]
+    size: { sentences: 1004 }
+    retrieved: 2026-08-05
+    notes: >-
+      Built on FLORES sentences with 7 topic labels — so it shares text with
+      FLORES+ and inherits the same contamination risk.
+
+  - id: hf.glotlid-model
+    name: GlotLID language identification model
+    modality: tool
+    tier: reference
+    access: hf
+    uri: https://huggingface.co/cis-lmu/glotlid
+    licence: other
+    languages: [kab]
+    size: { rows: 1 }
+    retrieved: 2026-08-09
+    notes: >-
+      Covers 2000+ languages including Kabyle and its Berber siblings. The tool for
+      enforcing the scope discipline in CLAUDE.md §1. Scored in task 7.4.
+      Licence corrected 2026-08-09: recorded as apache-2.0 from 2026-08-05, but the
+      hub declares `other` and the LICENSE file reads "Apache License 2.0 plus
+      notices" — added notices on training data and model behaviour. `other`
+      classifies as `unclear`, which is the honest record; the tier is `reference`,
+      so nothing is redistributed either way.
+
+  - id: hf.nllb-lid218e
+    name: NLLB-200 language identification (lid218e)
+    modality: tool
+    tier: reference
+    access: hf
+    uri: https://huggingface.co/facebook/fasttext-language-identification
+    licence: cc-by-nc-4.0
+    languages: [kab]
+    size: { rows: 1 }
+    retrieved: 2026-08-09
+    notes: >-
+      The fastText classifier over the 218 FLORES-200 labels, including kab_Latn,
+      taq_Latn, taq_Tfng, tzm_Tfng and zgh_Tfng. Load-bearing for this project
+      specifically: it is the LID that gated NLLB's bitext mining, and NLLB-derived
+      pairs are 90.1% of AƔBALU-Parallel v1 (CLAUDE.md §6.2). Its Berber confusion
+      is therefore a property of our own largest corpus, not a third-party curio.
+      Non-commercial, `reference` tier — scored, never redistributed, never ingested.
+
+  - id: git.kabyle-specs
+    name: Kabyle Language Specs
+    modality: tool
+    tier: reference
+    access: git
+    uri: https://github.com/kabyle-specs/kabyle-specs.github.io
+    licence: unknown
+    languages: [kab]
+    size: { rows: 1 }
+    retrieved: 2026-08-05
+    notes: >-
+      Community technical specifications for orthography, phonology, morphology,
+      syntax and input. The closest thing to a normative reference for the
+      normalisation layer — read before finalising any orthography rule.
+
+  # =========================================================================
+  # Phase 1.7 sweep (2026-08-06) — sources found by re-querying the HF API
+  # against the registry. 185 datasets carry a `kab` tag; Phase 0 catalogued
+  # 62. Of the 146 uncatalogued, 78 are mirrors or benchmarks and 11 are
+  # speech; these are the ones carrying Kabyle text that we did not hold.
+  # =========================================================================
+
+  - id: hf.imsidag.kabyle-datasets-mono
+    name: Imsidag-community/kabyle-datasets-mono
+    modality: text
+    tier: core
+    access: hf
+    uri: https://huggingface.co/datasets/Imsidag-community/kabyle-datasets-mono
+    licence: cc-by-3.0
+    languages: [kab]
+    size: { bytes: 36809380 }
+    retrieved: 2026-08-06
+    notes: >-
+      Aggregated Kabyle monolingual text from the Imsidag community.
+
+  - id: hf.imsidag.english-kabyle-parallel
+    name: Imsidag-community/english-kabyle-parallel
+    modality: parallel
+    tier: core
+    access: hf
+    uri: https://huggingface.co/datasets/Imsidag-community/english-kabyle-parallel
+    licence: cc-by-2.0
+    languages: [kab, eng]
+    size: { bytes: 18903874 }
+    retrieved: 2026-08-06
+    notes: >-
+      English-Kabyle pairs from the Imsidag community. Gated; terms accepted
+      2026-08-06, fetched at rev 7bb7257faa1e. Two JSONL files, keys {en, kab}:
+      en-kab-parallel 130,883 rows and en-kab-computer-science 92,613 rows =
+      223,496 pairs. The computer-science half is software/UI localisation and is
+      a technical register absent from every other Kabyle parallel source; the
+      general half looks Tatoeba-derived, so expect heavy overlap there and
+      measure it in Phase 4.1.
+
+  - id: hf.finetranslations-kab
+    name: HuggingFaceFW/finetranslations
+    modality: parallel
+    tier: core
+    access: hf
+    uri: https://huggingface.co/datasets/HuggingFaceFW/finetranslations
+    licence: odc-by
+    languages: [kab, eng]
+    size: { bytes: 72491303 }
+    retrieved: 2026-08-06
+    notes: >-
+      FineTranslations kab_Latn slice. Not surveyed in Phase 0.
+
+  - id: hf.finepdfs-kab
+    name: HuggingFaceFW/finepdfs
+    modality: text
+    tier: core
+    access: hf
+    uri: https://huggingface.co/datasets/HuggingFaceFW/finepdfs
+    licence: odc-by
+    languages: [kab]
+    size: { bytes: 667787 }
+    retrieved: 2026-08-06
+    notes: >-
+      PDF-extracted prose, kab_Latn slice. Edited prose is the scarcest register.
+
+  - id: hf.dcad2000-kab
+    name: openbmb/DCAD-2000
+    modality: text
+    tier: core
+    access: hf
+    uri: https://huggingface.co/datasets/openbmb/DCAD-2000
+    licence: other
+    languages: [kab]
+    size: { bytes: 30519738 }
+    retrieved: 2026-08-06
+    notes: >-
+      Ships keep/remove splits; the remove set is a ready-made negative set for Phase 3.4 filter ablation.
+
+  - id: hf.glot500-kab
+    name: cis-lmu/Glot500
+    modality: text
+    tier: core
+    access: hf
+    uri: https://huggingface.co/datasets/cis-lmu/Glot500
+    licence: other
+    languages: [kab]
+    size: { bytes: 16418407 }
+    retrieved: 2026-08-06
+    notes: >-
+      Glot500 corpus, kab_Latn.
+
+  - id: hf.hplt2-edu-annotation-kab
+    name: LumiOpen/hpltv2-llama33-edu-annotation
+    modality: annotation
+    tier: core
+    access: hf
+    uri: https://huggingface.co/datasets/LumiOpen/hpltv2-llama33-edu-annotation
+    licence: other
+    languages: [kab]
+    size: { bytes: 65286832 }
+    retrieved: 2026-08-06
+    notes: >-
+      Educational-quality labels over HPLT v2 Kabyle. Annotations on text we already hold; feeds Phase 3.4.
+
+  - id: hf.tamazight-nlp.pontoon
+    name: Tamazight-NLP/Pontoon-Translations
+    modality: parallel
+    tier: core
+    access: hf
+    uri: https://huggingface.co/datasets/Tamazight-NLP/Pontoon-Translations
+    licence: mpl-2.0
+    languages: [kab]
+    size: { bytes: 4765991 }
+    retrieved: 2026-08-06
+    notes: >-
+      Mozilla Pontoon UI strings.
+
+  - id: hf.tamazight-nlp.translatewiki
+    name: Tamazight-NLP/translatewiki
+    modality: parallel
+    tier: core
+    access: hf
+    uri: https://huggingface.co/datasets/Tamazight-NLP/translatewiki
+    licence: cc-by-3.0
+    languages: [kab]
+    size: { bytes: 643806 }
+    retrieved: 2026-08-06
+    notes: >-
+      translatewiki.net strings.
+
+  - id: hf.tamazight-nlp.weblate
+    name: Tamazight-NLP/Weblate-Translations
+    modality: parallel
+    tier: supplementary
+    access: hf
+    uri: https://huggingface.co/datasets/Tamazight-NLP/Weblate-Translations
+    licence: other
+    languages: [kab]
+    size: { bytes: 1851644 }
+    retrieved: 2026-08-06
+    notes: >-
+      Weblate strings; licence unspecified upstream.
+
+  - id: hf.tamazight-nlp.anki
+    name: Tamazight-NLP/Anki-Translations
+    modality: parallel
+    tier: supplementary
+    access: hf
+    uri: https://huggingface.co/datasets/Tamazight-NLP/Anki-Translations
+    licence: unknown
+    languages: [kab]
+    size: { bytes: 17088 }
+    retrieved: 2026-08-06
+    notes: >-
+      Anki deck translations; licence unspecified upstream.
+
+  - id: hf.boffire.kab-en-toponyms-sentences
+    name: boffire/kab-en-toponyms-sentences
+    modality: parallel
+    tier: core
+    access: hf
+    uri: https://huggingface.co/datasets/boffire/kab-en-toponyms-sentences
+    licence: mit
+    languages: [kab, eng]
+    size: { bytes: 3799410 }
+    retrieved: 2026-08-06
+    notes: >-
+      Toponym sentences, Kabyle-English.
+
+  - id: hf.boffire.kabyle-lyrics
+    name: boffire/kabyle-lyrics
+    modality: text
+    tier: core
+    access: hf
+    uri: https://huggingface.co/datasets/boffire/kabyle-lyrics
+    licence: mit
+    languages: [kab]
+    size: { bytes: 2729 }
+    retrieved: 2026-08-06
+    notes: >-
+      Song lyrics. A register absent from crawl and Tatoeba data.
+
+  - id: hf.boffire.road-traffic-code
+    name: boffire/Kabyle_Road_Traffic_Code
+    modality: text
+    tier: core
+    access: hf
+    uri: https://huggingface.co/datasets/boffire/Kabyle_Road_Traffic_Code
+    licence: cc-by-sa-4.0
+    languages: [kab]
+    size: { bytes: 48946 }
+    retrieved: 2026-08-06
+    notes: >-
+      Legal/administrative prose — a register absent elsewhere.
+
+  - id: hf.boffire.kabyle-english-translatewiki
+    name: boffire/kabyle-english-translatewiki
+    modality: parallel
+    tier: core
+    access: hf
+    uri: https://huggingface.co/datasets/boffire/kabyle-english-translatewiki
+    licence: cc-by-3.0
+    languages: [kab, eng]
+    size: { bytes: 485483 }
+    retrieved: 2026-08-06
+    notes: >-
+      translatewiki Kabyle-English.
+
+  - id: hf.boffire.libretranslate-suggestions
+    name: boffire/libretranslate-en-kab-suggestions
+    modality: parallel
+    tier: supplementary
+    access: hf
+    uri: https://huggingface.co/datasets/boffire/libretranslate-en-kab-suggestions
+    licence: mit
+    languages: [kab, eng]
+    size: { bytes: 207557 }
+    retrieved: 2026-08-06
+    notes: >-
+      User-submitted MT corrections; unvetted.
+
+  - id: hf.imsidag.libretranslate-suggestions
+    name: Imsidag-community/libretranslate-suggestions
+    modality: parallel
+    tier: supplementary
+    access: hf
+    uri: https://huggingface.co/datasets/Imsidag-community/libretranslate-suggestions
+    licence: mit
+    languages: [kab]
+    size: { bytes: 207227 }
+    retrieved: 2026-08-06
+    notes: >-
+      User-submitted MT corrections; unvetted.
+
+  - id: hf.abdelhaqueidali.amazigh-lyrics
+    name: abdelhaqueidali/Amazigh-Lyrics-Collection
+    modality: text
+    tier: supplementary
+    access: hf
+    uri: https://huggingface.co/datasets/abdelhaqueidali/Amazigh-Lyrics-Collection
+    licence: other
+    languages: [kab]
+    size: { bytes: 649708 }
+    retrieved: 2026-08-06
+    notes: >-
+      Amazigh lyrics; may mix sibling languages — needs per-record LID in Phase 3.3.
+
+  - id: hf.agurzil.tafsut-maths-lexicon
+    name: Agurzil-Amazigh/tafsut-lexique-mathematiques-kabyle
+    modality: lexicon
+    tier: core
+    access: hf
+    uri: https://huggingface.co/datasets/Agurzil-Amazigh/tafsut-lexique-mathematiques-kabyle
+    licence: cc-by-4.0
+    languages: [kab]
+    size: { bytes: 1112365 }
+    retrieved: 2026-08-06
+    notes: >-
+      Kabyle mathematics terminology.
+
+  - id: hf.goldfish.fish-food-kab
+    name: goldfish-models/fish-food
+    modality: text
+    tier: supplementary
+    access: hf
+    uri: https://huggingface.co/datasets/goldfish-models/fish-food
+    licence: cc-by-nc-sa-4.0
+    languages: [kab]
+    size: { bytes: 47612545 }
+    retrieved: 2026-08-06
+    notes: >-
+      Goldfish monolingual training corpus, kab slice. NON-COMMERCIAL licence — permissive cuts must exclude it.
+
+  - id: hf.panlex-meanings-kab
+    name: cointegrated/panlex-meanings
+    modality: lexicon
+    tier: supplementary
+    access: hf
+    uri: https://huggingface.co/datasets/cointegrated/panlex-meanings
+    licence: cc0-1.0
+    languages: [kab]
+    size: { bytes: 640668 }
+    retrieved: 2026-08-06
+    notes: >-
+      PanLex cross-lingual meanings.
+
+  - id: hf.tapaco-kab
+    name: community-datasets/tapaco
+    modality: parallel
+    tier: supplementary
+    access: hf
+    uri: https://huggingface.co/datasets/community-datasets/tapaco
+    licence: cc-by-2.0
+    languages: [kab]
+    size: { bytes: 471650 }
+    retrieved: 2026-08-06
+    notes: >-
+      TaPaCo paraphrase corpus, kab subset.
+
+  - id: hf.boffire.nllb-en-kab
+    name: boffire/nllb_en_kab — filtered NLLB en-kab
+    modality: parallel
+    tier: supplementary
+    access: hf
+    uri: https://huggingface.co/datasets/boffire/nllb_en_kab
+    licence: cc-by-nc-4.0
+    languages: [kab, eng]
+    size: { rows: 2786012, bytes: 200461786 }
+    retrieved: 2026-08-06
+    notes: >-
+      A filtered subset of the same OPUS NLLB en-kab held raw at opus.nllb-kab.
+      Filtering method undocumented. Its value is the per-pair keep/drop decision,
+      not the text. Non-commercial, so excluded from a permissive cut.
+
+  - id: hf.imsidag.nllb-en-kab
+    name: Imsidag-community/nllb_en_kab — GlotLID-filtered NLLB en-kab
+    modality: parallel
+    tier: supplementary
+    access: hf
+    uri: https://huggingface.co/datasets/Imsidag-community/nllb_en_kab
+    licence: cc-by-nc-4.0
+    languages: [kab, eng]
+    size: { rows: 2484297, bytes: 174150419 }
+    retrieved: 2026-08-06
+    notes: >-
+      OPUS NLLB en-kab filtered with GlotLID v3 at 0.95 confidence plus character
+      normalisation of non-standard Kabyle Latin. Neither this nor the boffire
+      sibling reports precision; treat both as candidate pools, never as gold.

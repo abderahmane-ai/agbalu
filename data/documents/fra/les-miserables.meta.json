@@ -1,0 +1,19 @@
+{
+  "title": "Les Misérables",
+  "kabyle_title": "Imeɣban (Les Misérables)",
+  "author": "Victor Hugo",
+  "year": 1862,
+  "language": "fra",
+  "licence": "public-domain",
+  "source": "https://www.gutenberg.org/cache/epub/17489/pg17489.txt",
+  "retrieved": "2026-08-12",
+  "retrieved_note": "the date the document was staged into this tree; the original fetch date was not recorded, so re-running `reproduce` is what re-establishes the bytes",
+  "boilerplate": "Project Gutenberg header, table of contents, and footer stripped.",
+  "prepared": "Illustration tags, emphasis underscores, edition colophons, tables of contents and publisher adverts removed after the boilerplate strip, and runs of blank lines collapsed to two. `sha256` is of the prepared text, not of the fetched file.",
+  "reproduce": "curl -L -o data/documents/fra/les-miserables.txt https://www.gutenberg.org/cache/epub/17489/pg17489.txt  # then strip between the START/END OF THIS PROJECT GUTENBERG EBOOK markers",
+  "sha256": "ca75706530633a4db28fa544d857afb12d2b646ef1e02f986fb8e797115c06e6",
+  "bytes": 672766,
+  "characters": 654464,
+  "words": 110062,
+  "paragraphs": 2
+}
