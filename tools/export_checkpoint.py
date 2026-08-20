@@ -26,7 +26,7 @@ import json
 import shutil
 import sys
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
@@ -154,7 +154,14 @@ def drop_derived(
 
 
 def config_of(checkpoint: dict[str, object]) -> dict[str, object]:
+    """The architecture the checkpoint records, as a mapping.
+
+    Two spellings, because two trainers wrote these files: one stores `asdict(config)` and
+    one pickles the frozen dataclass itself. Both describe the same shapes.
+    """
     found = checkpoint.get("config")
+    if is_dataclass(found) and not isinstance(found, type):
+        return dict(asdict(found))
     if not isinstance(found, dict):
         message = "the checkpoint carries no config, so the export cannot say what shape it is"
         raise ExportError(message)

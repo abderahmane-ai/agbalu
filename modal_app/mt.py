@@ -356,7 +356,7 @@ def upload_mt() -> None:
     dev = LOCAL_DATA / "dev.jsonl"
     for path in (train, dev):
         if not path.exists():
-            message = f"{path} missing; run `make mt-data` first"
+            message = f"{path} missing; run `make mt TASK=corpus` first"
             raise SystemExit(message)
 
     with data_volume.batch_upload(force=True) as batch:

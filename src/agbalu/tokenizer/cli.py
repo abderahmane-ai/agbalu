@@ -53,13 +53,13 @@ def _seed(out_dir: Path) -> Path:
 def _require_prepared(out_dir: Path, *, seeded: bool) -> tuple[Path, Path | None]:
     plain = _plain(out_dir)
     if not plain.is_file():
-        msg = f"{plain} missing; run `make tokenizer-prepare`"
+        msg = f"{plain} missing; run `make tokenizer STAGE=prepare`"
         raise TokenizerError(msg)
     if not seeded:
         return plain, None
     seed = _seed(out_dir)
     if not seed.is_file():
-        msg = f"{seed} missing; run `make tokenizer-prepare`"
+        msg = f"{seed} missing; run `make tokenizer STAGE=prepare`"
         raise TokenizerError(msg)
     return plain, seed
 
@@ -105,7 +105,7 @@ def command_sweep(args: argparse.Namespace) -> int:
 def command_evaluate(args: argparse.Namespace) -> int:
     models = sorted(args.out_dir.glob("*.model"))
     if not models:
-        msg = f"no tokenizer models under {args.out_dir}; run `make tokenizer-sweep`"
+        msg = f"no tokenizer models under {args.out_dir}; run `make tokenizer STAGE=sweep`"
         raise TokenizerError(msg)
 
     sentences = sample_sentences(args.corpus, args.sample)

@@ -13,6 +13,10 @@ data/raw/**
 data/interim/**
 data/processed/**
 data/tasks/**
+# The three KabStandard splits, 48 MB, pulled off the volume by `make modal-boulifa
+# TASK=pull`. Published as `agbalu/KabStandard` and reproducible at seed 42 from
+# `agbalu.standardise.corpus`, so the bytes have both a home and a recipe elsewhere.
+data/kabstandard/**
 # Whole documents run end-to-end through the MT stack, one directory per source
 # language. Bytes never go in git; the sidecar beside each one records where it came
 # from and how to fetch it again. The directory rule is what lets git descend far
@@ -96,3 +100,5 @@ paper/**/*.blg
 paper/**/*.synctex.gz
 paper/**/*.fdb_latexmk
 paper/**/*.fls
+
+.agents/

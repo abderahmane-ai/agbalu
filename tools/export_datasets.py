@@ -36,6 +36,8 @@ from typing import Final
 BENCH: Final = Path("data/processed/bench")
 TASKS: Final = Path("data/tasks")
 LEXICON: Final = Path("data/processed/lexicon")
+PUNCT: Final = Path("data/processed/punctuation")
+PRONUNCIATIONS: Final = LEXICON / "agbalu-pronunciations-v1.jsonl"
 CARDS: Final = Path("docs/cards")
 
 TASK_CATEGORIES: Final = frozenset(
@@ -550,12 +552,113 @@ def stage(repo: Repo, out: Path) -> Report:
     return report
 
 
+def punctuation() -> Repo:
+    """KabPunct: annotated punctuation & casing restoration corpus.
+
+    Each sentence is converted from raw text to a sequence of (word, punct_label, case_label)
+    triples. The raw JSONL holds one sentence per row with `text` and `source` fields;
+    `annotate` from `agbalu.punctuation.labels` is the one definition of how a sentence
+    becomes word tokens and labels, so the published rows are exactly what the model trains on.
+
+    The four splits map to two configs: `default` (train/dev/test — CV-style sentences) and
+    `ood` (long-form prose, held out of training). The card's `configs:` block declares both.
+    """
+    from agbalu.punctuation.labels import CASE, PUNCTUATION, annotate
+
+    def _annotated(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+        """Convert raw sentence rows to the published word-level annotation format."""
+        out: list[dict[str, object]] = []
+        for row in rows:
+            text = row.get("text")
+            if not isinstance(text, str) or not text.strip():
+                continue
+            ann = annotate(text)
+            if not ann.words:
+                continue
+            out.append(
+                {
+                    "words": list(ann.words),
+                    "punctuation": [PUNCTUATION[i] for i in ann.punctuation],
+                    "case": [CASE[i] for i in ann.case],
+                    "source": row.get("source", ""),
+                }
+            )
+        return out
+
+    fields = ("words", "punctuation", "case", "source")
+
+    train_rows = _annotated(read_jsonl(PUNCT / "train.jsonl"))
+    dev_rows = _annotated(read_jsonl(PUNCT / "dev.jsonl"))
+    test_rows = _annotated(read_jsonl(PUNCT / "test.jsonl"))
+    ood_rows = _annotated(read_jsonl(PUNCT / "ood.jsonl"))
+
+    return Repo(
+        name="KabPunct",
+        card=CARDS / "kabpunct.md",
+        configs=(
+            Config(
+                name="default",
+                splits={"train": train_rows, "dev": dev_rows, "test": test_rows},
+                fields=fields,
+            ),
+            Config(
+                name="ood",
+                splits={"ood": ood_rows},
+                fields=fields,
+            ),
+        ),
+    )
+
+
+def g2p() -> Repo:
+    """KabG2P: Kabyle grapheme-to-phoneme pronunciation dictionary.
+
+    25,634 word-IPA pairs recovered by aligning 59,462 Kabyle sentences against
+    their IPA transcriptions (99.53% alignment rate, 0% ambiguity). The 8 entries
+    whose headword falls outside the Kabyle writing system are excluded.
+    """
+    outside_writing_system: frozenset[str] = frozenset(
+        {
+            "3d",
+            "androïd",
+            "mp3",
+            "muḥ€nd",
+            "rosé",
+            "supermarché",
+            "xelleṣ̣",
+            "ṭeyyeb\u201f",
+        }
+    )
+
+    rows = read_jsonl(PRONUNCIATIONS)
+    kept = [r for r in rows if r.get("word") not in outside_writing_system]
+    if len(kept) == len(rows):
+        message = "outside-writing-system filter removed nothing; verify the source data"
+        raise ExportError(message)
+
+    fields = ("word", "ipa", "variants", "repaired")
+    return Repo(
+        name="KabG2P",
+        card=CARDS / "kabg2p.md",
+        configs=(
+            Config(
+                name="default",
+                splits={"train": project(kept, fields)},
+                fields=fields,
+            ),
+        ),
+        layout="nested",
+    )
+
+
 def repositories() -> Iterator[tuple[str, Callable[[], Repo]]]:
     yield "bench", bench
     yield "lex", lexicon
     yield "sentiment", sentiment
     yield "inflect", inflection
     yield "tifinagh", transliteration
+    yield "punct", punctuation
+    yield "g2p", g2p
 
 
 def main(argv: Sequence[str] | None = None) -> int:

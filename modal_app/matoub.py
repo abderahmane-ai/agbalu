@@ -158,6 +158,11 @@ DIFF_EPOCH: Final = 999
 path loads a fixed voicepack as the speaker and never samples one. The recipe's own config
 writes the same number with the same comment."""
 
+SYNTHESIS_RATE: Final = 24_000
+"""Kokoro's output rate, and therefore the recipe's `sr`, the reference clip's load rate
+and the written wav's. One constant because five copies of a sample rate is four chances
+to write audio at a rate its header does not declare."""
+
 MAX_LEN: Final[dict[str, int]] = {STAGE1: 200, STAGE2: 100}
 """Frames of audio per training example, per stage. One frame is `hop_length / sr` = 12.5 ms.
 
@@ -184,11 +189,10 @@ def _emit(event: str, **fields: object) -> None:
 def work_root(arm: str, *, limit: int) -> Path:
     """Where one arm's run lives, keyed on its cap as well as its arm.
 
-    A capped run never shares a directory with the real one, and — the part that was wrong
-    first time — no two caps share one either. `LIMIT=200` and `LIMIT=4000` both resolving
-    to `<arm>-smoke` meant the second probe read the first's `epoch_1st_00000.pth`, decided
-    it was already complete, and measured nothing, while its own prepare had already
-    overwritten the lists the first had trained on.
+    A capped run never shares a directory with the real one, and no two caps share one
+    either. `LIMIT=200` and `LIMIT=4000` both resolving to `<arm>-smoke` would let the
+    second probe read the first's `epoch_1st_00000.pth`, decide it was already complete and
+    measure nothing, while its own prepare had overwritten the lists the first trained on.
     """
     return WORK_ROOT / (f"{arm}-smoke-{limit}" if limit else arm)
 
@@ -413,7 +417,7 @@ def render_config(root: Path, plan: StagePlan, *, batch: int, workers: int) -> P
             "num_workers": workers,
         },
         "preprocess_params": {
-            "sr": 24000,
+            "sr": SYNTHESIS_RATE,
             "spect_params": {
                 "n_fft": 2048,
                 "win_length": 1200,
@@ -1030,6 +1034,10 @@ def matoub_infer(
     checkpoint: str = "",
     limit: int = 0,
     output_filename: str = "sample_stage1.wav",
+    diffusion_steps: int = 10,
+    embedding_scale: float = 1.0,
+    alpha: float = 0.3,
+    beta: float = 0.7,
 ) -> dict[str, object]:
     """Inference over a trained Stage 1 or Stage 2 checkpoint on the volume.
 
@@ -1044,21 +1052,32 @@ def matoub_infer(
 
     # PyTorch 2.6+ defaults weights_only=True which breaks legacy StyleTTS2 checkpoints
     _orig_torch_load = torch.load
+
     def _safe_load(*args: object, **kwargs: object) -> object:
         if "weights_only" not in kwargs:
             kwargs["weights_only"] = False
         return _orig_torch_load(*args, **kwargs)
+
     torch.load = _safe_load
 
     from agbalu.tts import kokoro
     from agbalu.tts.g2p import phonemize
 
-
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     root = work_root(arm, limit=limit)
     logs_dir = root / "logs" if stage == STAGE1 else root / "logs" / voice
 
-    ckpt_path = Path(checkpoint) if checkpoint else (logs_dir / "first_stage.pth")
+    if checkpoint:
+        ckpt_path = Path(checkpoint)
+    else:
+        first_stage_file = logs_dir / "first_stage.pth"
+        if first_stage_file.is_file():
+            ckpt_path = first_stage_file
+        else:
+            prefix = "epoch_1st_*.pth" if stage == STAGE1 else "epoch_2nd_*.pth"
+            found = sorted(logs_dir.glob(prefix))
+            ckpt_path = found[-1] if found else first_stage_file
+
     if not ckpt_path.is_file():
         message = f"no checkpoint at {ckpt_path}; has Stage 1/2 trained yet?"
         raise RuntimeError(message)
@@ -1069,16 +1088,27 @@ def matoub_infer(
     token_ids = [vocabulary.symbols[char] for char in ipa if char in vocabulary.symbols]
     if not token_ids:
         token_ids = [vocabulary.pad_index]
+    token_ids.insert(0, 0)
     tokens = torch.LongTensor(token_ids).unsqueeze(0).to(device)
 
     # 2. Config & Auxiliary Models
-    config_file = root / "config_stage1.yml" if stage == STAGE1 else root / "config_stage2.yml"
-    if not config_file.is_file():
-        config_file = root / "config.yml"
-    config = yaml.safe_load(config_file.read_text(encoding="utf-8")) if config_file.is_file() else {}
+    config_candidates = [
+        root / f"config_{stage}_{voice}.yml",
+        root / f"config_{stage}.yml",
+        root / f"config_stage2_{voice}.yml",
+        root / "config_stage2.yml",
+        root / f"config_stage1_{voice}.yml",
+        root / "config_stage1.yml",
+        root / "config.yml",
+    ]
+    config_file = next((c for c in config_candidates if c.is_file()), None)
+    if config_file is None:
+        message = f"no config file found in {root}; checked: {[str(c) for c in config_candidates]}"
+        raise RuntimeError(message)
+    config = yaml.safe_load(config_file.read_text(encoding="utf-8"))
 
     from models import build_model, load_ASR_models, load_F0_models
-    from munch import munchify
+    from utils import length_to_mask, recursive_munch
     from Utils.PLBERT.util import load_plbert
 
     asr_config = str(STYLETTS2_PATH / "Utils" / "ASR" / "config.yml")
@@ -1091,39 +1121,60 @@ def matoub_infer(
     bert_path = str(STYLETTS2_PATH / "Utils" / "PLBERT")
     plbert = load_plbert(bert_path)
 
-    model_params = munchify(config.get("model_params", {}))
+    model_params = recursive_munch(config.get("model_params", {}))
     model = build_model(model_params, text_aligner, pitch_extractor, plbert)
 
-    for key, module in model.items():
+    for module in model.values():
         if isinstance(module, torch.nn.Module):
             module.to(device)
             module.eval()
 
     # 3. Load Checkpoint into Sub-modules
-    state_dict = torch.load(ckpt_path, map_location=device)
-    net_dict = state_dict.get("net", state_dict)
+    loaded = _orig_torch_load(ckpt_path, map_location=device, weights_only=False)
+    net_dict = loaded["net"] if isinstance(loaded, dict) and "net" in loaded else loaded
     for key in model:
         if key in net_dict and hasattr(model[key], "load_state_dict"):
             try:
-                model[key].load_state_dict(net_dict[key], strict=False)
-            except Exception as e:
-                log.warning("could not load state_dict for %s: %s", key, e)
+                model[key].load_state_dict(net_dict[key])
+            except Exception:
+                from collections import OrderedDict
+
+                raw_sd = net_dict[key]
+                new_sd = OrderedDict()
+                for k, v in raw_sd.items():
+                    name = k[7:] if k.startswith("module.") else k
+                    new_sd[name] = v
+                model[key].load_state_dict(new_sd, strict=False)
 
     # 4. Reference Audio & Style Vector
-    voice_dir = CORPUS_ROOT / voice / arm
-    wav_files = sorted(voice_dir.glob("*.wav"))
+    voice_dirs = [
+        CORPUS_ROOT / voice / arm,
+        CORPUS_ROOT / voice,
+        root / voice,
+        root,
+        WORK_ROOT / arm,
+    ]
+    wav_files: list[Path] = []
+    for vd in voice_dirs:
+        if vd.is_dir():
+            wav_files = sorted(vd.glob("*.wav"))
+            if wav_files:
+                break
     if not wav_files:
-        message = f"no reference audio clips found in {voice_dir}"
+        message = f"no reference audio clips found in any of {[str(d) for d in voice_dirs]}"
         raise RuntimeError(message)
     ref_wav_path = wav_files[0]
 
     import librosa
     import torchaudio
-    from utils import length_to_mask
 
-    wave, sr = librosa.load(str(ref_wav_path), sr=24000)
+    wave, sr = librosa.load(str(ref_wav_path), sr=SYNTHESIS_RATE)
     audio_trimmed, _ = librosa.effects.trim(wave, top_db=30)
+    if sr != SYNTHESIS_RATE:
+        audio_trimmed = librosa.resample(audio_trimmed, orig_sr=sr, target_sr=SYNTHESIS_RATE)
 
+    # Canonical StyleTTS2 mel normalization: (log(1e-5 + mel) - (-4)) / 4
+    mean, std = -4, 4
     to_mel = torchaudio.transforms.MelSpectrogram(
         n_fft=2048,
         win_length=1200,
@@ -1133,42 +1184,93 @@ def matoub_infer(
         f_max=8000,
     )
     mel_tensor = to_mel(torch.from_numpy(audio_trimmed).float().unsqueeze(0))
-    mel_tensor = torch.log(torch.clamp(mel_tensor, min=1e-5)).to(device)
+    mel_tensor = (torch.log(1e-5 + mel_tensor) - mean) / std
+    mel_tensor = mel_tensor.to(device)
 
-    # 5. End-to-End Synthesis
     with torch.no_grad():
         ref_s = model["style_encoder"](mel_tensor.unsqueeze(1))
-        input_lengths = torch.LongTensor([tokens.shape[1]]).to(device)
-        text_mask = length_to_mask(input_lengths).to(device)
-        t_en = model["text_encoder"](tokens, input_lengths, text_mask)
+        ref_p = model["predictor_encoder"](mel_tensor.unsqueeze(1))
+        ref_style = torch.cat([ref_s, ref_p], dim=1)
 
-        d = model["predictor"].text_encoder(t_en, ref_s, input_lengths, text_mask)
+    # 5. Canonical StyleTTS2 Diffusion & Decoding
+    from Modules.diffusion.sampler import ADPM2Sampler, DiffusionSampler, KarrasSchedule
+
+    sampler = DiffusionSampler(
+        model["diffusion"].diffusion,
+        sampler=ADPM2Sampler(),
+        sigma_schedule=KarrasSchedule(sigma_min=0.0001, sigma_max=3.0, rho=9.0),
+        clamp=False,
+    )
+
+    with torch.no_grad():
+        input_lengths = torch.LongTensor([tokens.shape[-1]]).to(device)
+        text_mask = length_to_mask(input_lengths).to(device)
+
+        t_en = model["text_encoder"](tokens, input_lengths, text_mask)
+        bert_dur = model["bert"](tokens, attention_mask=(~text_mask).int())
+        d_en = model["bert_encoder"](bert_dur).transpose(-1, -2)
+
+        s_pred = sampler(
+            noise=torch.randn((1, 256)).unsqueeze(1).to(device),
+            embedding=bert_dur,
+            embedding_scale=embedding_scale,
+            features=ref_style,
+            num_steps=diffusion_steps,
+        ).squeeze(1)
+
+        s = s_pred[:, 128:]
+        ref = s_pred[:, :128]
+
+        ref = alpha * ref + (1 - alpha) * ref_style[:, :128]
+        s = beta * s + (1 - beta) * ref_style[:, 128:]
+
+        d = model["predictor"].text_encoder(d_en, s, input_lengths, text_mask)
         x, _ = model["predictor"].lstm(d)
         duration = model["predictor"].duration_proj(x)
-        duration = torch.sigmoid(duration).sum(axis=-1)
+        duration = torch.sigmoid(duration).sum(dim=-1)
         pred_dur = torch.round(duration.squeeze()).clamp(min=1)
+        if pred_dur.dim() == 0:
+            pred_dur = pred_dur.unsqueeze(0)
+        pred_dur[-1] += 5
 
-
-        total_frames = int(pred_dur.sum().item()) if pred_dur.dim() > 0 else int(pred_dur.item())
-        pred_aln_trg = torch.zeros(input_lengths.item(), total_frames)
+        pred_aln_trg = torch.zeros(int(input_lengths.item()), int(pred_dur.sum().item()))
         c_frame = 0
         for i in range(pred_aln_trg.size(0)):
-            dur_i = int(pred_dur[i].item()) if pred_dur.dim() > 0 else int(pred_dur.item())
+            dur_i = int(pred_dur[i].item())
             pred_aln_trg[i, c_frame : c_frame + dur_i] = 1
             c_frame += dur_i
+        pred_aln_trg = pred_aln_trg.unsqueeze(0).to(device)
 
-        aln = pred_aln_trg.unsqueeze(0).to(device)
-        en = d.transpose(-1, -2) @ aln
-        f0_pred, n_pred = model["predictor"].F0Ntrain(en, ref_s)
-        asr = t_en @ aln
-        out_wav = model["decoder"](asr, f0_pred, n_pred, ref_s.squeeze().unsqueeze(0))
-        out_audio = out_wav.squeeze().cpu().numpy()
+        en = d.transpose(-1, -2) @ pred_aln_trg
+        if model_params.decoder.type == "hifigan":
+            asr_new = torch.zeros_like(en)
+            asr_new[:, :, 0] = en[:, :, 0]
+            asr_new[:, :, 1:] = en[:, :, 0:-1]
+            en = asr_new
+
+        F0_pred, N_pred = model["predictor"].F0Ntrain(en, s)
+
+        asr = t_en @ pred_aln_trg
+        if model_params.decoder.type == "hifigan":
+            asr_new = torch.zeros_like(asr)
+            asr_new[:, :, 0] = asr[:, :, 0]
+            asr_new[:, :, 1:] = asr[:, :, 0:-1]
+            asr = asr_new
+
+        out = model["decoder"](asr, F0_pred, N_pred, ref.squeeze().unsqueeze(0))
+        out_audio = out.squeeze().cpu().numpy()[..., :-50]
+
+        import numpy as np
+
+        max_val = np.abs(out_audio).max()
+        if max_val > 0:
+            out_audio = (out_audio / max_val) * 0.95
 
     samples_dir = root / "samples"
     samples_dir.mkdir(parents=True, exist_ok=True)
     out_path = samples_dir / output_filename
 
-    sf.write(out_path, out_audio, 24000)
+    sf.write(out_path, out_audio, SYNTHESIS_RATE)
     data_volume.commit()
 
     payload = {
@@ -1180,10 +1282,8 @@ def matoub_infer(
         "checkpoint": str(ckpt_path),
         "reference_clip": str(ref_wav_path),
         "output_audio": str(out_path),
-        "duration_seconds": round(len(out_audio) / 24000, 2),
-        "sample_rate": 24000,
+        "duration_seconds": round(len(out_audio) / SYNTHESIS_RATE, 2),
+        "sample_rate": SYNTHESIS_RATE,
     }
     _emit("infer_done", **payload)
     return payload
-
-

@@ -68,7 +68,7 @@ class TestTokeniseCorpus:
     def test_writes_both_splits_and_their_stats(self, tmp_path: Path) -> None:
         model = Path("artifacts/tokenizer/agbalu-tok-base-16k.model")
         if not model.is_file():
-            pytest.skip("tokenizer not built; run `make tokenizer-sweep`")
+            pytest.skip("tokenizer not built; run `make tokenizer STAGE=sweep`")
         corpus = tmp_path / "corpus.jsonl"
         corpus.write_text(
             "".join(
@@ -86,7 +86,7 @@ class TestTokeniseCorpus:
     def test_an_empty_corpus_is_refused(self, tmp_path: Path) -> None:
         model = Path("artifacts/tokenizer/agbalu-tok-base-16k.model")
         if not model.is_file():
-            pytest.skip("tokenizer not built; run `make tokenizer-sweep`")
+            pytest.skip("tokenizer not built; run `make tokenizer STAGE=sweep`")
         corpus = tmp_path / "empty.jsonl"
         corpus.write_text("", encoding="utf-8")
         with pytest.raises(ModelError, match="no training tokens"):

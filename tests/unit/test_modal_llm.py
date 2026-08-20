@@ -56,9 +56,17 @@ class TestCheckInputs:
     def test_a_missing_evaluation_set_names_both_targets(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """Both files, and the two commands that produce them. An operator reading this on
+        a container has nothing else to go on."""
         patch(monkeypatch, volume(tmp_path, languages=["kab_Latn", "eng_Latn"], sets=["kab"]))
-        with pytest.raises(FileNotFoundError, match="llm-holdout"):
+        with pytest.raises(FileNotFoundError) as raised:
             llm.check_inputs(["kab-eng"])
+
+        message = str(raised.value)
+        assert "heldout-eng.jsonl" in message
+        assert "heldout-fra.jsonl" in message
+        assert "make llm TASK=holdout" in message
+        assert "make modal-upload TASK=llm" in message
 
     def test_a_missing_flores_split_is_still_caught(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

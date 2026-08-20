@@ -186,7 +186,7 @@ def synthesise(
 def upload_pivot() -> None:
     """Push the pivot job to the data volume."""
     if not LOCAL_PIVOT.exists():
-        message = f"{LOCAL_PIVOT} missing; run `make pivot-data` first"
+        message = f"{LOCAL_PIVOT} missing; run `make mt TASK=pivot` first"
         raise SystemExit(message)
     with data_volume.batch_upload(force=True) as batch:
         batch.put_file(LOCAL_PIVOT, f"/{REMOTE_PIVOT}")

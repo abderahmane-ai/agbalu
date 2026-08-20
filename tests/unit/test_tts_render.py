@@ -146,9 +146,8 @@ class TestRenderArms:
     def test_one_source_read_feeds_both_arms(
         self, audio_map: Mapping[str, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The defect this replaces read every clip once per arm: the restored pass and
-        the raw resample are two derivations of one decode, and the volume charges per
-        read."""
+        """One decode per clip, not one per arm: the restored pass and the raw resample are
+        two derivations of the same decode, and the volume charges per read."""
         reads: Counter[str] = Counter()
         original = tts._native
 

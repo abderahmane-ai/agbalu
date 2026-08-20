@@ -7,6 +7,7 @@ proves it on the published ones, through `AutoModel`/`AutoTokenizer` with
 
 from __future__ import annotations
 
+import random
 import shutil
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from safetensors.torch import load_file
 from tools.stage_hub import stage
 from transformers import (
     AutoConfig,
+    AutoModel,
     AutoModelForMaskedLM,
     AutoModelForSeq2SeqLM,
     AutoProcessor,
@@ -25,6 +27,12 @@ from transformers import (
 
 from agbalu.model.config import PRESETS
 from agbalu.model.modeling import Encoder
+from agbalu.ocr.config import ModelConfig
+from agbalu.ocr.infer import Recognizer
+from agbalu.ocr.models import VisionEncoderDecoder
+from agbalu.ocr.synthetic import render_text_line
+from agbalu.ocr.vocabulary import VOCAB_SIZE, encode
+from agbalu.standardise.infer import Standardiser
 from agbalu.tifinagh.infer import Transliterator
 
 RELEASE = Path("artifacts/release")
@@ -63,6 +71,52 @@ def test_juba_decodes_exactly_as_the_transliterator_does(tmp_path: Path) -> None
             tokenizer.decode(greedy[0], skip_special_tokens=True)
             == reference.greedy_batch([text])[0]
         )
+
+
+def test_boulifa_decodes_exactly_as_the_standardiser_does(tmp_path: Path) -> None:
+    directory = _staged("Boulifa-48M", "boulifa", tmp_path)
+    reference = Standardiser.load()
+    tokenizer = AutoTokenizer.from_pretrained(directory, trust_remote_code=True)
+    model = AutoModelForSeq2SeqLM.from_pretrained(directory, trust_remote_code=True).eval()
+
+    for text in (
+        "achimi ur d-thekhedmedh ara tamazight g l'ecole?",
+        "3emmi l7adj yerza-d 5ir d lbaraka s wuzzal",
+        "Azul fell-awen, amek i telliḍ taṣebḥit-a?",
+    ):
+        encoded = tokenizer(text, return_tensors="pt")
+        with torch.inference_mode():
+            greedy = model.generate(**encoded, max_length=512, num_beams=1)
+        produced = tokenizer.decode(greedy[0], skip_special_tokens=True)
+        assert produced == reference.standardise(text)
+
+
+def test_feraoun_transcribes_exactly_as_the_recognizer_does(tmp_path: Path) -> None:
+    """Rendered and read back, because the preprocessing is half of this model: a canvas
+    built at the wrong scale still gives logits of the right shape."""
+    directory = _staged("Feraoun-36M", "feraoun", tmp_path)
+    trained = VisionEncoderDecoder(ModelConfig(), use_pretrained_encoder=False)
+    trained.load_state_dict(load_file(directory / "model.safetensors"), strict=True)
+    reference = Recognizer(model=trained, device=torch.device("cpu"))
+    tokenizer = AutoTokenizer.from_pretrained(directory, trust_remote_code=True)
+    model = AutoModel.from_pretrained(directory, trust_remote_code=True).eval()
+
+    lines = [
+        "Aḍris n uḥric ɣef tɛeṛṛamt d uẓekka.",
+        "ⵜⴰⵇⴱⴰⵢⵍⵉⵜ ⴷ ⵜⵓⵜⵍⴰⵢⵜ ⵜⴰⵢⴻⵎⵎⴰⵜ ⵏⵏⴻⵖ.",
+    ]
+    images = [render_text_line(line, augment=False, rng=random.Random(3)) for line in lines]
+    with torch.inference_mode():
+        assert model.transcribe(images, tokenizer) == reference.recognize_lines(images)
+
+
+def test_feraoun_s_published_tokenizer_is_the_table_it_was_trained_on(tmp_path: Path) -> None:
+    directory = _staged("Feraoun-36M", "feraoun", tmp_path)
+    tokenizer = AutoTokenizer.from_pretrained(directory, trust_remote_code=True)
+
+    assert len(tokenizer) == VOCAB_SIZE
+    for text in ("Aḍris n uḥric", "ⴰⵣⵓⵍ ⴼⵍⵍ-ⴰⵡⴻⵏ", "1980 d aseggas"):
+        assert tokenizer(text, add_special_tokens=True).input_ids == encode(text)
 
 
 def test_masinissa_produces_the_encoder_s_own_representations(tmp_path: Path) -> None:

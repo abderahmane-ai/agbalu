@@ -131,6 +131,32 @@ label for Tarifit cannot be scored on it, and scoring it anyway flatters the tot
 which it *can* name, so that is genuine confusion rather than a missing label.** It is also
 the identifier that gated the bitext mining behind most published "Kabyle" parallel data.
 
+## Usage
+
+Two configs, and they answer different questions. `mt` is the repaired reference; `lid` is
+the six-language discrimination set.
+
+```python
+from datasets import load_dataset
+
+mt = load_dataset("agbalu/KabBench", "mt", split="devtest")
+mt[0]
+# {'id': 0, 'split': 'devtest', 'corrected': True,
+#  'text': '"Tura nesɛa tiɣeṛdayin n 4 n wagguren di leɛmeṛ-nsent ur nesɛi aṭṭan n skeṛ...'
+
+# The 326 rows this benchmark exists for:
+repaired = mt.filter(lambda row: row["corrected"])
+len(repaired)
+
+lid = load_dataset("agbalu/KabBench", "lid", split="test")
+lid[0]
+# {'text': 'D acu kan, xas akk-n ttseth'in s tutlayt-nsen, ...', 'language': 'kab_Latn'}
+```
+
+**`mt` has no Kabyle–English pairs in it.** It is the Kabyle *side* only, keyed on
+`(split, id)` — FLORES+ ids restart at 0 per split, so the pair is not unique on its own.
+Join it against FLORES+'s other languages on that key to build a direction.
+
 ## Provenance and limits
 
 - The `mt` config derives from FLORES+ `kab_Latn` and inherits **CC-BY-SA-4.0**. Repairs are

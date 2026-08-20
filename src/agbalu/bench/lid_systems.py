@@ -23,7 +23,7 @@ SYSTEMS: Final[dict[str, Path]] = {
     "glotlid": GLOTLID_MODEL,
     "nllb-lid218e": NLLB_LID_MODEL,
 }
-"""Identifier name to the model file `make acquire-lid` lands."""
+"""Identifier name to the model file `make acquire TASK=siblings` lands."""
 
 
 class LidModelError(Exception):

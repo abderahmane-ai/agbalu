@@ -68,7 +68,12 @@ transitive — `agbalu.model.data` imports `agbalu.tokenizer.spec`, which reache
 `agbalu.normalise.rules`. `tests/unit/test_modal_image.py` recomputes the closure and
 fails if this list drifts from it."""
 
-IMPORT_NAME: Final[dict[str, str]] = {"pyyaml": "yaml"}
+IMPORT_NAME: Final[dict[str, str]] = {
+    "pyyaml": "yaml",
+    "cut-cross-entropy": "cut_cross_entropy",
+    "sentence-transformers": "sentence_transformers",
+    "pillow": "PIL",
+}
 """Distribution names that differ from the module they provide."""
 
 REMOTE_FLORES: Final = "bench/flores"
@@ -254,14 +259,19 @@ JUGURTHA_PIP_PACKAGES: Final[tuple[str, ...]] = (
 )
 
 jugurtha_image: Final = (
-    modal.Image.debian_slim(python_version=PYTHON_VERSION)
-    # `causal-conv1d` ships an sdist only and compiles a CUDA extension, so the toolchain
-    # has to be in the image before pip runs. `flash-linear-attention` is Triton and needs
-    # neither, but it is installed in the same layer so one rebuild covers both.
+    modal.Image.from_registry("nvidia/cuda:13.0.3-devel-ubuntu24.04", add_python=PYTHON_VERSION)
     .apt_install("git", "build-essential", "ninja-build")
-    .env({"TORCH_CUDA_ARCH_LIST": "8.6", "MAX_JOBS": "4"})
-    .pip_install(f"torch=={TORCH_VERSION}")
-    .pip_install(*JUGURTHA_PIP_PACKAGES)
+    .env(
+        {
+            "TORCH_CUDA_ARCH_LIST": "8.6",
+            "MAX_JOBS": "4",
+            "CUDA_HOME": "/usr/local/cuda",
+            "CC": "gcc",
+            "CXX": "g++",
+        }
+    )
+    .pip_install(f"torch=={TORCH_VERSION}", "wheel", "packaging", "setuptools", "ninja")
+    .pip_install(*JUGURTHA_PIP_PACKAGES, extra_options="--no-build-isolation")
     .env(
         {
             "HF_HOME": str(MODELS_PATH),
@@ -275,8 +285,9 @@ jugurtha_image: Final = (
     .add_local_python_source("agbalu", "modal_app")
     .add_local_dir(RESOURCES, remote_path=f"/root/{RESOURCES}")
 )
-"""Torch first and alone: `causal-conv1d` imports torch inside its `setup.py`, so a single
-`pip_install` that lists both resolves them in one pass and the build sees no torch.
+"""NVIDIA CUDA 13.0 devel image provides nvcc 13.0 matching PyTorch 2.11's CUDA version.
+`torch` and build tools are installed first so `causal-conv1d` compiles with g++ against
+the active torch install with `--no-build-isolation`.
 
 8.6 is the A10's compute capability. Left unset, the extension builds for every architecture
 the toolkit knows, which is many minutes of nvcc for code no container here will run."""
@@ -555,6 +566,67 @@ A10G is also 24 GiB. The smoke measures it before the run commits — this is th
 point, not a finding."""
 
 MATOUB_TIMEOUT: Final = 24 * 60 * 60
+
+EMBED_GPU: Final = "A10"
+EMBED_CPU: Final = 8.0
+EMBED_TIMEOUT: Final = 12 * 60 * 60
+
+EMBED_PIP_PACKAGES: Final[tuple[str, ...]] = (
+    *PIP_PACKAGES,
+    "transformers>=4.44.0",
+    # 5.x, not 3.x: `losses` moved under `sentence_transformer` and the old path is a
+    # deprecation shim. The gate type-checks against the moved path, so the container must
+    # be the version that has it.
+    "sentence-transformers>=5.0",
+    # `agbalu.embed.backbone` imports `AddedToken` directly to add the five Kabyle
+    # consonants the backbone maps to `<unk>`. It arrives with transformers, but a
+    # transitive dependency is not a declaration.
+    "tokenizers>=0.19",
+    "datasets>=2.20.0",
+    "accelerate>=0.33.0",
+    "safetensors>=0.4.4",
+)
+
+embed_image: Final = _with_local_sources(
+    modal.Image.debian_slim(python_version=PYTHON_VERSION)
+    .pip_install(*EMBED_PIP_PACKAGES)
+    .env(
+        {
+            "HF_HOME": str(MODELS_PATH),
+            "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
+        }
+    )
+)
+
+OCR_GPU: Final = "A10G"
+OCR_CPU: Final = 4.0
+OCR_TIMEOUT: Final = 6 * 60 * 60
+
+OCR_PIP_PACKAGES: Final[tuple[str, ...]] = (
+    f"torch=={TORCH_VERSION}",
+    "numpy>=2.0",
+    # `agbalu.ocr.dataset` reads the Tifinagh split straight out of its parquet.
+    "pyarrow>=17.0",
+    "transformers>=4.44.0",
+    "pillow>=10.0.0",
+    "accelerate>=0.33.0",
+    "safetensors>=0.4.4",
+)
+"""Same trim as `EMBED_PIP_PACKAGES`, and for the same reason: Feraoun is character-level
+over its own 171-symbol table, so no SentencePiece model, registry schema or normalisation
+table is ever loaded."""
+
+ocr_image: Final = _with_local_sources(
+    modal.Image.debian_slim(python_version=PYTHON_VERSION)
+    .apt_install("fonts-dejavu-core", "fonts-freefont-ttf", "fonts-liberation", "fonts-noto-core")
+    .pip_install(*OCR_PIP_PACKAGES)
+    .env(
+        {
+            "HF_HOME": str(MODELS_PATH),
+            "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
+        }
+    )
+)
 
 TRAIN_TIMEOUT: Final = 24 * 60 * 60
 """Modal's ceiling. The run is expected to finish inside it; the retry policy below is

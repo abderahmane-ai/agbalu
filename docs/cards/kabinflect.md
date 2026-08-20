@@ -94,6 +94,25 @@ Same 336,151 entries, indexed by inflected surface form.
 
 6,198 full verb paradigms with French translations, irregularity indicators (`is_irregular`, `is_derived`), pattern verbs, and principal aspect stems (`imperative`, `aorist`, `preterite`, `negative_preterite`, `aorist_participle`, `preterite_participle`, `negative_preterite_participle`, `intensive_forms`).
 
+## Usage
+
+```python
+from datasets import load_dataset
+
+inflection = load_dataset("agbalu/KabInflect", "inflection", split="train")
+inflection[0]
+# {'id': 'kab_inflect_train_000000', 'lemma': 'ttemnunnuḍ',
+#  'feats': 'Aspect=Imp|VerbForm=Part', 'tense_raw': 'participe aoriste intensif',
+#  'person_raw': 'participe', 'form': 'ittemnunnuḍen'}
+
+analysis  = load_dataset("agbalu/KabInflect", "analysis",  split="test")   # form -> lemma
+paradigms = load_dataset("agbalu/KabInflect", "paradigms", split="train")  # whole tables
+```
+
+The task is `(lemma, feats) -> form` for `inflection` and the reverse for `analysis`. The
+splits are **sealed on the paradigm**, so a lemma appearing in train appears in no other
+split — which is why the copy-the-lemma floor below is as low as it is.
+
 ## Paradigmatically Sealed Partitioning (Zero Paradigm Leakage)
 
 **Upstream datasets randomly split individual inflected forms across train and test.** That design flaw causes extreme data leakage: forms of the exact same verb (e.g. `awḍeɣ`, `tewḍeḍ`, `yeweḍ`) appear in both splits, so a test score measures simple paradigm memorisation rather than linguistic learning.

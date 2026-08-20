@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
 from collections import Counter, deque
 from concurrent.futures import ThreadPoolExecutor
@@ -530,6 +531,15 @@ def tts_baseline(
     return payload
 
 
+DECODE_LOCK: Final = threading.Lock()
+"""libsndfile 1.2.2's MPEG path is not safe to enter from two threads at once, and the clips
+are mp3. Measured: three workers decoding the same three files 800 times crash the
+interpreter with SIGBUS inside `sf_open` in 6 of 6 runs, and 0 of 8 under this lock. A
+warm-up decode on the main thread does not help, so it is the concurrent open rather than a
+one-time global init. Only the decode is serialised; the resample, the filterbank, the cut
+and the write stay on the pool."""
+
+
 def _native(path: Path) -> tuple[NDArray[np.float32], int]:
     """One clip at the rate it was stored at.
 
@@ -540,7 +550,8 @@ def _native(path: Path) -> tuple[NDArray[np.float32], int]:
     import numpy as np
     import soundfile
 
-    audio, rate = soundfile.read(path, dtype="float32", always_2d=False)
+    with DECODE_LOCK:
+        audio, rate = soundfile.read(path, dtype="float32", always_2d=False)
     if audio.ndim > 1:
         audio = audio.mean(axis=1)
     return np.ascontiguousarray(audio), int(rate)
@@ -1287,16 +1298,21 @@ def tts_corpus(
 
 @app.local_entrypoint()
 def upload_tts() -> None:
-    """Push the prompt set to the data volume."""
+    """Push the prompt set and candidate voices to the data volume."""
     missing = [path for path in (LOCAL_PROMPTS, LOCAL_OOD) if not path.is_file()]
     if missing:
         names = ", ".join(str(path) for path in missing)
         message = f"{names} missing; run `make tts TASK=prompts` and `make tts TASK=ood` first"
         raise SystemExit(message)
+    paths_to_upload = [LOCAL_PROMPTS, LOCAL_OOD]
+    if LOCAL_VOICES.is_file():
+        paths_to_upload.append(LOCAL_VOICES)
     with data_volume.batch_upload(force=True) as batch:
         batch.put_file(LOCAL_PROMPTS, f"/{REMOTE_TTS.name}/{PROMPTS_FILE}")
         batch.put_file(LOCAL_OOD, f"/{REMOTE_TTS.name}/{OOD_FILE}")
-    for path in (LOCAL_PROMPTS, LOCAL_OOD):
+        if LOCAL_VOICES.is_file():
+            batch.put_file(LOCAL_VOICES, f"/{REMOTE_TTS.name}/{VOICES_FILE}")
+    for path in paths_to_upload:
         print(f"uploaded {path} ({path.stat().st_size / 1e3:.1f} kB)")
 
 

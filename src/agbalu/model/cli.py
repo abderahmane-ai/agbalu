@@ -54,7 +54,7 @@ def command_train(args: argparse.Namespace) -> int:
         stats=args.data / "tokenised.stats.json",
     )
     if not corpus.train.is_file():
-        msg = f"{corpus.train} missing; run `make model-data`"
+        msg = f"{corpus.train} missing; run `make model TASK=data`"
         raise ModelError(msg)
 
     base = TrainConfig()

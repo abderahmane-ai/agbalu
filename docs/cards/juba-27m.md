@@ -249,6 +249,15 @@ checkable rather than a claim.
 a second name, safetensors refuses to write shared storage twice, and the module re-ties it
 on load.
 
+## Reproduction
+
+```bash
+make modal-upload TASK=bench                   # the script-conversion splits onto the volume
+make modal-tifinagh TASK=train                 # deploy, spawn detached, tail the one call
+make modal-tifinagh TASK=evaluate              # the model's row of the results table
+make bench TASK=tifinagh                       # the character table's row, over the full split
+```
+
 ## The name
 
 **Juba II** (r. 25 BCE – 23 CE) was a Numidian king who wrote in Greek on geography and

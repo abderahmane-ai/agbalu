@@ -307,9 +307,9 @@ class TestSplits:
         assert split_sizes(0) == (DEV_CLIPS, CYCLE_CLIPS)
 
     def test_the_smoke_sizes_keep_a_capped_corpus_splittable(self) -> None:
-        """The defect: a 20-clip cap leaves about a dozen utterances, and the recipe's
-        200/300 held-out sizes refused to split it — so the smoke was the one call that
-        could not run. The smoke sizes must leave every split non-empty at that size."""
+        """A 20-clip cap leaves about a dozen utterances, which the recipe's 200/300
+        held-out sizes cannot split — the smoke would be the one call that could not run.
+        The smoke sizes must leave every split non-empty at that size."""
         utterances = [utterance_for(f"c{i}") for i in range(12)]
         dev, cycle = split_sizes(20)
         assigned = assign_splits(utterances, dev=dev, cycle=cycle)

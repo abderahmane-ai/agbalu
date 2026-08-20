@@ -255,7 +255,7 @@ def pretrain(
 def upload_corpus() -> None:
     """Push the tokenised corpus and the tokenizer to the data volume."""
     if not (LOCAL_DATA / "train.bin").is_file():
-        message = f"{LOCAL_DATA}/train.bin missing; run `make model-data` first"
+        message = f"{LOCAL_DATA}/train.bin missing; run `make model TASK=data` first"
         raise SystemExit(message)
     with data_volume.batch_upload(force=True) as batch:
         for name in ("train.bin", "validation.bin", "tokenised.stats.json"):

@@ -316,8 +316,8 @@ def mt_baselines(
                 row["raw"]["bleu"],
                 row["normalised"]["bleu"],
             )
-            # After each direction, not at the end: a failure on the fifth used to discard
-            # four completed scores and the GPU minutes that bought them.
+            # After each direction, not at the end: a failure on the fifth would otherwise
+            # discard four completed scores and the GPU minutes that bought them.
             out.write_text(
                 json.dumps(results, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
             )
@@ -335,7 +335,7 @@ def upload_bench() -> None:
 
     for path in (LOCAL_FLORES, LOCAL_CORRECTED):
         if not path.exists():
-            message = f"{path} missing; run `make bench-audit` first"
+            message = f"{path} missing; run `make bench TASK=audit` first"
             raise SystemExit(message)
 
     wanted = [

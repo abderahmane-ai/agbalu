@@ -220,7 +220,8 @@ tuned result.
 
 ## Usage
 
-Greedy, with nothing but `transformers`:
+Greedy, with `transformers`, `torch` and `librosa` — the architecture is `Wav2Vec2ForCTC`,
+one of the library's own, so no `trust_remote_code` is needed:
 
 ```python
 import librosa

@@ -20,17 +20,23 @@ layer rather than a character filter.
 
 ## Published artifacts
 
-Eleven repositories on the Hugging Face Hub under [`agbalu`](https://huggingface.co/agbalu).
-Every model loads with `transformers` and `torch` alone, without this repository.
+Eighteen repositories on the Hugging Face Hub under [`agbalu`](https://huggingface.co/agbalu),
+ten models and eight datasets. Every model except `Matoub-82M` loads with `transformers` and
+`torch` alone, without this repository; the voice is a StyleTTS2 checkpoint and ships its own
+`inference.py`.
 
 | Model | | |
 |---|---|---|
 | [`Masinissa-31M`](https://huggingface.co/agbalu/Masinissa-31M) | encoder | 90.51% on gold POS, against a most-frequent-tag baseline of 83.42% |
+| [`SiMohand-278M`](https://huggingface.co/agbalu/SiMohand-278M) | sentence embeddings and retrieval | 97.0% Recall@1 against the backbone's 63.8, and the same 97.0 at a 12× compression |
 | [`Amrouche-1.3B`](https://huggingface.co/agbalu/Amrouche-1.3B) | translation | beats NLLB-1.3B in all four directions; eng→kab 36.34 chrF++ |
 | [`Fadhma-300M`](https://huggingface.co/agbalu/Fadhma-300M) | speech recognition | CER 8.01 / WER 25.65 over 888 unseen speakers |
 | [`Belaid-31M`](https://huggingface.co/agbalu/Belaid-31M) | punctuation and casing | macro-F1 0.793 |
+| [`Boulifa-48M`](https://huggingface.co/agbalu/Boulifa-48M) | orthography standardisation | informal → canonical Kabyle Latin; 97.39% character accuracy against 89.70% for leaving the input alone |
+| [`Feraoun-36M`](https://huggingface.co/agbalu/Feraoun-36M) | document OCR, Latin and Tifinagh | CER 2.85% and 70.20% line exact match over 1,000 held-out lines |
 | [`Juba-27M`](https://huggingface.co/agbalu/Juba-27M) | Latin ↔ Tifinagh, with schwa restoration | 94.22% sentence exact match |
 | [`Mammeri-Tok`](https://huggingface.co/agbalu/Mammeri-Tok) | tokenizer | ten vocabularies, 8k–32k |
+| [`Matoub-82M`](https://huggingface.co/agbalu/Matoub-82M) | speech synthesis (preview) | First neural TTS for Kabyle — 24 kHz, StyleTTS2, 42-symbol IPA inventory, male voice |
 
 | Dataset | |
 |---|---|
@@ -39,6 +45,9 @@ Every model loads with `transformers` and `torch` alone, without this repository
 | [`KabInflect`](https://huggingface.co/datasets/agbalu/KabInflect) | 336,151 inflected forms over 6,198 paradigms |
 | [`KabTifinagh`](https://huggingface.co/datasets/agbalu/KabTifinagh) | 497,944 script-conversion pairs |
 | [`KabSentiment`](https://huggingface.co/datasets/agbalu/KabSentiment) | 15,000 rows, three balanced classes |
+| [`KabPunct`](https://huggingface.co/datasets/agbalu/KabPunct) | 1,318,707 word-labelled sentences for punctuation and casing restoration |
+| [`KabG2P`](https://huggingface.co/datasets/agbalu/KabG2P) | 25,634 word forms with IPA transcriptions |
+| [`KabStandard`](https://huggingface.co/datasets/agbalu/KabStandard) | 497,944 pairs, informal → canonical Kabyle Latin (training data for Boulifa-48M) |
 
 Weights are Apache-2.0. Text keeps its upstream licences, so each card carries the licence
 composition of the data behind it, the decontamination result, and the defects that are not

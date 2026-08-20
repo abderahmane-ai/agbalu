@@ -116,7 +116,25 @@ on test — because the rule degrades faster on multi-sentence text than the mod
 numbers are reported because a model evaluated only in its training domain has not been
 evaluated.
 
+## Intended use
+
+Putting punctuation and capitals back onto text that has none: the output of
+[`Fadhma-300M`](https://huggingface.co/agbalu/Fadhma-300M) or any other Kabyle speech
+recogniser, subtitle and caption tracks, and lowercased corpus text being prepared for
+reading rather than for training.
+
+**One utterance at a time is what it was fitted on.** The training split is Common Voice,
+where every record is a single sentence, and that is the shape the 0.793 above measures.
+
+**Not suitable for**: segmenting a paragraph or a book page into sentences — it restores
+marks, not boundaries, and the out-of-domain numbers above are what that costs; any decision
+about a person; or any language other than Kabyle.
+
 ## Usage
+
+`transformers` and `torch`, nothing else. The architecture is not one of the library's own,
+so the modelling code travels in this repository and `trust_remote_code=True` is what loads
+it.
 
 ```python
 from transformers import AutoModelForTokenClassification, AutoTokenizer
@@ -132,11 +150,12 @@ model.restore(["ur zmireɣ ara ad d-aseɣ assa", "anida i tedduḍ a yelli"], to
 
 `restore` takes a string or a list and is the interface. Calling the model directly returns
 `punctuation_logits` and `case_logits`, both `[batch, subwords, classes]` — but the labels are
-per **word** while the model sees subwords, so the alignment inside `restore` is what makes them
-mean anything. Reimplement it only deliberately.
+per **word** while the model sees subwords, so the alignment inside `restore` is what makes
+them mean anything. Reimplement it only deliberately.
 
-`trust_remote_code=True` is required: the architecture is not native to `transformers` and the
-modelling code ships in this repository.
+**Normalise the input first.** The vocabulary is Mammeri-16k, built over text where `ɛ` is
+U+025B and never Greek epsilon; homoglyph-corrupted text fragments into byte pieces and the
+labels degrade with it.
 
 ## Label scheme
 
@@ -283,11 +302,24 @@ He sits beside [`Fadhma-300M`](https://huggingface.co/agbalu/Fadhma-300M) by des
 Mansour Amrouche wrote down the songs she had inherited, and Belaïd made Kabyle a written prose
 language. One recovers the words; the other renders them as writing.
 
-## Licence and citation
+## Citation
 
-Apache-2.0 on the weights, for the patent grant. A permissive grant on weights does not
-relicense the text they were trained on: over AƔBALU-Text v1's 3,041,989 sentences the
-composition is unclear 34.9%, permissive 32.0%, share-alike 31.0%, non-commercial 2.0%.
+```bibtex
+@software{agbalu_belaid_2026,
+  title  = {Belaid-31M: punctuation and casing restoration for Kabyle},
+  author = {AƔBALU},
+  year   = {2026},
+  url    = {https://huggingface.co/agbalu/Belaid-31M},
+  note   = {Two token-classification heads over Masinissa-31M; macro-F1 0.793 over marks}
+}
+```
+
+## Licence
+
+**Apache-2.0** on the weights and the code, for the patent grant. A permissive grant on
+weights does not relicense the text they were trained on: over AƔBALU-Text v1's 3,041,989
+sentences the composition is unclear 34.9%, permissive 32.0%, share-alike 31.0%,
+non-commercial 2.0%.
 
 Part of [AƔBALU](https://huggingface.co/agbalu), a Kabyle corpus and model collection. The
 naming is homage.

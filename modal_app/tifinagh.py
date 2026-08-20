@@ -236,7 +236,7 @@ def _save(directory: Path, payload: dict[str, object], name: str) -> None:
     timeout=TRAIN_TIMEOUT,
     retries=RETRIES,
 )
-def tifinagh_train(  # noqa: PLR0915
+def tifinagh_train(
     run: str = DEFAULT_RUN, max_steps: int = 0, force: bool = False
 ) -> dict[str, object]:
     """Fit the model, resuming from `latest.pt` if the run directory holds one.

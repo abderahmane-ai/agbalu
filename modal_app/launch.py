@@ -52,7 +52,16 @@ FUNCTIONS: Final = (
     "tts_corpus",
     "matoub_train",
     "jugurtha_train",
+    "simohand_prepare",
+    "simohand_train",
+    "simohand_eval",
+    "boulifa_prepare",
+    "boulifa_train",
+    "feraoun_train",
+    "feraoun_smoke",
 )
+
+
 """The long-running functions. Each outlives any client, so each is spawned, never run —
 synthesis included, because a full pivot pass is an hour of generation and `modal run`
 would end it with the laptop, and `asr_finetune` because ten epochs is about seventeen.
@@ -274,9 +283,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--batch",
+        "--batch-size",
         type=int,
         default=0,
-        help="matoub_train: examples per step, 0 taking the default. Smoke it before a run",
+        help="examples per step, 0 taking the default",
     )
     parser.add_argument("--file", default="", help="mt_predict: the document to translate")
     parser.add_argument("--direction", default="eng-kab", help="mt_predict: translation direction")
@@ -297,6 +307,16 @@ def main(argv: list[str] | None = None) -> int:
         help="synthesise: keep only sentences both teachers translated",
     )
     parser.add_argument("--freeze", action="store_true", help="finetune: freeze the embeddings")
+    parser.add_argument(
+        "--max-lines", "--lines", type=int, default=0, help="feraoun_train: max lines"
+    )
+    parser.add_argument("--lr", type=float, default=0.0, help="learning rate override")
+    parser.add_argument(
+        "--tifinagh-ratio",
+        type=float,
+        default=0.0,
+        help="feraoun_train: ratio of Tifinagh lines for dual-script CPT (e.g. 0.25)",
+    )
     args = parser.parse_args(argv)
 
     if args.cancel:
@@ -439,6 +459,58 @@ def _matoub_kwargs(args: argparse.Namespace) -> dict[str, object]:
     }
 
 
+def _simohand_prepare_kwargs(args: argparse.Namespace) -> dict[str, object]:
+    return {"force": args.force}
+
+
+def _simohand_kwargs(args: argparse.Namespace) -> dict[str, object]:
+    return {
+        "run_name": args.run_name if args.run_name != DEFAULT_RUN_NAME else "simohand-base-v1",
+        "epochs": args.epochs or 3,
+        "max_steps": args.steps or 0,
+        "limit": args.limit or 0,
+        "batch_size": args.batch or 64,
+        "force": args.force,
+    }
+
+
+def _simohand_eval_kwargs(args: argparse.Namespace) -> dict[str, object]:
+    return {
+        "run_name": args.run_name if args.run_name != DEFAULT_RUN_NAME else "simohand-base-v1",
+        "limit": args.limit or 0,
+    }
+
+
+def _boulifa_prepare_kwargs(args: argparse.Namespace) -> dict[str, object]:
+    return {"limit": args.limit or 0}
+
+
+def _boulifa_kwargs(args: argparse.Namespace) -> dict[str, object]:
+    return {
+        "epochs": args.epochs or 3,
+        "batch_size": args.batch or 64,
+        "limit": args.limit or 0,
+    }
+
+
+def _feraoun_kwargs(args: argparse.Namespace) -> dict[str, object]:
+    return {
+        "run_name": args.run_name if args.run_name != DEFAULT_RUN_NAME else "feraoun-36m-v1",
+        "epochs": args.epochs or 5,
+        "batch_size": args.batch or 32,
+        "lr": args.lr or 3e-4,
+        "max_lines": args.max_lines or 100_000,
+        "resume_from": args.resume_from or args.checkpoint or None,
+        "tifinagh_ratio": args.tifinagh_ratio or 0.0,
+    }
+
+
+def _feraoun_smoke_kwargs(_args: argparse.Namespace) -> dict[str, object]:
+    return {
+        "run_name": "feraoun-smoke",
+    }
+
+
 KWARGS: Final[dict[str, Callable[[argparse.Namespace], dict[str, object]]]] = {
     "finetune": _mt_finetune_kwargs,
     "mt_predict": _document_kwargs,
@@ -454,7 +526,16 @@ KWARGS: Final[dict[str, Callable[[argparse.Namespace], dict[str, object]]]] = {
     "jugurtha_train": _jugurtha_kwargs,
     "tts_corpus": _tts_kwargs,
     "matoub_train": _matoub_kwargs,
+    "simohand_prepare": _simohand_prepare_kwargs,
+    "simohand_train": _simohand_kwargs,
+    "simohand_eval": _simohand_eval_kwargs,
+    "boulifa_prepare": _boulifa_prepare_kwargs,
+    "boulifa_train": _boulifa_kwargs,
+    "feraoun_train": _feraoun_kwargs,
+    "feraoun_smoke": _feraoun_smoke_kwargs,
 }
+
+
 """One builder per spawnable function. A table rather than a chain of branches because the
 two lists must not drift: the test asserts every name in `FUNCTIONS` has an entry, so adding
 a function without its keywords fails locally instead of raising `TypeError` on the worker

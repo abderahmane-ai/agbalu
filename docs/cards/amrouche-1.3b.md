@@ -93,6 +93,9 @@ corpus or the output.
 
 ## Usage
 
+`transformers` and `torch`. The architecture is `M2M100ForConditionalGeneration`, one of the
+library's own, so no `trust_remote_code` is needed — but the vocabulary is not the base's.
+
 **This model has a trimmed vocabulary, so `from_pretrained` alone is not enough.** The
 embedding was cut to the 52,209 tokens the fine-tuning corpus uses, while the tokenizer
 shipped beside it still speaks NLLB's full 256,206. Ids must be translated in both
@@ -144,11 +147,28 @@ token, the generated ids on the way back, and `unk` itself. Language codes are N
 Special tokens are unaffected: ids 0–49 map to themselves, so `<s>`, `<pad>`, `</s>` and
 `<unk>` keep their usual values.
 
-## Training
+## Architecture
+
+`M2M100ForConditionalGeneration`, the base's own, with one thing changed: the embedding.
 
 | | |
 |---|---|
+| Parameters | **1,161,745,408** |
 | Base | `facebook/nllb-200-distilled-1.3B` |
+| Encoder / decoder layers | 24 / 24 |
+| Hidden / feed-forward | 1,024 / 8,192, ReLU |
+| Attention heads | 16 encoder, 16 decoder |
+| Positions | sinusoidal, 1,024 maximum |
+| Vocabulary | **52,209** of the base's 256,206, tied input and output |
+
+**The trim is the only architectural change and it is the one a caller has to know about.**
+Dropping 203,997 unused rows removes 0.84 GB of embedding that this corpus never addresses,
+and it means the shipped tokenizer's ids are not the model's — see Usage above.
+
+## Training recipe
+
+| | |
+|---|---|
 | Corpus | **544,729 pairs → 1,089,458 examples** (train 1,085,458 / dev 4,000), all four directions |
 | Selection | everything NLLB did not mine, minus 7,805 hard-defect pairs |
 | Recipe | published, arXiv 2602.04442 — effective batch 2,048, lr 2e-4, 2 epochs |
@@ -194,13 +214,27 @@ bitext.
 model behaves on speech transcripts, dialogue, or the localisation strings that make up a
 sixth of the training corpus.
 
-## Licence composition of the training text
+## Files
 
-The weights are Apache-2.0. That grant does not relicense the text they were trained on. By
-licence, the 5.56M-pair parallel corpus this fine-tuning set was drawn from is: `unclear`
-4,871,469 pairs, permissive 376,389, non-commercial 297,058, share-alike 16,710. The
-`unclear` bulk — not the non-commercial slice — is the real redistribution risk, and it is
-published here rather than left for someone to discover.
+| file | contents |
+|---|---|
+| `model.safetensors` | 4.65 GB, 1,161,745,408 parameters |
+| `config.json` | the architecture, with `vocab_size` 52,209 |
+| `generation_config.json` | the base's decoder start, pad and eos ids |
+| `keep.json` | **the trim table** — the 52,209 base ids this vocabulary kept, in order. Without it the tokenizer and the model disagree |
+| `tokenizer.json`, `tokenizer_config.json` | NLLB's own tokenizer, unmodified, all 256,206 pieces |
+
+**The tokenizer is deliberately untrimmed.** Cutting it too would break every NLLB language
+code and the `src_lang` machinery that selects them; the mapping belongs in `keep.json`, where
+a caller can see it.
+
+## Reproduction
+
+```bash
+make mt TASK=corpus                    # build the non-mined parallel corpus
+make modal-mt-train                    # trim, then fine-tune detached on one A10
+make modal-bench-mt WEIGHTS=<path>     # score all four directions
+```
 
 ## The name
 
@@ -232,5 +266,10 @@ affiliated with this work.
 ## Licence
 
 **Apache-2.0** for the weights. NLLB-200 itself is CC-BY-NC-4.0; check the base model's terms
-for your use case, and read the training-text composition above before redistributing
-derivatives.
+for your use case.
+
+That grant does not relicense the text the weights were trained on. By licence, the
+5.56M-pair parallel corpus this fine-tuning set was drawn from is `unclear` 4,871,469 pairs,
+permissive 376,389, non-commercial 297,058, share-alike 16,710. **The `unclear` bulk, not the
+non-commercial slice, is the redistribution risk** — `unclear` is the absence of a resolvable
+licence, not a permissive one. It is stated here rather than left for someone to discover.

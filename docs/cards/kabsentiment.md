@@ -72,6 +72,30 @@ Each record:
 | `confidence_score` | float | classifier probability for the assigned class, ≥ 0.85 |
 | `source` | string | provenance marker |
 
+## Usage
+
+```python
+from datasets import load_dataset
+
+train = load_dataset("agbalu/KabSentiment", split="train")
+dev   = load_dataset("agbalu/KabSentiment", split="dev")
+test  = load_dataset("agbalu/KabSentiment", split="test")
+
+train[0]
+# {'id': 'kab_sent_train_00000', 'text_kab': 'Ifukal-nwen ur sɛin ara lsas.',
+#  'text_en': 'Your argument is unfounded.', 'label': 0, 'label_name': 'negative',
+#  'confidence_score': 0.838, 'source': 'tatoeba_roberta_labeled'}
+```
+
+`label` is 0 negative, 1 neutral, 2 positive, and `label_name` carries the same thing as a
+string. `text_en` is the English sentence the label was projected from — **train on
+`text_kab`**; `text_en` is there so the projection can be audited, not so the two can be
+mixed.
+
+**`confidence_score` is the English classifier's, not a human's.** Filtering on it selects
+sentences the projection was surer about; it does not select sentences a Kabyle speaker
+would agree with.
+
 ## Curation
 
 ### Source text

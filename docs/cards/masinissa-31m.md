@@ -273,8 +273,9 @@ The source checkpoint is `best.pt`, SHA-256
 architecture above with zero missing and zero unexpected keys.
 
 The POS numbers reproduce exactly. Head initialisation is seeded per-layer with an explicit
-generator, so two fits of the same frozen checkpoint are bit-identical — an earlier version
-seeded only the batch order, and the reported accuracy moved by up to 0.5 points per refit.
+generator, so two fits of the same frozen checkpoint are bit-identical. Seeding only the
+batch order is not enough: it leaves the reported accuracy moving by up to 0.5 points per
+refit.
 
 ```
 python -m agbalu.bench.cli pos --systems encoder neural lexicon baseline

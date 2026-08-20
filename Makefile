@@ -16,7 +16,7 @@ cli = $(PY) -m agbalu.$(1).cli
 deploy = modal deploy -m modal_app.$(1)
 
 help: ## Show this help
-	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 install: ## Editable install with dev extras
 	$(PY) -m pip install -e ".[dev]"
@@ -126,18 +126,43 @@ tifinagh: ## Script conversion with Juba-27M. TASK=convert TEXT="ⴰⵣⵓⵍ"|e
 		$(if $(TEXT),--text "$(TEXT)",) $(if $(SPLIT),--split $(SPLIT),) \
 		$(if $(LIMIT),--limit $(LIMIT),)
 
+embed: ## SiMohand sentence embeddings. TASK=coverage|corpus
+	$(call cli,embed) $(or $(TASK),coverage)
+
+# Training is not here: nothing in this project trains locally. `make modal-ocr` is the
+# path, and `evaluate` is what produces the number the card carries.
+ocr: ## Feraoun-36M OCR, GPU-free. TASK=generate|evaluate|infer (IMAGE=path)|transcribe-book (BOOK=dir). INPUT OUTPUT LINES BATCH RATIO DEVICE CHECKPOINT PAGE=1
+	$(call cli,ocr) $(or $(TASK),evaluate) \
+		$(if $(INPUT),--input $(INPUT),) $(if $(OUTPUT),--output $(OUTPUT),) \
+		$(if $(LINES),--lines $(LINES),) $(if $(BATCH),--batch-size $(BATCH),) \
+		$(if $(RATIO),--tifinagh-ratio $(RATIO),) $(if $(DEVICE),--device $(DEVICE),) \
+		$(if $(IMAGE),--image $(IMAGE),) $(if $(PAGE),--page,) \
+		$(if $(CHECKPOINT),--checkpoint $(CHECKPOINT),) \
+		$(if $(BOOK),--book-dir $(BOOK),)
+
+standardise: ## Boulifa-48M, GPU-free. TASK=standardise TEXT="achimi..."|evaluate. LIMIT BATCH CHECKPOINT
+	$(call cli,standardise) $(or $(TASK),evaluate) \
+		$(if $(TEXT),"$(TEXT)",) $(if $(LIMIT),--limit $(LIMIT),) \
+		$(if $(BATCH),--batch-size $(BATCH),) \
+		$(if $(CHECKPOINT),--checkpoint $(CHECKPOINT),)
+
 RELEASE ?= artifacts/release
+
 CHECKPOINTS ?= artifacts/checkpoints
 
 # Datasets go through one path, because the path is where the checks are: the Hub validates
 # card metadata on *render*, so a bad `task_categories` or `task_ids` publishes silently and
 # is visible only to whoever opens the page. Models are staged per repo, since each has a
 # different weight format.
-DATASET_REPOS := bench lex sentiment inflect tifinagh
+DATASET_REPOS := bench lex sentiment inflect tifinagh punct g2p
 MODEL_REPOS := encoder tokenizer mt juba
 REPOS := $(MODEL_REPOS) $(DATASET_REPOS) org
 
-release: $(addprefix release-,$(or $(REPO),$(REPOS))) ## Stage repos under $(RELEASE). REPO=encoder|tokenizer|mt|juba|fadhma|belaid|bench|lex|sentiment|inflect|tifinagh|org
+# Out of the default set on purpose: each needs a checkpoint pulled off a volume first, so
+# `make release` with no REPO would fail on whichever one this machine has not pulled.
+PULLED_REPOS := fadhma belaid boulifa matoub simohand feraoun kabstandard
+
+release: $(addprefix release-,$(or $(REPO),$(REPOS))) ## Stage repos under artifacts/release. REPO=encoder|tokenizer|mt|juba|bench|lex|sentiment|inflect|tifinagh|punct|g2p|org, or fadhma|belaid|boulifa|matoub|simohand|feraoun|kabstandard once pulled
 	@echo 'staged under $(RELEASE) — review, then push each with: hf upload <repo> <dir> .'
 
 $(addprefix release-,$(DATASET_REPOS)): release-%:
@@ -146,7 +171,23 @@ $(addprefix release-,$(DATASET_REPOS)): release-%:
 release-org:
 	@mkdir -p $(RELEASE)/org-README
 	@cp docs/cards/organization.md $(RELEASE)/org-README/README.md
-	@echo '$(RELEASE)/org-README -> hf upload agbalu/README $(RELEASE)/org-README . --repo-type=space'
+	@echo "Staged $(RELEASE)/org-README/README.md"
+
+# `hf upload` can never update a Space — it calls `api/repos/create` unconditionally and
+# 402s even against an existing public one — so the org card goes through `upload_file`,
+# which does not re-create. MESSAGE is a variable because a commit message describing one
+# release is wrong for the next.
+ORG_MESSAGE ?= Update organization README
+push-org: release-org ## Upload the organization card to the agbalu Space. MESSAGE="..."
+	@$(PY) -c "\
+from huggingface_hub import HfApi;\
+print('Uploaded:', HfApi().upload_file(\
+    path_or_fileobj='$(RELEASE)/org-README/README.md',\
+    path_in_repo='README.md',\
+    repo_id='agbalu/README',\
+    repo_type='space',\
+    commit_message='$(ORG_MESSAGE)',\
+))"
 
 # `stage_hub` second, always: neither architecture is native to transformers, so without
 # the standalone modelling code and the `auto_map` beside them the weights publish with
@@ -202,9 +243,146 @@ release-tokenizer:
 	@cp docs/cards/mammeri-tok.md $(RELEASE)/Mammeri-Tok/README.md
 	@echo "$(RELEASE)/Mammeri-Tok: $$(ls $(RELEASE)/Mammeri-Tok | wc -l | tr -d ' ') files"
 
-UPLOADS := corpus bench mt speech llm tts punctuation
+# SiMohand is a native sentence-transformers model — no custom architecture, no stage_hub.
+# The weights are already on disk from `modal volume get`; only the card needs syncing.
+# The name repeats because `modal volume get` recreates the remote directory inside the
+# local target, putting the model at `artifacts/simohand-base-v1/simohand-base-v1/`.
+SIMOHAND_DIR ?= artifacts/simohand-base-v1/simohand-base-v1
+release-simohand:
+	@test -f $(SIMOHAND_DIR)/config.json || \
+		{ echo "no model in $(SIMOHAND_DIR) — pull it first"; exit 1; }
+	@cp docs/cards/simohand-278m.md $(SIMOHAND_DIR)/README.md
+	@echo "$(SIMOHAND_DIR): $$(ls $(SIMOHAND_DIR) | wc -l | tr -d ' ') files"
 
-modal-upload: $(addprefix modal-upload-,$(or $(TASK),$(UPLOADS))) ## Push what a container reads off the volumes. TASK=corpus|bench|mt|speech|llm|tts|punctuation|encoder. Tifinagh fetches its own
+# Weights arrive from `make modal-boulifa TASK=pull`. `export_checkpoint` strips the
+# optimizer state, untangles the tied weights and writes model.safetensors + config.json +
+# README.md; `stage_hub` adds the modelling code and refuses a directory that will not load
+# back — the same two steps as Juba-27M.
+release-boulifa:
+	$(PY) -m tools.export_checkpoint \
+		--source artifacts/boulifa/boulifa_best.pt \
+		--out $(RELEASE)/Boulifa-48M \
+		--card docs/cards/boulifa-48m.md
+	$(PY) -m tools.stage_hub --repo boulifa --dir $(RELEASE)/Boulifa-48M
+
+# `pos_encoder.pe` stays in the export: it is a registered buffer, so `from_pretrained`
+# allocates it empty and fills it from the file. Dropped as derived it would come back as
+# uninitialised memory and rotate every position by a garbage angle without raising.
+FERAOUN_RUN ?= feraoun-36m-v1
+release-feraoun:
+	$(PY) -m tools.export_checkpoint \
+		--source artifacts/runs/$(FERAOUN_RUN)/best.pt \
+		--out $(RELEASE)/Feraoun-36M \
+		--card docs/cards/feraoun-36m.md \
+		--extra data/processed/bench/feraoun-v1-heldout.json
+	$(PY) -m tools.stage_hub --repo feraoun --dir $(RELEASE)/Feraoun-36M
+
+release-kabstandard:
+	@mkdir -p $(RELEASE)/KabStandard
+	@cp data/kabstandard/train.jsonl data/kabstandard/dev.jsonl data/kabstandard/test.jsonl \
+		$(RELEASE)/KabStandard/
+	@cp docs/cards/kabstandard.md $(RELEASE)/KabStandard/README.md
+	@echo "$(RELEASE)/KabStandard: $$(ls $(RELEASE)/KabStandard | wc -l | tr -d ' ') files"
+
+MATOUB_EPOCH ?= epoch_2nd_00003
+modal-matoub-pull:
+	@mkdir -p artifacts/matoub
+	modal volume get --force agbalu-checkpoints \
+		/tts/matoub/logs/kab_male/$(MATOUB_EPOCH).pth artifacts/matoub/$(MATOUB_EPOCH).pth
+
+# The one release that ships a training checkpoint rather than an export, because StyleTTS2
+# has no `save_pretrained` and its loader keys on the recipe's own component names. The card
+# says so: the file carries optimizer state and is larger than the weights alone.
+release-matoub:
+	@mkdir -p $(RELEASE)/Matoub-82M
+	@cp artifacts/matoub/$(MATOUB_EPOCH).pth $(RELEASE)/Matoub-82M/$(MATOUB_EPOCH).pth
+	@cp src/agbalu/hub/matoub/inference.py $(RELEASE)/Matoub-82M/inference.py
+	@cp docs/cards/matoub-82m.md $(RELEASE)/Matoub-82M/README.md
+	@echo "$(RELEASE)/Matoub-82M: $$(ls $(RELEASE)/Matoub-82M | wc -l | tr -d ' ') files"
+
+# One push target with a variable, not one per repository. The table is the only place a
+# staged directory is paired with the repository it belongs in; two copies of that pairing
+# is how a directory gets published under the wrong name.
+CARDS := docs/cards
+HF_bench       := datasets agbalu/KabBench       $(RELEASE)/KabBench      $(CARDS)/kabbench.md
+HF_lex         := datasets agbalu/KabLex         $(RELEASE)/KabLex        $(CARDS)/kablex.md
+HF_sentiment   := datasets agbalu/KabSentiment   $(RELEASE)/KabSentiment  $(CARDS)/kabsentiment.md
+HF_inflect     := datasets agbalu/KabInflect     $(RELEASE)/KabInflect    $(CARDS)/kabinflect.md
+HF_tifinagh    := datasets agbalu/KabTifinagh    $(RELEASE)/KabTifinagh   $(CARDS)/kabtifinagh.md
+HF_punct       := datasets agbalu/KabPunct       $(RELEASE)/KabPunct      $(CARDS)/kabpunct.md
+HF_g2p         := datasets agbalu/KabG2P         $(RELEASE)/KabG2P        $(CARDS)/kabg2p.md
+HF_kabstandard := datasets agbalu/KabStandard    $(RELEASE)/KabStandard   $(CARDS)/kabstandard.md
+HF_encoder     := models   agbalu/Masinissa-31M  $(RELEASE)/Masinissa-31M $(CARDS)/masinissa-31m.md
+HF_tokenizer   := models   agbalu/Mammeri-Tok    $(RELEASE)/Mammeri-Tok   $(CARDS)/mammeri-tok.md
+HF_mt          := models   agbalu/Amrouche-1.3B  $(RELEASE)/Amrouche-1.3B $(CARDS)/amrouche-1.3b.md
+HF_juba        := models   agbalu/Juba-27M       $(RELEASE)/Juba-27M      $(CARDS)/juba-27m.md
+HF_fadhma      := models   agbalu/Fadhma-300M    $(RELEASE)/Fadhma-300M   $(CARDS)/fadhma-300m.md
+HF_belaid      := models   agbalu/Belaid-31M     $(RELEASE)/Belaid-31M    $(CARDS)/belaid-31m.md
+HF_boulifa     := models   agbalu/Boulifa-48M    $(RELEASE)/Boulifa-48M   $(CARDS)/boulifa-48m.md
+HF_matoub      := models   agbalu/Matoub-82M     $(RELEASE)/Matoub-82M    $(CARDS)/matoub-82m.md
+HF_feraoun     := models   agbalu/Feraoun-36M    $(RELEASE)/Feraoun-36M   $(CARDS)/feraoun-36m.md
+HF_simohand    := models   agbalu/SiMohand-278M  $(SIMOHAND_DIR)          $(CARDS)/simohand-278m.md
+
+ALL_REPOS := bench lex sentiment inflect tifinagh punct g2p kabstandard encoder tokenizer \
+	mt juba fadhma belaid boulifa matoub feraoun simohand
+
+# Restaged first, always: `artifacts/release/` is git-ignored scratch and goes stale
+# silently, so a push from whatever is already there can un-publish correct live text.
+push: ## Restage and upload one repo. REPO=<any name `make release` takes>. Needs `hf auth login`
+	@test -n "$(REPO)" || { echo "REPO= is required, e.g. make push REPO=feraoun"; exit 1; }
+	@test -n "$(HF_$(REPO))" || { echo "no Hub repository registered for REPO=$(REPO)"; exit 1; }
+	$(MAKE) release-$(REPO)
+	hf upload $(word 2,$(HF_$(REPO))) $(word 3,$(HF_$(REPO))) . \
+		--repo-type=$(patsubst %s,%,$(word 1,$(HF_$(REPO))))
+	@echo "pushed $(word 2,$(HF_$(REPO))) — now diff the deployed card against docs/cards/"
+
+# One file per repository, straight from `docs/cards/`. A card change needs no restaging and
+# no weights: `make push REPO=mt` would re-upload 4.65 GB to correct a paragraph. Every
+# upload is followed by reading the deployed file back and diffing it against its source,
+# because a push that silently kept the old text looks exactly like a push that worked.
+# The org profile is a Space, and `hf upload` cannot update one — it calls `repos/create`
+# unconditionally and 402s against an existing Space — so it goes through `push-org`, which
+# uses `upload_file`. Included here only for a full run, not for a single `REPO=`.
+push-cards: $(addprefix push-card-,$(or $(REPO),$(ALL_REPOS))) ## Upload every card as its repo's README.md and verify each. REPO=<one name> for one
+ifeq ($(REPO),)
+	@$(MAKE) --no-print-directory push-org
+endif
+	@echo "every card uploaded and read back identical to docs/cards/"
+
+hub_url = https://huggingface.co/$(if $(filter datasets,$(word 1,$(HF_$(1)))),datasets/,)$(word 2,$(HF_$(1)))
+
+push-card-%:
+	@test -f $(word 4,$(HF_$*)) || { echo "no card at $(word 4,$(HF_$*))"; exit 1; }
+	@hf upload $(word 2,$(HF_$*)) $(word 4,$(HF_$*)) README.md \
+		--repo-type=$(patsubst %s,%,$(word 1,$(HF_$*))) >/dev/null
+	@curl -sfL $(call hub_url,$*)/resolve/main/README.md | diff -q - $(word 4,$(HF_$*)) >/dev/null \
+		&& echo "  $(word 2,$(HF_$*)) matches $(word 4,$(HF_$*))" \
+		|| { echo "  MISMATCH: $(word 2,$(HF_$*)) does not match $(word 4,$(HF_$*))"; exit 1; }
+
+infer-matoub: ## Synthesise, pull the wav and play it. TEXT="Azul..." VOICE STAGE CHECKPOINT OUT
+	$(PY) -m tools.infer_matoub $(if $(TEXT),--text "$(TEXT)",) $(if $(VOICE),--voice "$(VOICE)",) \
+		$(if $(STAGE),--stage "$(STAGE)",) $(if $(CHECKPOINT),--checkpoint "$(CHECKPOINT)",) \
+		$(if $(OUT),--out "$(OUT)",)
+
+modal-boulifa: modal-boulifa-$(or $(TASK),train) ## Boulifa-48M. TASK=prepare (CPU, builds KabStandard)|train (spawned)|pull. EPOCHS BATCH LIMIT
+
+modal-boulifa-prepare:
+	modal run -m modal_app.boulifa::boulifa_prepare $(if $(LIMIT),--limit $(LIMIT),)
+
+modal-boulifa-train:
+	$(call deploy,boulifa)
+	$(PY) -m modal_app.launch --function boulifa_train \
+		$(if $(EPOCHS),--epochs $(EPOCHS),) $(if $(BATCH),--batch $(BATCH),) \
+		$(if $(LIMIT),--limit $(LIMIT),)
+
+modal-boulifa-pull:
+	@mkdir -p artifacts/boulifa
+	modal volume get --force agbalu-checkpoints \
+		/boulifa/boulifa_best.pt artifacts/boulifa/boulifa_best.pt
+
+UPLOADS := corpus bench mt speech llm tts punctuation ocr embed
+
+modal-upload: $(addprefix modal-upload-,$(or $(TASK),$(UPLOADS))) ## Push what a container reads off the volumes. TASK=corpus|bench|mt|speech|llm|tts|punctuation|ocr|embed|encoder. Tifinagh fetches its own
 
 modal-upload-corpus:
 	modal run -m modal_app.train::upload_corpus
@@ -231,6 +409,12 @@ modal-upload-encoder:
 
 modal-upload-tts:
 	modal run -m modal_app.tts::upload_tts
+
+modal-upload-embed:
+	modal run -m modal_app.simohand::upload_embed
+
+modal-upload-ocr:
+	modal run -m modal_app.ocr::upload_ocr
 
 modal-train: ## Deploy, start the run, and tail it. COMPILE=1 RESUME=best START=n STEPS=n FORCE=1
 	$(call deploy,train)
@@ -308,8 +492,7 @@ modal-tts-corpus:
 modal-tts-pull:
 	modal run -m modal_app.tts::pull_corpus $(if $(LIMIT),--limit $(LIMIT),)
 
-modal-matoub: modal-matoub-$(or $(TASK),prepare) ## Task 12.6 — Kokoro fine-tune. TASK=prepare (CPU, no GPU)|stage1|stage2. ARM=restored|raw VOICE=kab_male|kab_female (stage2) LIMIT=<n> smokes EPOCHS FROM=<stage1 epoch> MAXLEN=<frames, the OOM lever> BATCH=<examples/step> FORCE
-	@:
+modal-matoub: modal-matoub-$(or $(TASK),prepare) ## Task 12.6 — Kokoro fine-tune. TASK=prepare (CPU, no GPU)|stage1|stage2|infer|pull. ARM=restored|raw VOICE=kab_male|kab_female (stage2) LIMIT=<n> smokes EPOCHS FROM=<stage1 epoch> MAXLEN=<frames, the OOM lever> BATCH=<examples/step> FORCE
 
 modal-matoub-prepare:
 	modal run -m modal_app.matoub::matoub_prepare $(if $(ARM),--arm $(ARM),) \
@@ -337,6 +520,12 @@ modal-matoub-infer:
 		$(if $(STAGE),--stage $(STAGE),) $(if $(CHECKPOINT),--checkpoint $(CHECKPOINT),) \
 		$(if $(LIMIT),--limit $(LIMIT),)
 
+modal-simohand: ## SiMohand sentence embeddings on Modal. TASK=prepare|train|eval. RUN EPOCHS STEPS LIMIT BATCH FORCE
+	$(call deploy,simohand)
+	$(PY) -m modal_app.launch --function simohand_$(or $(TASK),train) \
+		$(if $(RUN),--run-name $(RUN),) $(if $(EPOCHS),--epochs $(EPOCHS),) \
+		$(if $(STEPS),--steps $(STEPS),) $(if $(LIMIT),--limit $(LIMIT),) \
+		$(if $(BATCH),--batch $(BATCH),) $(if $(FORCE),--force,)
 
 modal-tifinagh: ## Juba-27M on GPU — deploy, spawn, tail. TASK=train|evaluate. RUN STEPS SPLIT LIMIT FORCE
 	$(call deploy,tifinagh)
@@ -351,6 +540,25 @@ modal-punctuation: ## Punctuation and casing on GPU — deploy, spawn, tail. TAS
 		$(if $(RUN),--run-name $(RUN),) $(if $(EPOCHS),--epochs $(EPOCHS),) \
 		$(if $(SPLIT),--split $(SPLIT),) $(if $(CHECKPOINT),--checkpoint $(CHECKPOINT),) \
 		$(if $(FORCE),--force,)
+
+# RATIO is the dual-script lever: 0.0 trains Latin only, 0.50 the 50/50 Latin+Tifinagh
+# continuation the release was cut from. Every default lives in `_feraoun_kwargs`, so there
+# is no second target restating them.
+modal-ocr: ## Feraoun-36M on GPU — deploy, spawn, tail. TASK=train|smoke. RUN EPOCHS BATCH LR LINES RESUME RATIO
+	$(call deploy,ocr)
+	$(PY) -m modal_app.launch --function feraoun_$(or $(TASK),train) \
+		$(if $(RUN),--run-name $(RUN),) $(if $(EPOCHS),--epochs $(EPOCHS),) \
+		$(if $(BATCH),--batch-size $(BATCH),) $(if $(LR),--lr $(LR),) \
+		$(if $(LINES),--max-lines $(LINES),) $(if $(RESUME),--resume-from $(RESUME),) \
+		$(if $(RATIO),--tifinagh-ratio $(RATIO),)
+
+# `modal volume get`, as every other pull here does: a 415 MB checkpoint does not travel
+# through a function's return value, and `modal run`'s stdout carries the log stream.
+modal-ocr-pull: ## Copy the Feraoun checkpoint off the volume. RUN=feraoun-36m-v1
+	@mkdir -p artifacts/runs/$(or $(RUN),$(FERAOUN_RUN))
+	modal volume get --force agbalu-checkpoints \
+		/feraoun/$(or $(RUN),$(FERAOUN_RUN))/best.pt \
+		artifacts/runs/$(or $(RUN),$(FERAOUN_RUN))/best.pt
 
 modal-sentiment: ## Phase 7 sentiment on GPU. TASK=benchmark scores the encoder; TASK=build relabels from Tatoeba
 	$(call deploy,sentiment)

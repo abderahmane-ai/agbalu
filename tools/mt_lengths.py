@@ -104,7 +104,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if not TRAIN.is_file():
-        message = f"{TRAIN} is missing; run `make mt-data` first"
+        message = f"{TRAIN} is missing; run `make mt TASK=corpus` first"
         raise SystemExit(message)
 
     for key, value in measure(args.sample, args.micro, args.accum).items():

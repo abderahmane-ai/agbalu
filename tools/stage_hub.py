@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Final, Literal
 if TYPE_CHECKING:
     from transformers import PreTrainedTokenizerFast
 
-Repo = Literal["belaid", "juba", "masinissa"]
+Repo = Literal["belaid", "boulifa", "feraoun", "juba", "masinissa"]
 
 HUB: Final = Path("src/agbalu/hub")
 
@@ -45,6 +45,14 @@ AUTO_MAP: Final[dict[Repo, dict[str, str]]] = {
         "AutoConfig": "configuration_belaid.BelaidConfig",
         "AutoModelForTokenClassification": "modeling_belaid.BelaidForTokenClassification",
     },
+    "boulifa": {
+        "AutoConfig": "configuration_boulifa.BoulifaConfig",
+        "AutoModelForSeq2SeqLM": "modeling_boulifa.BoulifaForSeq2SeqLM",
+    },
+    "feraoun": {
+        "AutoConfig": "configuration_feraoun.FeraounConfig",
+        "AutoModel": "modeling_feraoun.FeraounForVision2Seq",
+    },
     "juba": {
         "AutoConfig": "configuration_juba.JubaConfig",
         "AutoModelForSeq2SeqLM": "modeling_juba.JubaForSeq2SeqLM",
@@ -58,6 +66,8 @@ AUTO_MAP: Final[dict[Repo, dict[str, str]]] = {
 
 ARCHITECTURES: Final[dict[Repo, str]] = {
     "belaid": "BelaidForTokenClassification",
+    "boulifa": "BoulifaForSeq2SeqLM",
+    "feraoun": "FeraounForVision2Seq",
     "juba": "JubaForSeq2SeqLM",
     "masinissa": "MasinissaForMaskedLM",
 }
@@ -68,6 +78,63 @@ PIECE_REPOS: Final[frozenset[Repo]] = frozenset({"belaid", "masinissa"})
 
 class StagingError(Exception):
     """A directory that would not load on a machine without this repository."""
+
+
+def build_boulifa_tokenizer() -> PreTrainedTokenizerFast:
+    """Boulifa's 128-character inventory as a `tokenizer.json`."""
+    from tokenizers import Regex, Tokenizer, decoders, models, pre_tokenizers
+    from tokenizers import processors as tokenizer_processors
+    from transformers import PreTrainedTokenizerFast
+
+    from agbalu.standardise.tokenizer import Tokenizer as StandardTokenizer
+
+    reference = StandardTokenizer.build()
+    backend = Tokenizer(models.WordLevel(vocab=dict(reference.char_to_id), unk_token="<unk>"))
+    backend.pre_tokenizer = pre_tokenizers.Split(Regex(r"[\s\S]"), behavior="isolated")
+    backend.post_processor = tokenizer_processors.TemplateProcessing(
+        single="<s> $A </s>",
+        pair="<s>:0 $A:0 </s>:0 <s>:1 $B:1 </s>:1",
+        special_tokens=[("<s>", reference.bos_id), ("</s>", reference.eos_id)],
+    )
+    backend.decoder = decoders.Fuse()
+    return PreTrainedTokenizerFast(
+        tokenizer_object=backend,
+        unk_token="<unk>",
+        pad_token="<pad>",
+        bos_token="<s>",
+        eos_token="</s>",
+        model_max_length=512,
+    )
+
+
+def build_feraoun_tokenizer() -> PreTrainedTokenizerFast:
+    """Feraoun's 171-symbol table as a `tokenizer.json`, id for id with `agbalu.ocr`.
+
+    No normalizer: the model is defined over the glyphs on the page, so folding case or
+    stripping a combining mark here would change what a decoded id means.
+    """
+    from tokenizers import Regex, Tokenizer, decoders, models, pre_tokenizers
+    from tokenizers import processors as tokenizer_processors
+    from transformers import PreTrainedTokenizerFast
+
+    from agbalu.ocr.vocabulary import BOS_ID, BOS_TOKEN, EOS_ID, EOS_TOKEN, VOCABULARY
+
+    vocab = {symbol: index for index, symbol in enumerate(VOCABULARY)}
+    backend = Tokenizer(models.WordLevel(vocab=vocab, unk_token="<unk>"))
+    backend.pre_tokenizer = pre_tokenizers.Split(Regex(r"[\s\S]"), behavior="isolated")
+    backend.post_processor = tokenizer_processors.TemplateProcessing(
+        single=f"{BOS_TOKEN} $A {EOS_TOKEN}",
+        special_tokens=[(BOS_TOKEN, BOS_ID), (EOS_TOKEN, EOS_ID)],
+    )
+    backend.decoder = decoders.Fuse()
+    return PreTrainedTokenizerFast(
+        tokenizer_object=backend,
+        unk_token="<unk>",
+        pad_token="<pad>",
+        bos_token=BOS_TOKEN,
+        eos_token=EOS_TOKEN,
+        model_max_length=256,
+    )
 
 
 def build_char_tokenizer() -> PreTrainedTokenizerFast:
@@ -87,7 +154,7 @@ def build_char_tokenizer() -> PreTrainedTokenizerFast:
         ]
     )
     # `[\s\S]` rather than `.`, which does not match a newline.
-    backend.pre_tokenizer = pre_tokenizers.Split(Regex("[\\s\\S]"), behavior="isolated")
+    backend.pre_tokenizer = pre_tokenizers.Split(Regex(r"[\s\S]"), behavior="isolated")
     backend.post_processor = tokenizer_processors.TemplateProcessing(
         single="[BOS] $A [EOS]",
         special_tokens=[("[BOS]", BOS_ID), ("[EOS]", EOS_ID)],
@@ -123,14 +190,14 @@ def build_piece_tokenizer(model_file: Path) -> PreTrainedTokenizerFast:
     backend = Tokenizer(models.Unigram(vocabulary, unk_id=1, byte_fallback=True))
     backend.pre_tokenizer = pre_tokenizers.Sequence(
         [
-            pre_tokenizers.Metaspace(replacement="▁", prepend_scheme="always", split=True),
+            pre_tokenizers.Metaspace(replacement="\u2581", prepend_scheme="always", split=True),
             # `split_digits=True` in the build spec.
             pre_tokenizers.Digits(individual_digits=True),
         ]
     )
     backend.decoder = decoders.Sequence(
         [
-            decoders.Metaspace(replacement="▁", prepend_scheme="always", split=True),
+            decoders.Metaspace(replacement="\u2581", prepend_scheme="always", split=True),
             decoders.ByteFallback(),
             decoders.Fuse(),
             decoders.Strip(content=" ", left=1),
@@ -172,6 +239,8 @@ def write_config(repo: Repo, directory: Path) -> None:
     training summary and the full validation curve, which the card promises are there.
     """
     from agbalu.hub.belaid.configuration_belaid import BelaidConfig
+    from agbalu.hub.boulifa.configuration_boulifa import BoulifaConfig
+    from agbalu.hub.feraoun.configuration_feraoun import FeraounConfig
     from agbalu.hub.juba.configuration_juba import JubaConfig
     from agbalu.hub.masinissa.configuration_masinissa import MasinissaConfig
 
@@ -183,7 +252,13 @@ def write_config(repo: Repo, directory: Path) -> None:
     existing.pop("auto_map", None)
     existing.pop("architectures", None)
 
-    classes = {"belaid": BelaidConfig, "juba": JubaConfig, "masinissa": MasinissaConfig}
+    classes = {
+        "belaid": BelaidConfig,
+        "boulifa": BoulifaConfig,
+        "feraoun": FeraounConfig,
+        "juba": JubaConfig,
+        "masinissa": MasinissaConfig,
+    }
     config = classes[repo](**existing)
     config.auto_map = dict(AUTO_MAP[repo])
     config.architectures = [ARCHITECTURES[repo]]
@@ -228,6 +303,8 @@ def verify(repo: Repo, directory: Path) -> dict[str, object]:
 
     loaders = {
         "belaid": AutoModelForTokenClassification,
+        "boulifa": AutoModelForSeq2SeqLM,
+        "feraoun": AutoModel,
         "juba": AutoModelForSeq2SeqLM,
         "masinissa": AutoModelForMaskedLM,
     }
@@ -237,6 +314,8 @@ def verify(repo: Repo, directory: Path) -> dict[str, object]:
 
     probes = {
         "belaid": "azul fell-awen amek i tellam",
+        "boulifa": "achimi ur d-thekhedmedh ara tamazight g l'ecole?",
+        "feraoun": "Aḍris n uḥric ɣef tɛeṛṛamt d uẓekka.",
         "juba": "ⵜⵛⴼⵉⴹ ⴼⵍⵍⵉ ?",
         "masinissa": "Azul fell-awen, amek i tellam?",
     }
@@ -246,10 +325,20 @@ def verify(repo: Repo, directory: Path) -> dict[str, object]:
             # The end-to-end call, not a logits shape: the labels are per word and the model
             # sees subwords, so an aligner that is wrong still produces a plausible tensor.
             produced = model.restore(probe, tokenizer)[0]
-        elif repo == "juba":
+        elif repo == "feraoun":
+            # Rendered and read back, because the preprocessing is half of this model: a
+            # canvas built at the wrong scale still gives logits of the right shape. Seeded,
+            # so the typeface is fixed and two stagings of the same weights are comparable.
+            import random
+
+            from agbalu.ocr.synthetic import render_text_line
+
+            image = render_text_line(probe, augment=False, rng=random.Random(3))
+            produced = model.transcribe([image], tokenizer)[0]
+        elif repo in ("boulifa", "juba"):
             produced = tokenizer.decode(
                 model.generate(
-                    **tokenizer(probe, return_tensors="pt"), max_length=256, num_beams=4
+                    **tokenizer(probe, return_tensors="pt"), max_length=256, num_beams=1
                 )[0],
                 skip_special_tokens=True,
             )
@@ -271,7 +360,11 @@ def stage(repo: Repo, directory: Path) -> dict[str, object]:
         raise StagingError(message)
 
     copied = copy_modules(repo, directory)
-    if repo not in PIECE_REPOS:
+    if repo == "boulifa":
+        tokenizer = build_boulifa_tokenizer()
+    elif repo == "feraoun":
+        tokenizer = build_feraoun_tokenizer()
+    elif repo not in PIECE_REPOS:
         tokenizer = build_char_tokenizer()
     else:
         pieces = sorted(directory.glob("*.model"))

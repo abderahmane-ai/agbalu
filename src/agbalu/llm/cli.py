@@ -192,7 +192,7 @@ def token_budget(stats: Path, given: int | None) -> int:
     if given is not None:
         return given
     if not stats.is_file():
-        message = f"{stats} does not exist; run `make llm-mixture`, or pass --tokens"
+        message = f"{stats} does not exist; run `make llm TASK=mixture`, or pass --tokens"
         raise MixtureError(message)
     payload = json.loads(stats.read_text(encoding="utf-8"))
     total = payload.get("tokens_total")

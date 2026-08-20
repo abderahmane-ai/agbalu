@@ -56,11 +56,11 @@ BLOCKS_FILE: Final = "cpt-blocks.u32"
 BLOCKS_STATS: Final = "cpt-blocks.stats.json"
 
 DEFAULT_RUN: Final = "jugurtha-v1"
-MICRO_BATCH: Final = 4
-ACCUMULATION: Final = 16
-"""4 x 1024 x 16 x 2 GPUs = 131,072 tokens an optimizer step. The all-reduce moves 3.76 GB
-of bf16 gradients over PCIe once per optimizer step, so accumulation is what amortises it —
-at accumulation 1 the two cards would spend more time exchanging than computing."""
+MICRO_BATCH: Final = 2
+ACCUMULATION: Final = 32
+"""2 x 1024 x 32 x 2 GPUs = 131,072 tokens an optimizer step. Micro-batch 2 halves the
+transient logit tensor for the 248,320-token head (1.9 GiB vs 3.8 GiB), keeping peak VRAM
+well within the 22.06 GiB A10G limit while preserving the exact 131k token step geometry."""
 
 TOKENS_PER_STEP: Final = MICRO_BATCH * SEQUENCE_LENGTH * ACCUMULATION * GPUS
 
@@ -68,10 +68,14 @@ ENCODE_BATCH: Final = 1000
 
 LOG_EVERY: Final = 50
 CHECKPOINT_EVERY: Final = 500
-MIN_TOKENS_PER_SECOND: Final = 1500.0
-"""Below this the run is not worth its container. Two A10s at the measured 21.1 TFLOP/s each
-carry ~3,700 tokens a second at `6 * N` per token; half of that is a broken data path or a
-fallback kernel, not variance."""
+COMPILE: Final = True
+"""Wrap every decoder layer in `torch.compile` before FSDP2 sharding. The compile graph is
+per-layer rather than whole-model so FSDP2's per-layer `fully_shard` sees a static graph
+boundary and the Triton kernel cache is warm from layer 0 on the first forward."""
+
+MIN_TOKENS_PER_SECOND: Final = 2500.0
+"""Floor raised to match the compiled baseline. Two A10s at ~30% MFU carry ~6,500–7,800
+tok/s compiled; half of that still indicates a broken kernel or data path, not variance."""
 
 log: Final = logging.getLogger("agbalu.jugurtha")
 
@@ -222,6 +226,7 @@ def _setup(rank: int, world: int) -> tuple[nn.Module, Optimizer, torch.device]:
 
     model = AutoModelForCausalLM.from_pretrained(BASE, dtype=torch.bfloat16)
     model.gradient_checkpointing_enable()
+
     # bf16 parameters with fp32 reduction: the all-reduce is where a bf16 sum loses the
     # small updates that a 2e-5 schedule is made of.
     policy = MixedPrecisionPolicy(param_dtype=torch.bfloat16, reduce_dtype=torch.float32)
@@ -250,7 +255,7 @@ def _step(
     optimizer.zero_grad(set_to_none=True)
     loss_value = 0.0
     for rows in batch_rows:
-        ids = torch.from_numpy(np.asarray(blocks[rows], dtype=np.int64)).to(device)
+        ids = torch.from_numpy(blocks[rows].astype(np.int64)).to(device, non_blocking=True)
         out = model(input_ids=ids, labels=ids)
         (out.loss / ACCUMULATION).backward()
         loss_value = float(out.loss.detach())

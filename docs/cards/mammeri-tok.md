@@ -43,7 +43,7 @@ this has to come from the model, the objective, or an explicit morphological lay
 The one place the vocabulary does behave well is clitics: **72 of 72** clitic fixtures remain
 atomic at every size.
 
-## The sweep
+## Results
 
 30,000 held-out sentences, 344,648 words, 2,028,636 characters. `fertility` is tokens per
 word; lower is denser.
@@ -114,6 +114,22 @@ Apache-2.0 covers these vocabulary files. It does not relicense the text they we
 
 `unclear` is the absence of a resolvable licence, not a permissive one.
 
+## Intended use
+
+Segmenting Kabyle for a model you are training yourself. **base-16k is the default** — it is
+what [`Masinissa-31M`](https://huggingface.co/agbalu/Masinissa-31M) and
+[`Belaid-31M`](https://huggingface.co/agbalu/Belaid-31M) were built on, and the other nine
+exist so a size or initialisation decision can be made against measurements rather than by
+convention.
+
+**Normalise first.** The vocabulary was trained on text where `ɛ` is U+025B and never Greek
+epsilon; homoglyph-corrupted input fragments into byte pieces, and that is 2.6–3.2% of the
+seed corpora this project started from.
+
+**Not suitable for**: Tifinagh, which no vocabulary here covers; the Berber sibling languages,
+which share part of the orthography and were not measured; or as a general-purpose
+multilingual tokenizer — these are Kabyle vocabularies and nothing else.
+
 ## Usage
 
 ```python
@@ -122,8 +138,17 @@ from huggingface_hub import hf_hub_download
 
 model = hf_hub_download("agbalu/Mammeri-Tok", "agbalu-tok-base-16k.model")
 sp = spm.SentencePieceProcessor(model_file=model)
+
 sp.encode("Azul fell-awen, amek i tellam?", out_type=str)
+# ['▁Azul', '▁fell', '-', 'awen', ',', '▁amek', '▁i', '▁tellam', '?']
+
+sp.encode("Azul fell-awen, amek i tellam?")
+# [3173, 354, 261, 549, 265, 437, 267, 6399, 296]
 ```
+
+Nine pieces for six words: `Azul`, `amek`, `i` and `tellam` are each one piece, and the
+clitic chain `fell-awen` splits on its hyphen. That ratio is what the sweep below measures —
+**1.9355 pieces per word** for this vocabulary over 30,000 held-out sentences.
 
 The 16k base vocabulary is also published as a `transformers` fast tokenizer inside
 [`agbalu/Masinissa-31M`](https://huggingface.co/agbalu/Masinissa-31M), id for id with this
@@ -150,6 +175,31 @@ a `.vocab` listing and a `.metadata.json` recording its build spec and checksum.
   not spend pieces on corrupted spellings.
 - The sweep's morphological measures use small fixture sets — 15 annexed-state pairs, 72
   clitic fixtures. They are diagnostic, not a benchmark.
+
+## Files
+
+Ten vocabularies, each in three files, plus the sweep.
+
+| file | contents |
+|---|---|
+| `agbalu-tok-{base,seeded}-{8,12,16,24,32}k.model` | the SentencePiece model — the only file inference needs |
+| `agbalu-tok-*.vocab` | the pieces and their log-probabilities, one per line, for reading |
+| `agbalu-tok-*.metadata.json` | the build spec that produced it, and its SHA-256 |
+| `sweep.json` | every number in the results table above, for all ten |
+
+Each `.metadata.json` records the corpus, the character coverage, the seed list where there
+is one, and the checksum — so a vocabulary can be tied back to the build that made it rather
+than trusted by filename.
+
+## Reproduction
+
+```bash
+make tokenizer STAGE=prepare      # the corpus sample the vocabularies are trained on
+make tokenizer STAGE=sweep        # all ten, from that sample
+make tokenizer STAGE=evaluate     # the results table, over 30,000 held-out sentences
+```
+
+No GPU. The whole sweep is CPU work.
 
 ## The name
 

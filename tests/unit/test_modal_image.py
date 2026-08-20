@@ -22,11 +22,13 @@ import pytest
 from modal_app.common import (
     ASR_PIP_PACKAGES,
     BENCH_PIP_PACKAGES,
+    EMBED_PIP_PACKAGES,
     IMPORT_NAME,
     JUGURTHA_PIP_PACKAGES,
     LLM_PIP_PACKAGES,
     MATOUB_PIP_PACKAGES,
     MT_PIP_PACKAGES,
+    OCR_PIP_PACKAGES,
     PIP_PACKAGES,
     RESOURCES,
     TIFINAGH_PIP_PACKAGES,
@@ -52,13 +54,16 @@ IMAGES: Final[tuple[tuple[str, str, tuple[str, ...]], ...]] = (
     ("tifinagh", "modal_app.tifinagh", TIFINAGH_PIP_PACKAGES),
     ("sentiment", "modal_app.sentiment", BENCH_PIP_PACKAGES),
     ("punctuation", "modal_app.punctuation", PIP_PACKAGES),
+    ("boulifa", "modal_app.boulifa", PIP_PACKAGES),
+    ("simohand", "modal_app.simohand", EMBED_PIP_PACKAGES),
+    ("ocr", "modal_app.ocr", OCR_PIP_PACKAGES),
 )
 """Each entrypoint with the package list of the image it runs under. Three images, because
 the bench and MT stacks pull transformers and sacrebleu and adding them to the training
 image would invalidate it."""
 
-ALWAYS_PRESENT: Final = frozenset({"modal"})
-"""Installed in Modal's own runtime layer, not by us."""
+ALWAYS_PRESENT: Final = frozenset({"modal", "Modules", "Utils", "models", "utils"})
+"""Installed in Modal's runtime layer or cloned StyleTTS2 repository root, not via pip."""
 
 RUNTIME_ONLY: Final[dict[str, frozenset[str]]] = {
     "train": frozenset({"pyarrow"}),
@@ -76,17 +81,29 @@ RUNTIME_ONLY: Final[dict[str, frozenset[str]]] = {
     "llm": frozenset({"sentencepiece", "accelerate"}),
     # `flash-linear-attention` and `causal-conv1d` are imported by transformers'
     # `modeling_qwen3_5`, not by our own code, so no AST closure can see them.
+    # `cut-cross-entropy` backs `agbalu.llm.loss`, which `_step` does not call yet: the
+    # trainer still passes `labels=` and takes transformers' own loss, so no AST closure
+    # from this entrypoint reaches it. Wiring it is what lets `MICRO_BATCH` go back above 2.
     "jugurtha": frozenset(
         {
             "sentencepiece",
             "accelerate",
             "flash-linear-attention",
             "causal-conv1d",
-            "cut-cross-entropy",
+            "cut_cross_entropy",
         }
     ),
     # `accelerate` is what `from_pretrained` dispatches to for device placement, and
     # `huggingface_hub` arrives with transformers rather than being asked for.
+    # Shares the base training image. Boulifa is character-level over its own table, so it
+    # reaches none of the corpus stack the other entrypoints on that image pay for.
+    "boulifa": frozenset({"numpy", "pydantic", "sentencepiece", "yaml"}),
+    # `accelerate` is `from_pretrained`'s device-placement path and `safetensors` is what
+    # `save_pretrained` writes through; the e5 backbone's tokenizer is a SentencePiece model
+    # that transformers loads, not our code. `numpy` is what `encode` hands back.
+    "simohand": frozenset({"accelerate", "numpy", "safetensors", "sentencepiece"}),
+    # Same two, for the same reason: the DeiT encoder arrives through `from_pretrained`.
+    "ocr": frozenset({"accelerate", "safetensors"}),
     "asr": frozenset({"accelerate", "https://github.com/kpu/kenlm/archive/master.zip"}),
     # The baseline runs on the ASR stack unchanged: `VitsModel` is transformers' own, and
     # the decoder it is scored through is Fadhma's. `tts_image` adds only `torchaudio`,
@@ -340,8 +357,16 @@ def test_the_deploy_module_registers_every_function_without_a_name_collision() -
         "tts_corpus",
         "tts_voice",
         "tts_results",
+        "matoub_infer",
         "matoub_prepare",
         "matoub_train",
+        "boulifa_prepare",
+        "boulifa_train",
+        "simohand_prepare",
+        "simohand_train",
+        "simohand_eval",
+        "feraoun_train",
+        "feraoun_smoke",
     }
 
     entrypoints = set(deploy.app.registered_entrypoints)

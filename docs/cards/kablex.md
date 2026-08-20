@@ -157,6 +157,31 @@ regenerating one would replace an attested allophone with an approximation.
 
 Source: `boffire/kabyle-g2p-training-data`, **CC0-1.0**. The repair is this project's.
 
+## Usage
+
+```python
+from datasets import load_dataset
+
+lexicon = load_dataset("agbalu/KabLex", "lexicon", split="train")
+lexicon[0]
+# {'form': 'asider', 'lemma': None, 'upos': None, 'feats': 'Domain=Math',
+#  'glosses': [{'lang': 'fra', 'text': 'abaissement'}],
+#  'source': 'hf.agurzil.tafsut-maths-lexicon', 'licence': 'cc-by-4.0'}
+
+pronunciations = load_dataset("agbalu/KabLex", "pronunciations", split="train")
+pronunciations[0]
+# {'word': 'a', 'ipa': 'æ', ...}
+```
+
+**`licence` is a column because the tiers are not uniform.** Cut on it before redistributing:
+
+```python
+permissive = lexicon.filter(lambda row: row["licence"].startswith("cc-by-4"))
+```
+
+**`_` in `feats` is UD's own placeholder for "no features"**, and `None` in `lemma` or `upos`
+means the source supplied none. Neither is missing data to be cleaned.
+
 ## Orthography
 
 Everything is normalised to one documented orthography — normaliser `1.3.0+rules1.0.0`, 81

@@ -98,6 +98,26 @@ Parallel Kabyle Latin, Kabyle Tifinagh, and English / French translations for cr
 | `text_tfng` | string | Neo-Tifinagh Kabyle sentence |
 | `text_en` / `text_fr` | string | English or French translation |
 
+## Usage
+
+```python
+from datasets import load_dataset
+
+conversion = load_dataset("agbalu/KabTifinagh", "script_conversion", split="train")
+conversion[0]
+# {'id': 'kab_tfng_train_000000', 'text_latn': 'Ṣṣubbet-d neɣ ad n-aliɣ.',
+#  'text_tfng': 'ⵚⵚⵓⴱⴱⵜ ⴷ ⵏⵖ ⴰⴷ ⵏ ⴰⵍⵉⵖ.'}
+
+english = load_dataset("agbalu/KabTifinagh", "trilingual_en", split="test")
+french  = load_dataset("agbalu/KabTifinagh", "trilingual_fr", split="test")
+```
+
+**The hard direction is `text_tfng` → `text_latn`.** Kabyle Neo-Tifinagh writes no `e`, so
+converting back means predicting where the vowel belongs — which is why a character table
+scores 1.02% sentence exact match on this and
+[`Juba-27M`](https://huggingface.co/agbalu/Juba-27M) scores 94.22%. The other direction is a
+lookup table and needs no model.
+
 ## The Vowel Restoration & Script Conversion Challenge
 
 Tifinagh orthography presents a key sequence-to-sequence learning task due to structural orthographic asymmetries between the two scripts:

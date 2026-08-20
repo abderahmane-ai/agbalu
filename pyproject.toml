@@ -146,7 +146,7 @@ ignore = [
 # RUF012: `_tied_weights_keys` is declared as an instance variable on `PreTrainedModel`,
 #         so annotating the override `ClassVar` is a mypy error. The two rules disagree
 #         and the library decides.
-"src/agbalu/hub/**" = ["ANN401", "ARG002", "PLR0913", "RUF012", "TID252"]
+"src/agbalu/hub/**" = ["ANN401", "ARG002", "PLR0913", "RUF012", "TID252", "PLC0415", "T201", "N806"]
 # PLC0415: `torch`, `transformers`, `soundfile`, `librosa` and `pyctcdecode` are the optional
 #          `models` and `speech` extras. `audio_files` and `read_vocabulary` are what a test
 #          exercises without any of them, and a module-scope import would make the whole
@@ -157,7 +157,9 @@ ignore = [
 #          unimportable on an install that has only the corpus pipelines.
 # S105, S106: `[PAD]`, `[UNK]`, `[CLS]`, `[SEP]`, `[MASK]` are special-token names. The
 #             rule reads any string assigned to a `*_token` argument as a credential.
-"tools/stage_hub.py" = ["PLC0415", "S105", "S106"]
+# S311:       the typeface Feraoun's verification probe is rendered in. Fixed so two
+#             stagings of the same weights produce the same line to compare.
+"tools/stage_hub.py" = ["PLC0415", "S105", "S106", "S311"]
 # S105, S106: the vocabularies here are `[PAD]`, `[UNK]`, `[CLS]`, `[MASK]` and `|`, and
 #             the rule reads any string named `*_token` as a credential.
 "tests/**" = ["S101", "PLR2004", "SLF001", "S311", "S105", "S106"]
@@ -297,6 +299,26 @@ ignore = [
 "src/agbalu/punctuation/infer.py" = ["PLR0913"]
 # PLC0415: `trim_model` imports torch at call time so `coverage` and `Remap` — the parts
 #          that decide *what* to trim — stay importable without a training stack.
+# S105: `<pad>`, `<s>`, `</s>` and `<unk>` are the four special symbols of a character
+#       table. The rule reads `*_TOKEN = "..."` as a credential.
+"src/agbalu/ocr/vocabulary.py" = ["S105"]
+# S311: the renderer draws a font, a size and an offset. Where those must reproduce — the
+#       un-augmented validation render and the line chunking — a seeded `random.Random` is
+#       threaded in explicitly; the training draws are meant to differ every epoch. A
+#       cryptographic generator buys nothing either way.
+"src/agbalu/ocr/synthetic.py" = ["S311"]
+"src/agbalu/ocr/augment.py" = ["S311"]
+"src/agbalu/ocr/dataset.py" = ["S311"]
+"src/agbalu/ocr/cli.py" = ["S311", "PLC0415"]
+# S311: a fixed-seed draw over the held-out split, so two checkpoints are scored on the
+#       same pairs. A cryptographic generator would make that irreproducible.
+"src/agbalu/standardise/cli.py" = ["S311"]
+# PLC0415: `transformers` is imported inside the constructor so the vocabulary, the
+#          renderer and the metrics stay importable without a model stack.
+"src/agbalu/ocr/models.py" = ["PLC0415"]
+# PLR0913/PLR0915: `save_checkpoint` names every piece of resumable state rather than
+#          bundling it, and `fit` is one loop over state its steps share.
+"src/agbalu/ocr/trainer.py" = ["PLR0913", "PLR0915"]
 "src/agbalu/mt/vocab.py" = ["PLC0415"]
 # PLR0913: `iter_batches` takes six arguments because resumption needs all of them —
 #          epoch, start_batch and drop_last are not defaultable away without hiding the
@@ -310,6 +332,21 @@ ignore = [
 #          argument list, no shell, and no value from outside this module. The app name is
 #          a module constant.
 "modal_app/launch.py" = ["S603"]
+# S310:    `urlretrieve` fetches one module constant — the published KabTifinagh parquet —
+#          over https, into a staging path it then renames. No value comes from outside.
+"modal_app/ocr.py" = ["S310"]
+# PLR0915/PLR0912: a training entrypoint is one long function on purpose. Setup, resume,
+#          the loop, evaluation, checkpointing and the summary share the state they pass
+#          between them, and splitting them puts that state in a class whose only caller
+#          is the function it came out of. Listed per file, never as a glob over
+#          `modal_app/**`, which would also silence every short module in the tree.
+"modal_app/asr.py" = ["PLR0915"]
+"modal_app/tifinagh.py" = ["PLR0915"]
+"modal_app/boulifa.py" = ["PLR0912", "PLR0915"]
+"modal_app/simohand.py" = ["PLR0915"]
+# N806: `F0_pred` and `N_pred` are StyleTTS2's own names for the pitch and energy the
+#       predictor returns, and the recipe's checkpoints key on them.
+"modal_app/matoub.py" = ["N806", "PLR0912", "PLR0915"]
 # T20:     Modal local entrypoints report to the operator's terminal; that is their job.
 # PLC0415: the training imports must happen inside the container, not at local import
 #          time — `modal run` imports this file on a laptop that need not have torch.
@@ -427,6 +464,8 @@ module = [
     "agbalu.bench.lid",
     "agbalu.bench.tifinagh",
     "agbalu.bench.inflect",
+    "agbalu.ocr.dataset",
+    "modal_app.boulifa",
     "tools.build_kabinflect",
     "tools.build_kabtifinagh",
     "tools.export_datasets",
@@ -434,6 +473,16 @@ module = [
 ]
 disallow_untyped_calls = false
 disallow_any_unimported = false
+
+# The vendored StyleTTS2 tree. `matoub_infer` and the voicepack loader published beside
+# `Matoub-82M` both run from inside a `git clone` of the recipe, whose modules sit at the
+# clone root rather than under a package — `models`, `utils`, `Utils.PLBERT.util`,
+# `Modules.diffusion.sampler`. They exist only in the container and only after the clone,
+# so there is nothing for mypy to resolve on the laptop the gate runs on.
+# `tests/unit/test_modal_image.py` exempts the same four names for the same reason.
+[[tool.mypy.overrides]]
+module = ["models", "utils", "Utils.*", "Modules.*"]
+ignore_missing_imports = true
 
 # `fasttext` ships no py.typed marker and no stubs on PyPI. Confined to the one
 # module that loads it; `_FastTextModel` states the surface actually used.
@@ -470,11 +519,28 @@ disable_error_code = ["attr-defined", "arg-type", "no-any-return"]
 module = [
     "agbalu.hub.*",
     "agbalu.speech.release",
+    "modal_app.simohand",
     "tools.stage_hub",
     "stage_hub",
 ]
 disallow_untyped_calls = false
 disable_error_code = ["arg-type", "override"]
+
+# `datasets` ships no py.typed marker. Reached only by `simohand_train`, which wraps the
+# corpus rows it already parsed itself; nothing is inferred across the boundary.
+[[tool.mypy.overrides]]
+module = ["datasets.*"]
+ignore_missing_imports = true
+
+# `matoub_infer` rebinds `torch.load` for the duration of the call, because the recipe's own
+# `load_ASR_models`, `load_F0_models` and `load_plbert` call it and torch 2.6 defaults
+# `weights_only` true, which no StyleTTS2 checkpoint survives. The shim is variadic by
+# construction — it forwards whatever the recipe passes — so its call into `torch.load` is
+# the one place the module cannot restate a third-party signature. Our own load bypasses the
+# shim and narrows what comes back.
+[[tool.mypy.overrides]]
+module = ["modal_app.matoub"]
+disable_error_code = ["arg-type"]
 
 # The same boundary from the test side, plus two codes the library forces there:
 # `generate` is declared with `self: GenerativePreTrainedModel`, which mypy does not accept
@@ -483,6 +549,7 @@ disable_error_code = ["arg-type", "override"]
 [[tool.mypy.overrides]]
 module = [
     "tests.unit.test_hub_belaid",
+    "tests.unit.test_hub_feraoun",
     "tests.unit.test_hub_juba",
     "tests.unit.test_hub_masinissa",
     "tests.unit.test_stage_hub",

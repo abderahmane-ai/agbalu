@@ -183,7 +183,7 @@ def check_inputs(directions: Sequence[str]) -> None:
     if missing:
         message = (
             f"{len(missing)} evaluation set(s) absent from the volume: {missing}. "
-            f"Run `make llm-holdout` then `make modal-upload`."
+            f"Run `make llm TASK=holdout` then `make modal-upload TASK=llm`."
         )
         raise FileNotFoundError(message)
     check_corpora([d for d in DIRECTIONS if d in set(directions)], corrected=True)
@@ -487,7 +487,7 @@ def upload_llm() -> None:
     wanted.append(LOCAL_HELDOUT / CORPUS_FILE)
     missing = [str(path) for path in wanted if not path.is_file()]
     if missing:
-        message = f"{missing} absent; run `make llm-holdout` and `make llm-mixture` first"
+        message = f"{missing} absent; run `make llm TASK=holdout` and `make llm TASK=mixture` first"
         raise SystemExit(message)
     with data_volume.batch_upload(force=True) as batch:
         for path in wanted:

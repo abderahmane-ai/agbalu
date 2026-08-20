@@ -331,10 +331,10 @@ def _shard_samples(index: Path) -> Path:
 def next_shard(split: str, root: Path = REMOTE_PACK) -> int:
     """One past the highest shard number present, valid or not.
 
-    `len(shard_paths(...))` was wrong and two concurrent repacks are what exposed it: with
-    shards 000 and 002 on disk — 001 rejected by `read_shard` and its index removed — a count
-    returns 2 and the next write lands on **002**, destroying a good shard. Numbering from the
-    maximum never reuses a number, so a rejected shard costs its bytes and nothing else.
+    A count is not a number: with shards 000 and 002 on disk — 001 rejected by `read_shard`
+    and its index removed — `len(shard_paths(...))` returns 2 and the next write lands on
+    **002**, destroying a good shard. Numbering from the maximum never reuses a number, so a
+    rejected shard costs its bytes and nothing else.
     """
     numbers = [int(path.stem) for path in shard_paths(split, root) if path.stem.isdigit()]
     return max(numbers, default=-1) + 1
@@ -1238,7 +1238,7 @@ def asr_pipeline(
     timeout=ASR_TIMEOUT,
     retries=RETRIES,
 )
-def asr_finetune(  # noqa: PLR0915
+def asr_finetune(
     *,
     run: str = DEFAULT_RUN,
     epochs: int = EPOCHS,

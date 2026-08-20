@@ -16,12 +16,16 @@ from typing import Final
 from transformers import AutoTokenizer
 
 from agbalu.embed.backbone import CANDIDATES, encoder, unknown_id, widen
+from agbalu.embed.corpus import DEV_CLUSTERS, build_embed_corpus
 from agbalu.embed.vocabulary import Coverage, coverage
 from agbalu.llm.fertility import sample
 from agbalu.normalise import Normaliser
 
 DEFAULT_TEXT: Final = Path("data/processed/text/agbalu-text-v1.jsonl")
 DEFAULT_COVERAGE: Final = Path("data/processed/embed/coverage.stats.json")
+DEFAULT_EMBED_OUT: Final = Path("data/processed/embed")
+DEFAULT_PARALLEL_DIR: Final = Path("data/interim/parallel")
+DEFAULT_TAPACO_PATH: Final = Path("data/raw/tatoeba/tapaco_kab_2026-08-05.tsv")
 SAMPLE_SIZE: Final = 20_000
 SAMPLE_SEED: Final = 0
 
@@ -97,6 +101,23 @@ def command_coverage(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_corpus(args: argparse.Namespace) -> int:
+    stats = build_embed_corpus(
+        parallel_dir=args.parallel,
+        tapaco_path=args.tapaco,
+        output_dir=args.output,
+        dev_clusters=args.dev_clusters,
+        seed=args.seed,
+    )
+    log.info(
+        "embed corpus built: %d train pairs, %d dev pairs across %d clusters",
+        stats["train_pairs"],
+        stats["dev_pairs"],
+        stats["unique_clusters"],
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     parser = argparse.ArgumentParser(prog="agbalu.embed", description=__doc__)
@@ -106,6 +127,14 @@ def main(argv: list[str] | None = None) -> int:
     cover.add_argument("--text", type=Path, default=DEFAULT_TEXT)
     cover.add_argument("--output", type=Path, default=DEFAULT_COVERAGE)
     cover.set_defaults(handler=command_coverage)
+
+    corp = sub.add_parser("corpus", help="extract and split the contrastive pair dataset")
+    corp.add_argument("--parallel", type=Path, default=DEFAULT_PARALLEL_DIR)
+    corp.add_argument("--tapaco", type=Path, default=DEFAULT_TAPACO_PATH)
+    corp.add_argument("--output", type=Path, default=DEFAULT_EMBED_OUT)
+    corp.add_argument("--dev-clusters", type=int, default=DEV_CLUSTERS)
+    corp.add_argument("--seed", type=int, default=42)
+    corp.set_defaults(handler=command_corpus)
 
     args = parser.parse_args(argv)
     handler: Callable[[argparse.Namespace], int] = args.handler

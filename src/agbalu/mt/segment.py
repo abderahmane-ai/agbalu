@@ -6,7 +6,7 @@ distribution is a soft one that punishes long inputs well before the hard limit 
 Segmenting is therefore not a workaround for a short context — it is how the model is meant
 to be used, and the reason `bench.translate` scores FLORES+ a sentence at a time.
 
-What this replaces is silent truncation. `generate` encodes with `truncation=True`, so an
+What it prevents is silent truncation. `generate` encodes with `truncation=True`, so an
 over-long source is cut and its tail is never translated, with nothing in the output saying
 so — the failure mode this project names first: a result that looks like a result.
 
