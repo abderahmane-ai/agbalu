@@ -20,7 +20,9 @@ pipeline_tag: text-to-speech
 
 A text-to-speech model for **Kabyle** (Taqbaylit, `kab`), released as a **preview checkpoint**. An 82M-parameter StyleTTS2 fine-tune of [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) trained on 21,953 restored Common Voice Kabyle clips from a fifties male speaker. It synthesises 24 kHz speech that reproduces the gemination, spirantisation, emphatics, and pharyngeals of Kabyle phonology in a native speaker voice — twice the sample rate of `mms-tts-kab`, the incumbent Kabyle TTS model, and under a licence that permits commercial use where that one does not.
 
-This is a preview. The training data, recording quality, and single published voice define a ceiling that a full release will substantially exceed. See [What comes next](#what-comes-next) for the plan.
+The work that makes it Kabyle is the front end. Kokoro's token table maps 114 symbols and carries none of `ˤ ʕ ħ` — pharyngealisation, and the letters `ɛ` and `ḥ` — while its G2P is built with `unk=''` and drops a phoneme it cannot represent rather than raising, which would have deleted three consonants from every training target behind a healthy loss curve. The 42-symbol Kabyle inventory was diffed against that table, the three missing symbols assigned to unused embedding rows and trained, the affricate tie bar folded onto `ʧ` and `ʤ`, and the front end made to validate against the vocabulary and raise. That is why the emphatics and pharyngeals survive to the decoder.
+
+Released as a preview: it publishes one voice, and its Cycle-CER is not yet measured.
 
 Named after **Lounès Matoub** (1956-1998), Kabyle singer, poet, and tireless voice of Taqbaylit, who gave his life to its language and culture.
 
@@ -33,13 +35,13 @@ The baseline for Kabyle TTS is `mms-tts-kab` (Meta's MMS). Cycle-CER measures th
 | `mms-tts-kab` | 11.89 | 8.33 | +3.56 |
 | **Matoub-82M** | *not yet measured* | | |
 
-The cycle-CER evaluation against Matoub-82M has not been completed before this checkpoint was published. The card will be updated when it is. The baseline figure is the only number this model can be judged against at publication time.
+**That baseline row is itself a result of this project.** `mms-tts-kab` had been published without a Kabyle score by anyone; the +3.56 delta above was measured here on 2026-08-14 over 1,000 held-out non-biblical prompts, against a real-audio control on the same text. Kabyle TTS now has a number to be judged against. Matoub-82M's own Cycle-CER is not yet measured, and this card carries no claim about it until it is.
 
 Three things worth reading carefully.
 
 **The baseline is read scripture at 16 kHz.** `mms-tts-kab` is MMS's per-language VITS checkpoint, trained on New Testament recordings — which typically carry one speaker per language — and it emits 16 kHz under `cc-by-nc-4.0`. Matoub-82M was fine-tuned on Common Voice read speech from a native Kabyle male speaker and emits 24 kHz under Apache-2.0. No listening test has been run between the two, and none is claimed here.
 
-**The training audio has a hard frequency ceiling.** The `kab_male` clips are band-limited at approximately 7.9 kHz -- not 11.5 kHz or 24 kHz -- because the recording conditions for Common Voice Kabyle combined with phone microphones, lossy encoding, and upload artefacts cut the spectral content. The model cannot synthesise what was not in its training data; any evaluation above 7.9 kHz measures silence.
+**The training audio has a hard frequency ceiling.** The `kab_male` clips are band-limited at approximately 7.9 kHz -- not 11.5 kHz or 24 kHz -- because the recording conditions for Common Voice Kabyle combined with phone microphones, lossy encoding, and upload artefacts cut the spectral content. The model cannot synthesise what was not in its training data; any evaluation above 7.9 kHz measures silence. This is a property of the Kabyle speech record rather than of this checkpoint — the incumbent synthesises at 16 kHz, so both systems are band-limited, and closing it needs recordings that do not currently exist.
 
 **Diffusion was not trained in this checkpoint.** `lambda_diff: 0.0` in the training config. Passing `beta > 0.0` to the inference function injects Gaussian noise from an untrained sampler directly into the decoder. Use `alpha=0.0, beta=0.0` (pure reference style). This is the correct inference mode for this checkpoint and the one the sample audio was produced with.
 
@@ -55,11 +57,11 @@ Producing spoken Kabyle from text for:
 
 ## What comes next
 
-This is a proof of concept. It establishes that Kabyle TTS is tractable, that the phonology is reproduced correctly, and that the pipeline works end to end. The full release will be trained differently — same Kokoro-82M base, different everything else that determines whether speech sounds human.
+This checkpoint establishes the parts that carry forward: a Kabyle phoneme inventory the base model can represent, a G2P front end that raises instead of dropping, a two-stage recipe that trains to a monotone validation curve on 17.9 hours, and an end-to-end path from Kabyle text to 24 kHz audio.
 
-The goal is two models: a male voice and a female voice, both Kabyle, both trained to a standard where the pronunciation feels effortless and the sound is clean enough to use without apology. Not serviceable. Not a research demo. Something you would actually want to listen to.
+What it does not yet have is a second voice and a perceptual measurement. The `kab_female` Stage 2, the Cycle-CER, and UTMOSv2 and speaker-similarity scoring are the next three, in that order.
 
-This preview will remain permanently published. The two future production models will be released under their own distinct names as dedicated standalone repositories.
+This preview stays permanently published. The production voices that follow it are released under their own names as standalone repositories rather than replacing this checkpoint.
 
 ## Usage
 
