@@ -412,10 +412,9 @@ make standardise TASK=evaluate LIMIT=1000   # the numbers in the results table
 ## The name
 
 **Si Amar ou Saïd Boulifa** (1865–1931) was the first grammarian to systematically codify
-Kabyle Latin orthography. His 1897 *Recueil de poésies kabyles* introduced a consistent
-method for rendering emphatics, pharyngeals and long vowels in Latin characters — solving,
-in 19th-century print typography, precisely the mapping problem this model re-solves in the
-age of keyboard input.
+Kabyle Latin orthography. His *Recueil de poésies kabyles* (1904) set 555 pages of Kabyle in
+one consistent Latin notation — solving, in the print typography of its day, precisely the
+mapping problem this model re-solves in the age of keyboard input.
 
 He worked without a committee, without a standard, and against a tradition that had not yet
 decided whether Kabyle could be written at all. The orthographic rules he established were

@@ -9,8 +9,8 @@ is the primary artifact; the models are built on top of it.
 ## Why
 
 Kabyle has an unusual resource profile: it is **speech-rich and text-poor**. Common Voice
-v26.0 holds 571.29 validated hours of it — 10th of 294 locales — while the entire clean
-Kabyle web crawl is smaller than a single Tatoeba export.
+v26.0 holds 571.29 validated hours of it — 10th of 294 locales — while the entire filtered
+Kabyle web crawl is 13.8M words and the whole deduplicated text corpus is 34.9M.
 
 The text that exists is also damaged in a specific, measurable way. Both seed corpora carry
 systematic homoglyph corruption: Greek `ε` U+03B5 standing in for Latin `ɛ` U+025B in 2.60%

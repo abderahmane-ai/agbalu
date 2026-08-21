@@ -18,11 +18,11 @@ pipeline_tag: text-to-speech
 
 # Matoub-82M · Preview
 
-**The first neural text-to-speech model published for Kabyle** (Taqbaylit, `kab`), released as a **preview checkpoint**. An 82M-parameter StyleTTS2 fine-tune of [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) trained on 21,953 restored Common Voice Kabyle clips from a fifties male speaker. It synthesises 24 kHz speech that reproduces the gemination, spirantisation, emphatics, and pharyngeals of Kabyle phonology in a native speaker voice.
+A text-to-speech model for **Kabyle** (Taqbaylit, `kab`), released as a **preview checkpoint**. An 82M-parameter StyleTTS2 fine-tune of [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) trained on 21,953 restored Common Voice Kabyle clips from a fifties male speaker. It synthesises 24 kHz speech that reproduces the gemination, spirantisation, emphatics, and pharyngeals of Kabyle phonology in a native speaker voice — twice the sample rate of `mms-tts-kab`, the incumbent Kabyle TTS model, and under a licence that permits commercial use where that one does not.
 
 This is a preview. The training data, recording quality, and single published voice define a ceiling that a full release will substantially exceed. See [What comes next](#what-comes-next) for the plan.
 
-Named after **Lounes Matoub** (1956-1998), Kabyle singer, poet, and tireless voice of Taqbaylit, who gave his life to its language and culture.
+Named after **Lounès Matoub** (1956-1998), Kabyle singer, poet, and tireless voice of Taqbaylit, who gave his life to its language and culture.
 
 ## Results
 
@@ -37,7 +37,7 @@ The cycle-CER evaluation against Matoub-82M has not been completed before this c
 
 Three things worth reading carefully.
 
-**The baseline is a multilingual voice, not a Kabyle one.** `mms-tts-kab` was trained across 1,100+ languages with no Kabyle-specific fine-tuning; the voice it produces is generic. Matoub-82M was fine-tuned entirely on a native Kabyle male speaker. The perceptual quality difference is audible independent of the metric.
+**The baseline is read scripture at 16 kHz.** `mms-tts-kab` is MMS's per-language VITS checkpoint, trained on New Testament recordings — which typically carry one speaker per language — and it emits 16 kHz under `cc-by-nc-4.0`. Matoub-82M was fine-tuned on Common Voice read speech from a native Kabyle male speaker and emits 24 kHz under Apache-2.0. No listening test has been run between the two, and none is claimed here.
 
 **The training audio has a hard frequency ceiling.** The `kab_male` clips are band-limited at approximately 7.9 kHz -- not 11.5 kHz or 24 kHz -- because the recording conditions for Common Voice Kabyle combined with phone microphones, lossy encoding, and upload artefacts cut the spectral content. The model cannot synthesise what was not in its training data; any evaluation above 7.9 kHz measures silence.
 
@@ -225,9 +225,9 @@ make modal-matoub TASK=stage2 ARM=restored VOICE=kab_male EPOCHS=6
 
 ## The name
 
-**Lounes Matoub** (1956-1998) was the most celebrated Kabyle singer of the 20th century and one of the fiercest advocates for the survival of Taqbaylit. He recorded over 500 songs in Kabyle at a time when the Algerian state was suppressing Berber language and culture, making the language audible to an entire generation. He was assassinated on 25 June 1998, thirteen days after the passage of the Arabisation law he had spent years opposing.
+**Lounès Matoub** (1956-1998) was the most celebrated Kabyle singer of the 20th century and one of the fiercest advocates for the survival of Taqbaylit. He recorded 36 albums in Kabyle at a time when the Algerian state was suppressing Berber language and culture, making the language audible to an entire generation. He was assassinated on 25 June 1998, ten days before the Arabisation law he had spent years opposing took effect.
 
-His voice is inseparable from the survival of Kabyle as a spoken language in collective memory. Naming the first neural Kabyle TTS model after him is not metaphor; it is acknowledgment that what this model does -- make the language heard -- is what he spent his life doing.
+His voice is inseparable from the survival of Kabyle as a spoken language in collective memory. Naming a Kabyle TTS model after him is not metaphor; it is acknowledgment that what this model does -- make the language heard -- is what he spent his life doing.
 
 The naming is homage; it implies no endorsement by anyone.
 
