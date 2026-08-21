@@ -1,18 +1,13 @@
-r"""Kabyle Semantic Textual Similarity (STS) benchmark with isotropic collapse control.
+r"""Semantic similarity, scored beside the control that makes the score readable.
 
-Published sentence transformers for low-resource languages often report mean cosine
-similarity between aligned pairs as their headline metric. A collapsed encoder—where every
-sentence maps into a single narrow cone—maximises mean cosine similarity trivially (~0.95+)
-while retaining zero discriminative power.
+Pearson and Spearman against the gold scores the caller supplies, repeated at each
+Matryoshka slice so a truncated vector is measured rather than assumed.
 
-This benchmark couples:
-1. **Rank & Linear Alignment**: Measures Pearson $r$ and Spearman $\rho$ correlation between
-   model cosine similarities and human gold similarity scores.
-2. **Matryoshka Dimension Truncation**: Measures downstream performance retention across
-   nested dimension slices (e.g., 768 -> 512 -> 256 -> 128 -> 64).
-3. **Isotropic Collapse Control**: Samples random unaligned pairs from the embedding space.
-   A healthy space exhibits low mean similarity (~0.10-0.25) and broad variance ($\sigma \ge 0.10$);
-   a collapsed space is caught and refused.
+**The control is the reason this module exists.** Mean cosine similarity over aligned pairs
+is what the published Kabyle sentence transformer reports, and an encoder that maps every
+sentence into one narrow cone maximises it while telling two sentences apart not at all.
+`check_isotropic_collapse` samples unaligned pairs: a space that scores them as similar as
+the aligned ones is refused, whatever its correlation says.
 """
 
 from __future__ import annotations
@@ -100,7 +95,8 @@ def rank_data(values: Sequence[float]) -> list[float]:
 
 
 def pearson_correlation(x: Sequence[float], y: Sequence[float]) -> float:
-    """Compute Pearson product-moment correlation coefficient $r$."""
+    """Linear correlation. Returns 0.0 under `MIN_SAMPLES`, which reads as no relationship
+    rather than as too little data to say — check the sample count before quoting it."""
     n = len(x)
     if n != len(y) or n < MIN_SAMPLES:
         return 0.0
@@ -119,7 +115,8 @@ def pearson_correlation(x: Sequence[float], y: Sequence[float]) -> float:
 
 
 def spearman_correlation(x: Sequence[float], y: Sequence[float]) -> float:
-    """Compute Spearman rank-order correlation coefficient $\rho$."""
+    """Rank correlation, which is the same computation over ranked inputs and carries the
+    same 0.0 floor."""
     if len(x) != len(y) or len(x) < MIN_SAMPLES:
         return 0.0
     return pearson_correlation(rank_data(x), rank_data(y))

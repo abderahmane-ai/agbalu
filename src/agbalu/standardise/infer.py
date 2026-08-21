@@ -73,7 +73,8 @@ class Standardiser:
 
         memory = self.model.encode(input_tensor)
 
-        # Autoregressive greedy decoding
+        # Free-running: the decoder reads its own output, which is what a caller gets and
+        # what the published accuracy is measured over.
         generated = [self.tokenizer.bos_id]
         max_gen = min(max_length, len(token_ids) * 2 + 10)
 
@@ -106,7 +107,11 @@ class Standardiser:
         batch_size: int = 32,
         max_length: int = 512,
     ) -> list[str]:
-        """Standardise a batch of texts."""
+        """`standardise` over many texts.
+
+        `batch_size` chunks the list and nothing more: each text still runs its own decode,
+        so this costs what calling `standardise` in a loop costs.
+        """
         results: list[str] = []
         for i in range(0, len(texts), batch_size):
             batch = texts[i : i + batch_size]
@@ -115,6 +120,6 @@ class Standardiser:
 
 
 def standardise(text: str, *, checkpoint: Path | str = DEFAULT_CHECKPOINT) -> str:
-    """Convenience helper to standardise a sentence."""
+    """One sentence, loading the checkpoint for it. Hold a `Standardiser` for more."""
     engine = Standardiser.load(checkpoint)
     return engine.standardise(text)

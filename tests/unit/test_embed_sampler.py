@@ -1,4 +1,4 @@
-"""Unit tests for ClusterAwareBatchSampler."""
+"""Batches that never hold two members of one cluster, and what happens when they run out."""
 
 from __future__ import annotations
 

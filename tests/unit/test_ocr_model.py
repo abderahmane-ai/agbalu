@@ -1,4 +1,4 @@
-"""Unit tests for OCR model architecture."""
+"""The encoder-decoder's shapes, its loss, and the interpolation a line canvas goes through."""
 
 from __future__ import annotations
 

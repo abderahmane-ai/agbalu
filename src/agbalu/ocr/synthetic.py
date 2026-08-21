@@ -1,7 +1,9 @@
-"""Synthetic text line image renderer for Kabyle document OCR.
+"""Rendering a Kabyle text line onto the canvas the encoder reads.
 
-Renders authentic normalized Kabyle text lines from `AƔBALU-Text v1` into high-resolution,
-degraded document line images with exact ground-truth character alignment.
+The label of an image is the string that was drawn, so the two cannot drift apart. What can
+drift is the draw: typeface, size and horizontal offset come from an `rng` the caller
+passes where a render has to reproduce, and from the module generator where it should
+differ every epoch.
 """
 
 from __future__ import annotations
@@ -16,13 +18,10 @@ from PIL import Image, ImageDraw, ImageFont
 
 from agbalu.ocr.augment import augment_line_image
 
-# Model input dimensions (fixed height 64, fixed width 512)
 TARGET_HEIGHT: Final[int] = 64
 TARGET_WIDTH: Final[int] = 512
 
-# Common system font candidates across Linux, macOS, and container environments
 FONT_CANDIDATES: Final[tuple[str, ...]] = (
-    # Linux (Debian / Ubuntu / Modal containers)
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
     "/usr/share/fonts/truetype/freefont/FreeSerif.ttf",
@@ -32,7 +31,6 @@ FONT_CANDIDATES: Final[tuple[str, ...]] = (
     "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
     "/usr/share/fonts/truetype/noto/NotoSerif-Regular.ttf",
     "/usr/share/fonts/truetype/noto/NotoSansTifinagh-Regular.ttf",
-    # macOS Fonts
     "/System/Library/Fonts/Supplemental/Times New Roman.ttf",
     "/System/Library/Fonts/Supplemental/Georgia.ttf",
     "/System/Library/Fonts/Supplemental/Arial.ttf",
@@ -93,10 +91,10 @@ def render_text_line(
     augment: bool = True,
     rng: random.Random | None = None,
 ) -> Image.Image:
-    """Render a single text line to a PIL image with optional scan degradation.
+    """Render one line, degraded, onto the fixed canvas.
 
-    Preserves sub-dot diacritics by rendering at high resolution, then scales proportionally
-    and pads to the target (TARGET_HEIGHT=64, TARGET_WIDTH=512) canvas.
+    Drawn large and scaled down, so the sub-dots on `ḍ ḥ ṛ ṣ ṭ ẓ` survive as distinct dark
+    pixels rather than the one or two they occupy when drawn at the target height.
 
     `rng` fixes the font and the horizontal offset. Passing one is what makes a validation
     render the same image every time it is scored: on the module generator the same held-out
@@ -124,29 +122,24 @@ def render_text_line(
 
     font = load_font(chosen_font, font_size)
 
-    # Measure text bounding box
     dummy_img = Image.new("RGB", (1, 1), color=(255, 255, 255))
     draw = ImageDraw.Draw(dummy_img)
     bbox = draw.textbbox((0, 0), text, font=font)
     text_w = max(int(bbox[2] - bbox[0] + 16), 20)
     text_h = max(int(bbox[3] - bbox[1] + 16), 20)
 
-    # Render on clean white canvas
     line_img = Image.new("RGB", (text_w, text_h), color=(255, 255, 255))
     line_draw = ImageDraw.Draw(line_img)
-    # Slight margin offset
     offset_x = float(8 - bbox[0])
     offset_y = float(8 - bbox[1])
     line_draw.text((offset_x, offset_y), text, font=font, fill=(0, 0, 0))
 
-    # Apply physical scan degradation if enabled
     if augment:
         line_img = augment_line_image(line_img)
 
-    # Scale proportionally to fit TARGET_HEIGHT=64 without distorting aspect ratio
     orig_w, orig_h = line_img.size
-    target_usable_h = TARGET_HEIGHT - 12  # 52px
-    target_usable_w = TARGET_WIDTH - 16  # 496px
+    target_usable_h = TARGET_HEIGHT - 12
+    target_usable_w = TARGET_WIDTH - 16
 
     scale = target_usable_h / max(orig_h, 1)
     new_w = int(orig_w * scale)
@@ -162,11 +155,11 @@ def render_text_line(
 
     resized_line = line_img.resize((new_w, new_h), resample=Image.Resampling.LANCZOS)
 
-    # Place onto final fixed (64, 512) canvas with background color matching edge pixel
+    # The corner pixel, so a tinted or shaded render pads into its own background rather
+    # than into a white border the model would learn as a line boundary.
     bg_color = resized_line.getpixel((0, 0))
     canvas = Image.new("RGB", (TARGET_WIDTH, TARGET_HEIGHT), color=bg_color)
 
-    # Random slight horizontal/vertical offset within padding
     pad_x = draw_from.randint(4, max(TARGET_WIDTH - new_w - 4, 4))
     pad_y = (TARGET_HEIGHT - new_h) // 2
 
@@ -175,10 +168,12 @@ def render_text_line(
 
 
 def image_to_tensor(image: Image.Image) -> torch.Tensor:
-    """Convert a PIL Image (RGB) to a normalized PyTorch FloatTensor of shape (3, H, W).
+    """One image to `(3, H, W)` at mean 0.5 and std 0.5.
 
-    Normalized to mean=0.5, std=0.5 (range [-1.0, 1.0]), standard for vision transformer backbones.
+    `agbalu.hub.feraoun` repeats this arithmetic exactly, because it is half the contract:
+    a caller who scales differently gets logits of the right shape from a model that never
+    saw that input.
     """
-    arr = np.array(image.convert("RGB"), dtype=np.float32) / 255.0  # (H, W, 3), range [0, 1]
-    arr = (arr - 0.5) / 0.5  # range [-1, 1]
+    arr = np.array(image.convert("RGB"), dtype=np.float32) / 255.0
+    arr = (arr - 0.5) / 0.5
     return torch.from_numpy(arr).permute(2, 0, 1)

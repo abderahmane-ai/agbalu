@@ -1,4 +1,4 @@
-"""Unit tests for STS evaluation benchmark and isotropic collapse control."""
+"""The correlations, the Matryoshka slices, and the collapse control beside them."""
 
 from __future__ import annotations
 

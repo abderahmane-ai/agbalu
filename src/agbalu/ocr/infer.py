@@ -1,7 +1,8 @@
-"""Inference and page transcription engine for document OCR.
+"""Transcription, from one line image up to a whole page.
 
-Provides single-line transcription, batched line decoding, and horizontal projection
-page segmentation.
+A page is cut into lines by a horizontal projection profile — ink bands, cropped. There is
+no column detection and no reading-order model, so a two-column periodical is read straight
+across.
 """
 
 from __future__ import annotations

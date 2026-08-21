@@ -1,4 +1,4 @@
-"""Unit tests for Feraoun OCR synthetic line rendering and augmentations."""
+"""Rendering a line, and the seeds that decide whether it renders the same way twice."""
 
 from __future__ import annotations
 

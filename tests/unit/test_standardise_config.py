@@ -1,4 +1,4 @@
-"""Unit tests for Boulifa-48M model and training configurations."""
+"""The architecture and training configuration, and the values they refuse."""
 
 from __future__ import annotations
 

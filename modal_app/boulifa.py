@@ -1,4 +1,7 @@
-"""Modal app for training and deploying Boulifa-48M and generating the KabStandard dataset."""
+"""Building KabStandard and training Boulifa-48M on it.
+
+`boulifa_prepare` takes no GPU: the corruption pass is CPU work, and a preemption in
+training must not re-pay for it."""
 
 from __future__ import annotations
 
@@ -88,7 +91,6 @@ def boulifa_prepare(
 
     sentences: list[str] = []
 
-    # 1. Look for existing parquets on volume or fetch from Hub
     parquet_dir = Path(DATA_PATH) / "tasks" / "tifinagh" / "script_conversion"
     parquet_dir.mkdir(parents=True, exist_ok=True)
     hub_url = "https://huggingface.co/datasets/agbalu/KabTifinagh/resolve/main/script_conversion"
@@ -122,7 +124,8 @@ def boulifa_prepare(
             except Exception as exc:
                 log.warning("Failed to read %s: %s", pq_path, exc)
 
-    # 2. Fallback to volume text files if parquets are missing
+    # KabTifinagh's Latin side is the corpus; the Tatoeba export is what a container without
+    # it falls back to. The two are not the same corpus, so the count is logged either way.
     if not sentences:
         tatoeba_path = Path(DATA_PATH) / "raw" / "tatoeba" / "tatoeba_kab_mono_2026-08-05.tsv"
         if tatoeba_path.is_file():
@@ -138,7 +141,6 @@ def boulifa_prepare(
     log.info("Generating parallel pairs for %d canonical sentences...", len(sentences))
     pairs = list(generate_pairs(sentences, seed=seed))
 
-    # Split: 90% train, 5% dev, 5% test
     n = len(pairs)
     n_train = int(n * 0.90)
     n_dev = int(n * 0.05)
@@ -186,7 +188,12 @@ def boulifa_train(
     learning_rate: float = 5e-4,
     limit: int = 0,
 ) -> dict[str, object]:
-    """Train Boulifa-48M on GPU."""
+    """The Boulifa training run, spawned against the deployed app.
+
+    Selection is on dev character accuracy, which is **teacher-forced** — the decode runs
+    over the gold prefix. It ranks checkpoints and it is not what a caller gets; the
+    published figure comes from `make standardise TASK=evaluate`, free-running.
+    """
     from dataclasses import asdict
 
     from agbalu.standardise.config import ModelConfig
@@ -200,7 +207,6 @@ def boulifa_train(
 
     train_path = REMOTE_DATA_ROOT / "train.jsonl"
     if not train_path.is_file():
-        # Auto-prepare dataset
         log.info("KabStandard train.jsonl not found; generating dataset first...")
         boulifa_prepare.local(limit=limit)
         data_volume.reload()
@@ -271,7 +277,8 @@ def boulifa_train(
             best_dev_acc,
         )
 
-    # Fixed qualitative probe sentences to monitor progress in real-time
+    # Fixed across the run, so the log shows the same sentences improving rather than a new
+    # sample every time. The last one is already canonical: it must come back unchanged.
     eval_probes = [
         "achimi ur d-thekhedmedh ara tamazight g l'ecole?",
         "a7bib-iw l3ali, khedmegh g taddarth",
@@ -316,7 +323,6 @@ def boulifa_train(
                     tok_per_sec,
                 )
 
-        # Dev evaluation
         model.eval()
         dev_loss = 0.0
         dev_correct = 0

@@ -1,10 +1,9 @@
-"""Adlis archive scanner and book transcription pipeline for Feraoun-36M.
+"""Whole scanned books through Feraoun, page by page.
 
-Processes real scanned Kabyle books (such as `data/raw/hf.boffire.adlis-pdfs-ocr-kab`):
-1. Discovers scanned document pages (`crops/page_*.png`).
-2. Extracts horizontal text lines using projection profile segmentation.
-3. Transcribes each page with `Feraoun` Vision-Encoder-Decoder.
-4. Produces clean, searchable full-text transcriptions with metadata.
+Reads a book directory of `crops/page_*.png`, cuts each page into lines and transcribes
+them. **The model was trained on rendered text and has never been scored on a scan**, so
+what comes out of here is unmeasured — and `adlis-pdfs` copyright is unsettled
+(`docs/corpus_landscape.md`), which is why nothing from it enters the corpus.
 """
 
 from __future__ import annotations
@@ -58,7 +57,6 @@ def load_book_pages(book_dir: Path) -> list[ScannedPage]:
         msg = f"No crops/ directory found in {book_dir}"
         raise FileNotFoundError(msg)
 
-    # Check for pages.jsonl baseline annotations
     baselines: dict[int, str] = {}
     pages_jsonl = book_dir / "pages.jsonl"
     if pages_jsonl.is_file():

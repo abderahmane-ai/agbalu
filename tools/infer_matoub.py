@@ -1,13 +1,10 @@
-"""Synthesise Kabyle speech using Matoub-TTS.
+"""Hearing a Matoub checkpoint, locally, from `artifacts/matoub/`.
 
-This tool runs inference over any trained Matoub Stage 1 or Stage 2 checkpoint
-(such as Epoch 4 or the final Epoch 6 model) and outputs a 24 kHz WAV file.
+Any Stage 1 or Stage 2 checkpoint, out to a 24 kHz WAV. `alpha` and `beta` default to 0.0
+because no checkpoint here has trained diffusion; raising them blends in an untrained
+sampler.
 
-Usage:
-    # Synthesise a sentence with the Epoch 4 checkpoint:
     python3 -m tools.infer_matoub --text "Azul fell-awen, amek i telliḍ taṣebḥit-a?"
-
-    # Custom text and output path:
     python3 -m tools.infer_matoub --text "Aɣbalu d anegraw ameqqran." --out sample.wav
 """
 

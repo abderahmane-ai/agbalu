@@ -1,7 +1,9 @@
-"""Evaluation metrics and benchmark harness for Kabyle document OCR (Feraoun).
+"""The held-out evaluation behind Feraoun's published numbers.
 
-Calculates Character Error Rate (CER), Word Error Rate (WER), and exact diacritic precision
-over Kabyle extended characters and sub-dots.
+Character and word error rate, plus a precision, recall and F1 over the glyphs Kabyle
+adds to Latin. That last one is computed on the edit-distance alignment: counting glyphs
+per line instead scores a transcription with every `ḍ` in the wrong place as perfect,
+which is a defect this project has shipped twice.
 """
 
 from __future__ import annotations

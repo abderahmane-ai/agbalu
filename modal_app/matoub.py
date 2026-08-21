@@ -2,20 +2,22 @@
 
 The recipe is [`semidark/kikiri-tts`](https://github.com/semidark/kikiri-tts) (Apache-2.0)
 over a patched StyleTTS2, pinned by commit in `modal_app.common`. Stage 1 adapts the base
-to Kabyle across both voices; Stage 2 fine-tunes one voice out of it; the voicepack is what
-inference loads. Stage 1 is not optional for a new language — Stage 2 loads its output.
+to Kabyle across both voices; Stage 2 fine-tunes one voice out of it. Stage 1 is not
+optional for a new language — Stage 2 loads its output. No voicepack is extracted: the
+published `inference.py` encodes a reference clip on the filterbank `meldataset` trains
+with, where both of the recipe's extractors use a different one.
 
 **Every deterministic failure is made to happen on a CPU container.** `matoub_prepare`
 asks for no GPU and no retries, and it is where the filelists are validated, the symbol
 table is written, the base weights are converted and checked, and the audio is proved to
-exist. What reaches the GPU has already been shown to load. The split exists because the
-alternative was measured elsewhere in this project: a missing volume surfaced from inside
-`from_pretrained` as a Hub lookup, five times, once per retry, with the card attached.
+exist. What reaches the GPU has already been shown to load. `retries` is five and cannot
+tell a bug from a preemption, so a deterministic failure that reaches a GPU function is
+paid for five times.
 
-Six defects in the recipe are corrected here rather than worked around downstream. The
-first three are Stage 1's and were found before it ran; the last three are Stage 2's, and
-every one of them fails silently — a plausible checkpoint, a healthy loss curve, and a
-number that is not measuring what its name says.
+Seven defects in the recipe are corrected here rather than worked around downstream. The
+first three are Stage 1's and were found before it ran; the rest are Stage 2's, and all but
+the last fail silently — a plausible checkpoint, a healthy loss curve, and a number that is
+not measuring what its name says.
 
 1. Its symbol table has Private Use Area placeholders on rows 7, 8 and 26 and no entry for
    `ħ`, `ʕ` or `ˤ`, and its `TextCleaner` drops what it cannot find. Unmodified it deletes
@@ -1041,9 +1043,13 @@ def matoub_infer(
 ) -> dict[str, object]:
     """Inference over a trained Stage 1 or Stage 2 checkpoint on the volume.
 
-    Stage 1 runs in reference-cloning mode, extracting the speaker style embedding
-    from a reference clip on the volume. Synthesised 24 kHz audio is written to
+    The speaker style comes from a reference clip; 24 kHz audio is written to
     `/data/tts/matoub/samples/`.
+
+    **Diffusion is untrained in every checkpoint this project has produced** —
+    `lambda_diff: 0.0`, `diff_epoch: 999` — so `alpha` and `beta` blend in the output of a
+    sampler that learned nothing, and `0.0` for both is the only mode the published card
+    documents. The defaults here do not match it.
     """
     _configure_logging()
     import soundfile as sf
@@ -1082,16 +1088,16 @@ def matoub_infer(
         message = f"no checkpoint at {ckpt_path}; has Stage 1/2 trained yet?"
         raise RuntimeError(message)
 
-    # 1. G2P Phonemization
     vocabulary = Vocabulary.load()
     ipa = kokoro.fold(phonemize(text))
+    # `phonemize` raises on a character with no rule, but a folded symbol outside the table
+    # would be dropped here without a sound: the same silent deletion `mms-tts-kab` makes.
     token_ids = [vocabulary.symbols[char] for char in ipa if char in vocabulary.symbols]
     if not token_ids:
         token_ids = [vocabulary.pad_index]
     token_ids.insert(0, 0)
     tokens = torch.LongTensor(token_ids).unsqueeze(0).to(device)
 
-    # 2. Config & Auxiliary Models
     config_candidates = [
         root / f"config_{stage}_{voice}.yml",
         root / f"config_{stage}.yml",
@@ -1129,7 +1135,6 @@ def matoub_infer(
             module.to(device)
             module.eval()
 
-    # 3. Load Checkpoint into Sub-modules
     loaded = _orig_torch_load(ckpt_path, map_location=device, weights_only=False)
     net_dict = loaded["net"] if isinstance(loaded, dict) and "net" in loaded else loaded
     for key in model:
@@ -1146,7 +1151,6 @@ def matoub_infer(
                     new_sd[name] = v
                 model[key].load_state_dict(new_sd, strict=False)
 
-    # 4. Reference Audio & Style Vector
     voice_dirs = [
         CORPUS_ROOT / voice / arm,
         CORPUS_ROOT / voice,
@@ -1173,7 +1177,8 @@ def matoub_infer(
     if sr != SYNTHESIS_RATE:
         audio_trimmed = librosa.resample(audio_trimmed, orig_sr=sr, target_sr=SYNTHESIS_RATE)
 
-    # Canonical StyleTTS2 mel normalization: (log(1e-5 + mel) - (-4)) / 4
+    # `f_max=8000` and this shift are what `meldataset` trains on. A style vector extracted
+    # on any other filterbank describes a speaker the model has never heard.
     mean, std = -4, 4
     to_mel = torchaudio.transforms.MelSpectrogram(
         n_fft=2048,
@@ -1192,7 +1197,6 @@ def matoub_infer(
         ref_p = model["predictor_encoder"](mel_tensor.unsqueeze(1))
         ref_style = torch.cat([ref_s, ref_p], dim=1)
 
-    # 5. Canonical StyleTTS2 Diffusion & Decoding
     from Modules.diffusion.sampler import ADPM2Sampler, DiffusionSampler, KarrasSchedule
 
     sampler = DiffusionSampler(

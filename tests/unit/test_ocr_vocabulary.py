@@ -1,4 +1,4 @@
-"""Unit tests for the Feraoun OCR character vocabulary."""
+"""The 171-symbol table: what it holds, the letter it does not, and the width it fixes."""
 
 from __future__ import annotations
 
@@ -64,7 +64,6 @@ def test_unknown_character_replaces_with_unk() -> None:
     ids = encode(rare_text, add_special_tokens=False)
     assert UNK_ID in ids
     decoded = decode(ids, skip_special_tokens=True)
-    # UNK tokens skipped in decoded string
     assert "😊" not in decoded
     assert "Ж" not in decoded
 

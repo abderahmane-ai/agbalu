@@ -1,4 +1,4 @@
-"""Unit tests for KabStandard corpus generation and corruption logic."""
+"""The corruption pass: what it produces, and that a seed reproduces it exactly."""
 
 from __future__ import annotations
 

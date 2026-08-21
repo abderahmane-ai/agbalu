@@ -1,4 +1,4 @@
-"""Unit tests for Boulifa character-level tokenizer."""
+"""The character table, and the ids a published checkpoint is pinned to."""
 
 from __future__ import annotations
 

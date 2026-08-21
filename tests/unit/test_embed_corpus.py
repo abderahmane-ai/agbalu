@@ -1,6 +1,4 @@
-"""Unit tests for sentence embedding pair corpus extraction, leak exclusion, and
-cluster splitting.
-"""
+"""Pair extraction, the benchmark leak exclusion, and splitting on clusters."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Unit tests for Adlis book reader and scanner pipeline."""
+"""Reading a scanned book directory: what is found, and what is refused."""
 
 from __future__ import annotations
 

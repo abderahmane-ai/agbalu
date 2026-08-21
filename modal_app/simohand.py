@@ -1,15 +1,21 @@
-"""SiMohand: Kabyle sentence transformer training on Modal.
+"""Training the Kabyle sentence embeddings published as `agbalu/SiMohand-278M`.
 
-Trains a dense sentence embedding model (SiMohand-Base) with:
-1. **Vocabulary Repair**: Expands token embeddings for missing native consonants
-   (`Ɛ`, `Ɣ`, `Ǧ`, `Ẓ`, `ẓ`) using donor initialisation before training begins.
-2. **Cluster-Aware Contrastive Batching**: Prevents in-batch false negative collisions
-   by guaranteeing distinct `cluster_id`s in every mini-batch.
-3. **Matryoshka Representation Learning**: Multi-tier loss over nested dimension slices
-   [768, 512, 256, 128, 64] allowing lightweight downstream deployment.
-4. **Isotropic Collapse Control**: Verifies embedding space isotropy and STS rank correlation.
-5. **Live Probe Logging**: Periodically probes rotating semantic triplets to inspect margin
-   growth and Matryoshka dimension retention in real time.
+Three things happen here that a stock contrastive recipe does not do, and each is a
+correction rather than an addition.
+
+**The backbone's vocabulary is repaired before the first step.** Every candidate measured
+maps `ẓ` to `<unk>`, and LaBSE also loses `ǧ`; training without the repair produces an
+encoder for which `aẓar` and `aar` are the same string.
+
+**Batches are drawn from distinct clusters.** The loss treats every other passage as a
+negative, so two paraphrases of one sentence in one batch are trained apart.
+
+**The run scores its own collapse.** An encoder that maps everything into one narrow cone
+maximises the metric the published Kabyle sentence transformer reports, so a mean cosine
+over unaligned pairs is logged beside the loss and written into the final report.
+
+The loss is Matryoshka over nested slices down to 64 dimensions, which is what licenses
+quoting a truncated vector's retrieval rather than assuming it.
 """
 
 from __future__ import annotations
@@ -185,7 +191,6 @@ def simohand_train(
         message = f"no pair corpus at {train_path}; run `make modal-simohand TASK=prepare` first"
         raise FileNotFoundError(message)
 
-    # 1. Load data
     train_lines = train_path.read_text(encoding="utf-8").splitlines()
     train_rows = [json.loads(line) for line in train_lines if line.strip()]
 
@@ -208,7 +213,6 @@ def simohand_train(
     dev_data = [{"anchor": r["query"], "positive": r["passage"]} for r in dev_rows]
     dev_ds = Dataset.from_list(dev_data)
 
-    # 2. Model & Vocabulary Expansion
     _emit("backbone", name=backbone)
     torch.set_float32_matmul_precision("high")
     model = SentenceTransformer(backbone)
@@ -217,7 +221,8 @@ def simohand_train(
     tokenizer = model.tokenizer
     hf_model = model[0].auto_model
 
-    # Widen vocabulary & inject donor embeddings
+    # Before the trainer sees the model: every backbone measured maps `ẓ` to `<unk>`, and a
+    # run started without this trains on text missing a productive Kabyle consonant.
     repair_summary = repair(hf_model, tokenizer)
     _emit(
         "vocab_repair",
@@ -226,7 +231,6 @@ def simohand_train(
         after=repair_summary.vocabulary_after,
     )
 
-    # 3. Loss setup: MatryoshkaLoss wrapping MultipleNegativesRankingLoss
     base_loss = MultipleNegativesRankingLoss(model=model, scale=20.0)
     train_loss = MatryoshkaLoss(
         model=model,
@@ -234,7 +238,6 @@ def simohand_train(
         matryoshka_dims=list(MATRYOSHKA_DIMS),
     )
 
-    # 4. Training Arguments (A10 Ampere TensorCore & Memory Optimized)
     use_bf16 = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
     use_fp16 = torch.cuda.is_available() and not use_bf16
 
@@ -269,7 +272,6 @@ def simohand_train(
         report_to="none",
     )
 
-    # 5. Logging and Periodic Probe Callback
     class SiMohandLoggingCallback(TrainerCallback):
         def __init__(self) -> None:
             self._last_time = time.time()
@@ -303,7 +305,6 @@ def simohand_train(
                 pairs_per_sec=f"{pairs_per_sec:.1f}",
             )
 
-            # Periodic live semantic probe on rotating sentences
             if state.global_step > 0 and (
                 state.global_step % preview_interval == 0 or state.global_step == 1
             ):
@@ -368,7 +369,6 @@ def simohand_train(
             checkpoint_volume.commit()
             _emit("checkpoint", step=state.global_step, epoch=f"{state.epoch:.2f}")
 
-    # 6. Trainer
     trainer = SentenceTransformerTrainer(
         model=model,
         args=args,
@@ -389,12 +389,12 @@ def simohand_train(
     _emit("launch", gpu=EMBED_GPU, total_epochs=epochs, batch=batch_size)
     trainer.train(resume_from_checkpoint=last_checkpoint)
 
-    # 7. Save Model
     final_dir = Path(DATA_PATH) / "embed" / "models" / run_name
     model.save_pretrained(str(final_dir))
     _emit("saved", path=str(final_dir))
 
-    # 8. Final Evaluation: Isotropic Check
+    # The run's own collapse check: a model whose loss fell and whose embeddings all point
+    # one way is the failure this objective has, and nothing else in the log would show it.
     sample_texts = [r["query"] for r in train_rows[:1000]]
     embeddings = model.encode(sample_texts, show_progress_bar=False).tolist()
     iso_check = check_isotropic_collapse(embeddings)
@@ -468,7 +468,6 @@ def simohand_eval(
 
     _emit("eval_start", target=str(model_dir))
 
-    # 1. Load Dev Pairs
     raw_lines = [line for line in dev_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     dev_rows = [json.loads(line) for line in raw_lines]
     if limit > 0:
@@ -499,10 +498,10 @@ def simohand_eval(
             positives, convert_to_tensor=True, normalize_embeddings=True, show_progress_bar=False
         )
 
-        # Cosine similarity matrix [N, N]
+        # Every other passage in the set is a distractor, so the diagonal is the target and
+        # its rank is what Recall@k counts.
         sim_matrix = torch.mm(q_embs, pos_embs.t())
 
-        # Rank of target positive (diagonal i == i)
         ranks: list[int] = []
         for i in range(n_pairs):
             tgt_score = sim_matrix[i, i].item()
@@ -534,7 +533,6 @@ def simohand_eval(
             "is_collapsed": iso.collapsed,
         }
 
-        # Matryoshka dimension slices for SiMohand
         if "SiMohand" in name:
             mrl_slices: dict[str, object] = {}
             for d in [512, 256, 128, 64]:

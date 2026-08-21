@@ -1,7 +1,9 @@
-"""Probabilistic human typing generator and parallel dataset construction.
+"""The corruption pass that builds the standardisation corpus.
 
-Constructs `agbalu/KabStandard`: parallel pairs mapping real-world informal, French-keyboard,
-and Arabizi Kabyle text into 100% canonical Kabyle Latin.
+Builds `agbalu/KabStandard` by corrupting canonical text rather than by collecting real
+typing, so the pairs are a model of how Kabyle is typed and not a sample of it. What a
+score over them measures is recovery from *this* distribution — the card says so, and it
+is why the do-nothing baseline is printed beside every result.
 """
 
 from __future__ import annotations
@@ -87,7 +89,6 @@ def corrupt_text(text: str, rng: random.Random) -> str:
     while i < len(text):
         char = text[i]
 
-        # 1. Handle vowel digraph 'ou' for 'u'
         if char == "u" and rng.random() < PROB_DIGRAPH_OU:
             chars.append("ou")
             i += 1
@@ -97,7 +98,6 @@ def corrupt_text(text: str, rng: random.Random) -> str:
             i += 1
             continue
 
-        # 2. General phonetic substitutions
         if char in SUBSTITUTIONS and rng.random() < PROB_SUBSTITUTION:
             chars.append(_choose_sub(char, rng))
         else:
@@ -106,14 +106,15 @@ def corrupt_text(text: str, rng: random.Random) -> str:
 
     corrupted = "".join(chars)
 
-    # 3. Clitic hyphen omission (e.g. 'd-yeffeɣ' -> 'd yeffegh' or 'dyeffegh')
+    # `d-yeffeɣ` is typed `d yeffegh` or `dyeffegh`, so restoring the boundary is part of
+    # the task and not only the diacritics.
     if "-" in corrupted and rng.random() < PROB_CLITIC_DROP:
         if rng.random() < PROB_CLITIC_DROP:
             corrupted = corrupted.replace("-", " ")
         else:
             corrupted = corrupted.replace("-", "")
 
-    # 4. Preposition shortening (e.g. 'deg taddart' -> 'g taddart')
+    # `deg taddart` is typed `g taddart`.
     if rng.random() < PROB_PREP_SHORTEN:
         corrupted = re.sub(r"\bdeg\s+", "g ", corrupted)
         corrupted = re.sub(r"\bseg\s+", "s ", corrupted)

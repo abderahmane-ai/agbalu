@@ -1,4 +1,4 @@
-"""Unit tests for Standardiser inference engine."""
+"""Free-running decoding through `Standardiser`, which is what a caller gets."""
 
 from __future__ import annotations
 

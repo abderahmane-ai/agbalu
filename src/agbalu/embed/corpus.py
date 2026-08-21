@@ -1,24 +1,18 @@
 """The sentence embedding fine-tuning corpus: pairs, clusters, and leak exclusion.
 
-The objective is contrastive representation learning (InfoNCE / Matryoshka).
-Training pairs originate from two curated sources:
-1. **Parallel translations**: Curated human bitext (`kab-eng` and `kab-fra`) excluding
-   mined NLLB output, where each sentence translates the other.
-2. **TaPaCo Paraphrase Clusters**: Monolingual Kabyle paraphrase groups (`kab-kab`) where
-   sentences belonging to the same cluster express identical semantic intent.
+Pairs come from human bitext (`kab-eng`, `kab-fra`, mined NLLB excluded) and from TaPaCo
+paraphrase groups. Two invariants decide whether the resulting number means anything, and
+both are enforced here rather than downstream.
 
-### Decontamination & Leak Exclusion
-Sentence transformers are sensitive to evaluation benchmark memorisation.
-Before any pair is accepted:
-- All benchmark sentences (from FLORES+ dev/test and STS evaluation sets) are indexed
-  under both raw and NFKD-normalised fingerprints (`agbalu.extract.fingerprint`).
-- Any pair containing a query or passage matching a benchmark sentence is excluded.
+**Every pair carries a `cluster_id`, and a split is cut on clusters.** The objective treats
+every other row in the batch as a negative, so two paraphrases of one sentence meeting in
+one batch are a false negative — and a cluster spanning train and dev is the evaluation
+scoring what training saw.
 
-### Cluster Integrity
-In contrastive learning, in-batch negative sampling assumes distinct rows are semantically
-different. Multiple sentences from the same paraphrase cluster in the same batch act as
-false negatives. Every pair is assigned a `cluster_id`, and train/dev splitting is performed
-strictly at the cluster level so that no cluster spans across splits.
+**A pair whose either side matches a benchmark sentence is dropped**, under both the raw and
+the NFKD fingerprint, against FLORES+ dev and test and the STS set. Exclusion is per record
+on either side: keying it on one side leaks through the other side's partners, which has
+already put 274 of 832 evaluation sentences back into training once in this project.
 """
 
 from __future__ import annotations

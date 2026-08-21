@@ -3,11 +3,10 @@
 Published as `agbalu/Boulifa-48M`. The release name is not a code identifier (§3.9), so
 the classes here are named for what they configure.
 
-Features:
-- Depthwise convolutional stem (kernels 3, 5) for local multi-character digram/trigram context
-- Rotary Position Embeddings (RoPE)
-- SwiGLU non-linearities and RMSNorm
-- Tied embeddings and output projection
+The one architectural decision worth stating: a depthwise convolutional stem at kernels 3
+and 5 sits under the encoder, because the corruptions this model undoes are digraphs and
+trigraphs — `ou` for `u`, `gh` for `ɣ`, `dh` for `ḍ` — and attention alone has to learn
+that adjacency from scratch.
 """
 
 from __future__ import annotations
@@ -245,7 +244,6 @@ class CharTransformer(nn.Module):
         return decoded
 
     def output_projection(self, x: Tensor) -> Tensor:
-        # Tied embedding output
         logits: Tensor = functional.linear(x, self.embedding.weight)
         return logits
 
@@ -258,11 +256,12 @@ class CharTransformer(nn.Module):
     ) -> LossOutput:
         pad = self.config.pad_token_id if pad_id is None else pad_id
 
-        # Target shifted right for teacher forcing
+        # Teacher forcing: the decoder reads the gold prefix. Accuracy computed from this
+        # path is not the accuracy a caller gets, and the card's headline is the
+        # free-running number for that reason.
         dec_in = target_ids[:, :-1]
         dec_out = target_ids[:, 1:]
 
-        # Causal mask for decoder
         seq_len = dec_in.shape[1]
         causal_mask = (
             torch.triu(
@@ -273,7 +272,6 @@ class CharTransformer(nn.Module):
             .unsqueeze(0)
         )
 
-        # Padding masks
         enc_pad_mask = (input_ids == pad).unsqueeze(1).unsqueeze(2)
         enc_mask = torch.zeros(
             (input_ids.shape[0], 1, 1, input_ids.shape[1]),
@@ -294,7 +292,6 @@ class CharTransformer(nn.Module):
         )
         logits = self.output_projection(decoded)
 
-        # Loss calculation with label smoothing
         loss = functional.cross_entropy(
             logits.reshape(-1, logits.shape[-1]),
             dec_out.reshape(-1),

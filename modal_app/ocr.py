@@ -116,8 +116,9 @@ def _fetch_tifinagh_parquet() -> None:
 def _load_corpus(max_lines: int, tifinagh_ratio: float) -> list[str]:
     """Lines to render, from the volume.
 
-    Raises on anything missing. Training on a handful of repeated sentences produces a
-    beautiful loss curve, a plausible CER and a model that has read seven sentences.
+    Raises on anything missing, rather than falling back to a sample pool. A run over a
+    handful of repeated sentences converges, reports a plausible CER, and writes a
+    checkpoint that has read seven sentences.
     """
     from agbalu.ocr.dataset import (
         build_dual_script_lines,

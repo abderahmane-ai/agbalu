@@ -1,7 +1,7 @@
-"""Document & Book Line OCR (Vision-Encoder-Decoder).
+"""Line-level optical character recognition for printed Kabyle.
 
-Published as `agbalu/Feraoun-36M`. Provides optical character recognition for scanned
-Kabyle books, historical manuscripts, newspapers, and printed archives.
+Published as `agbalu/Feraoun-36M`. Trained and scored on rendered lines; a scanned page
+reaches the model through `adlis`, and no measurement here covers one.
 """
 
 from agbalu.ocr.adlis import (

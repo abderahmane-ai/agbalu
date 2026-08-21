@@ -1,7 +1,9 @@
-"""Character-level tokenizer for orthography standardisation and diacritic recovery.
+"""The character table Boulifa reads and writes.
 
-Operates at the character level with fixed token indices so the model vocabulary is
-compact (128 slots) and free from subword out-of-vocabulary failures.
+Per character, because the corruption is per character: a subword vocabulary would have to
+hold every misspelling as its own token. `vocab_size` is 128 against an inventory of
+`len(SPECIALS) + len(ALPHABET)`, so the embedding table carries a few free rows — adding a
+letter costs nothing until they run out, and then it costs a retrain.
 """
 
 from __future__ import annotations
@@ -18,19 +20,15 @@ EOS_TOKEN: Final = "</s>"  # noqa: S105
 
 SPECIALS: Final = (PAD_TOKEN, UNK_TOKEN, BOS_TOKEN, EOS_TOKEN)
 
-# 128 character inventory
 ALPHABET: Final = (
-    # Latin letters lowercase
     "abcdefghijklmnopqrstuvwxyz"
-    # Latin letters uppercase
     "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-    # Digits & Arabizi
+    # Digits, which in Arabizi are letters: `3` stands for both `ɛ` and `ɣ`, and resolving
+    # which is the model's hardest substitution.
     "0123456789"
-    # Berber canonical diacritics and IPA Latin extensions
     "čČğĞǦǧḍḌṭṬṣṢẓẒṛṚḥḤɛƐɣƔ"
-    # Common French accent vowels in Kabyle loanwords/inputs
+    # French accents, which reach the input through loanwords and through keyboards.
     "éèêàâîôûëï"
-    # Punctuation and spacing
     " .,!?:;-'\"()[]/\\_+=%«»–—\n"
 )
 

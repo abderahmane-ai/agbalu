@@ -37,7 +37,8 @@ REPO_ID = "agbalu/Matoub-82M"
 CHECKPOINT_FILE = "epoch_2nd_00003.pth"
 SAMPLE_RATE = 24_000
 
-# Kabyle Latin to IPA table
+# A copy of `agbalu.tts.g2p`'s table, not an import: nothing under `hub/` may import
+# `agbalu`, because the published repository ships without it. The two must agree.
 _KAB_G2P: dict[str, str] = {
     "b": "b",
     "d": "d",

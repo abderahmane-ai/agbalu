@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from typing import Final
 
-# Special tokens
 PAD_TOKEN: Final = "<pad>"
 BOS_TOKEN: Final = "<s>"
 EOS_TOKEN: Final = "</s>"
@@ -25,29 +24,21 @@ BOS_ID: Final = 1
 EOS_ID: Final = 2
 UNK_ID: Final = 3
 
-# Base Latin letters (lower and upper)
 _LOWER_LATIN: Final = "abcdefghijklmnopqrstuvwxyz"
 _UPPER_LATIN: Final = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
-# Native Kabyle extended consonants
 KABYLE_EXTENDED: Final = "ɣƔɛƐčČǧǦ"
-
-# Sub-dot emphatic and pharyngeal consonants
 KABYLE_SUBDOTS: Final = "ḍḌḥḤṛṚṣṢṭṬẓẒ"
 
-# Digits
 _DIGITS: Final = "0123456789"
-
-# Common punctuation and typographical marks found in Kabyle literature
 _PUNCTUATION: Final = " .,?!«»-—:;'\"/()[]{}%*+=_~–…\n\t"
 
-# Tifinagh basic character inventory (for bilingual/transcribed manuscripts)
+# Tifinagh, because a Kabyle page is sometimes set in both scripts.
 _TIFINAGH: Final = "ⴰⴱⴳⴷⴹⴻⴼⴽⵀⵃⵄⵅⵇⵉⵊⵍⵎⵏⵓⵔⵕⵙⵚⵛⵜⵟⵡⵢⵣⵥⵖ"
 
-# Common accented Latin letters found in historical Kabyle publications
+# French-accented letters, which older Kabyle publications set in loanwords and names.
 _ACCENTED_LATIN: Final = "éèêëàâîïôùûçÉÈÊËÀÂÎÏÔÙÛÇ"
 
-# Construct the deduplicated, deterministic vocabulary
 _INVENTORY: Final[str] = (
     _LOWER_LATIN
     + _UPPER_LATIN
@@ -59,10 +50,8 @@ _INVENTORY: Final[str] = (
     + _TIFINAGH
 )
 
-# Deterministic list of all unique characters
 _UNIQUE_CHARS: Final[tuple[str, ...]] = tuple(dict.fromkeys(_INVENTORY))
 
-# Complete token list including special tokens
 VOCABULARY: Final[tuple[str, ...]] = (
     PAD_TOKEN,
     BOS_TOKEN,
@@ -73,7 +62,6 @@ VOCABULARY: Final[tuple[str, ...]] = (
 
 VOCAB_SIZE: Final[int] = len(VOCABULARY)
 
-# Fast bidirectional lookups
 _CHAR_TO_ID: Final[dict[str, int]] = {char: idx for idx, char in enumerate(VOCABULARY)}
 _ID_TO_CHAR: Final[dict[int, str]] = dict(enumerate(VOCABULARY))
 

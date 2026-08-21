@@ -86,7 +86,7 @@ def save_checkpoint(
 
 
 class Trainer:
-    """Orchestrates optimization, evaluation, and checkpointing for OCR."""
+    """The training loop, its evaluations, and the checkpoints a preemption resumes from."""
 
     def __init__(
         self,

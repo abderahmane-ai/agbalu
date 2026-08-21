@@ -1,4 +1,4 @@
-"""Unit tests for BoulifaModel neural architecture."""
+"""`CharTransformer`'s shapes, and the teacher-forced path its loss is computed on."""
 
 from __future__ import annotations
 
@@ -17,7 +17,6 @@ def test_char_transformer_parameter_count() -> None:
 
 
 def test_char_transformer_forward_pass() -> None:
-    # Use a tiny 2-layer config for instant unit testing
     config = ModelConfig(
         vocab_size=128,
         hidden_size=64,

@@ -39,7 +39,6 @@ P_BLEEDTHROUGH: Final[float] = 0.3
 def apply_skew(image: Image.Image, max_angle: float = MAX_SKEW_ANGLE) -> Image.Image:
     """Apply a random slight rotation simulating scanner paper feed skew."""
     angle = random.uniform(-max_angle, max_angle)
-    # Rotate with white background fill
     return image.rotate(
         angle,
         resample=Image.Resampling.BILINEAR,
@@ -71,10 +70,8 @@ def apply_ink_degradation(image: Image.Image) -> Image.Image:
     """Simulate ink bleed (dilation/darkening) or dry-ribbon fade (erosion)."""
     p = random.random()
     if p < P_INK_BLEED:
-        # Ink bleed: min filter on grayscale (darkens thin strokes)
         return image.filter(ImageFilter.MinFilter(size=3))
     if p < P_INK_FADE:
-        # Faded ink: max filter (thins strokes)
         return image.filter(ImageFilter.MaxFilter(size=3))
     return image
 
@@ -82,12 +79,10 @@ def apply_ink_degradation(image: Image.Image) -> Image.Image:
 def apply_photometric_jitter(image: Image.Image) -> Image.Image:
     """Adjust brightness and contrast to simulate photocopier exposure variations."""
     if random.random() < P_PHOTOMETRIC:
-        # Contrast adjustment
         contrast_factor = random.uniform(0.75, 1.35)
         image = ImageEnhance.Contrast(image).enhance(contrast_factor)
 
     if random.random() < P_PHOTOMETRIC:
-        # Brightness adjustment
         brightness_factor = random.uniform(0.85, 1.15)
         image = ImageEnhance.Brightness(image).enhance(brightness_factor)
 
@@ -97,10 +92,8 @@ def apply_photometric_jitter(image: Image.Image) -> Image.Image:
 def apply_paper_tint(image: Image.Image) -> Image.Image:
     """Simulate aged or yellowed book paper backgrounds."""
     if random.random() < P_PAPER_TINT:
-        # Convert to RGB if not already
         rgb = image.convert("RGB")
         arr = np.array(rgb, dtype=np.float32)
-        # Slight yellow/sepia tint: reduce blue channel slightly on light pixels
         tint_r = random.uniform(0.98, 1.0)
         tint_g = random.uniform(0.95, 0.99)
         tint_b = random.uniform(0.88, 0.96)
@@ -117,7 +110,6 @@ def apply_shadow_gradient(image: Image.Image) -> Image.Image:
         rgb = image.convert("RGB")
         arr = np.array(rgb, dtype=np.float32)
         h, w, _ = arr.shape
-        # Create horizontal or vertical gradient
         direction = random.choice(["left_to_right", "right_to_left", "top_to_bottom"])
         if direction == "left_to_right":
             grad = np.linspace(random.uniform(0.65, 0.9), 1.0, w, dtype=np.float32)
@@ -139,7 +131,6 @@ def apply_bleedthrough_noise(image: Image.Image) -> Image.Image:
     if random.random() < P_BLEEDTHROUGH:
         arr = np.array(image.convert("L"), dtype=np.float32)
         h, w = arr.shape
-        # Add random faint ghost streaks
         ghost_raw = np.random.uniform(0.88, 1.0, (h, w)).astype(np.float32)
         ghost_img = Image.fromarray((ghost_raw * 255).astype(np.uint8)).filter(
             ImageFilter.GaussianBlur(radius=2.0)

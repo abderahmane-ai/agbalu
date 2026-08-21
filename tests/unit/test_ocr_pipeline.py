@@ -1,4 +1,4 @@
-"""Unit tests for OCR pipeline, dataset, and inference."""
+"""The dataset, the checkpoint round trip, and the guards a resumed run rests on."""
 
 from __future__ import annotations
 

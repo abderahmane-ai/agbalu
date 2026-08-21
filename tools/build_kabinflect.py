@@ -188,7 +188,6 @@ def main() -> None:
     test_lemmas = {r["lemma"] for r in splits["test"]}
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    # 1. Export Inflection Config Parquet
     inflection_schema = pa.schema(
         [
             pa.field("id", pa.string()),
@@ -222,7 +221,6 @@ def main() -> None:
             out_file = config_dir / f"{split_name}.parquet"
             pq.write_table(table, out_file, compression="snappy")
 
-    # 2. Export Analysis Config Parquet
     analysis_schema = pa.schema(
         [
             pa.field("id", pa.string()),
@@ -255,7 +253,6 @@ def main() -> None:
             out_file = config_dir / f"{split_name}.parquet"
             pq.write_table(table, out_file, compression="snappy")
 
-    # 3. Export Conjugation Table Paradigms Config Parquet
     log.info("exporting conjugation tables")
     conj_shards = sorted((RAW_DIR / "conjugation-tables").glob("*.parquet"))
     conj_rows = []
@@ -315,7 +312,6 @@ def main() -> None:
         out_file = config_dir / "train.parquet"
         pq.write_table(p_table, out_file, compression="snappy")
 
-    # 4. Generate dataset_info.json
     dataset_info = {
         "dataset_name": "agbalu/KabInflect",
         "description": "Kabyle verb inflection, analysis and conjugation tables",
