@@ -149,6 +149,27 @@ def command_transcribe(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_corpus_pro(args: argparse.Namespace) -> int:
+    """Build the unified 566h+ Fadhma-Pro dataset."""
+    from agbalu.speech.corpus_pro import SpeechProError, build_pro_corpus  # noqa: PLC0415
+
+    try:
+        report = build_pro_corpus(raw_dir=args.transcripts, out_dir=args.out)
+    except SpeechProError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+    else:
+        train_h = report["train_pro"]["hours"]
+        train_clips = report["train_pro"]["clips"]
+        train_spk = report["train_pro"]["speakers"]
+        print(
+            f"  Fadhma-Pro corpus built: {train_h}h train, "
+            f"{train_clips:,} clips across {train_spk} speakers"
+        )
+        print(f"  Speaker overlap check: {report['speaker_leakage_check']}")
+        return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="agbalu-speech", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -158,6 +179,10 @@ def build_parser() -> argparse.ArgumentParser:
     corpus_cmd.add_argument("--out", type=Path, default=PROCESSED)
     corpus_cmd.add_argument("--stats", type=Path, default=CORPUS_STATS)
     corpus_cmd.add_argument("--splits", nargs="+", default=list(SPLITS))
+
+    corpus_pro_cmd = sub.add_parser("corpus-pro", help="build unified 566h+ Fadhma-Pro dataset")
+    corpus_pro_cmd.add_argument("--transcripts", type=Path, default=TRANSCRIPTS)
+    corpus_pro_cmd.add_argument("--out", type=Path, default=Path("data/processed/speech_pro"))
 
     vocab_cmd = sub.add_parser("vocabulary", help="build the CTC vocabulary from the splits")
     vocab_cmd.add_argument("--out", type=Path, default=PROCESSED)
@@ -191,6 +216,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 COMMANDS: Final[dict[str, Callable[[argparse.Namespace], int]]] = {
     "corpus": command_corpus,
+    "corpus-pro": command_corpus_pro,
     "vocabulary": command_vocabulary,
     "lm": command_lm,
     "release": command_release,
