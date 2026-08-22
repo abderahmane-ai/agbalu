@@ -51,6 +51,12 @@ models = [
     # which numpy 2 raises on, so `predict` is unusable on any current install.
     # It provides the same `fasttext` module.
     "fasttext-numpy2>=0.10.4",
+    # `agbalu.ocr.trainer_pro` scores a whole held-out split per epoch. A C extension
+    # rather than `agbalu.ocr.evaluate.levenshtein_distance`, which is the pure-Python
+    # implementation the Feraoun-36M evaluation uses: at this split size the Python one
+    # costs more than the training it interrupts. Declared here because the module
+    # imports it, and an undeclared import is one whose tests cannot run.
+    "editdistance>=0.8",
 ]
 # Local decoding with a released Fadhma directory. Separate from `models`: the benchmark
 # inference stack has no reason to grow an audio decoder, and `soundfile` and `librosa` were
@@ -74,6 +80,9 @@ dev = [
     "ruff>=0.6",
     "types-PyYAML>=6.0",
     "types-requests>=2.32",
+    # The character map a face declares, which is the ground truth `fonts_pro`'s rendered
+    # probe stands in for. Test-only: the renderer itself needs Pillow and nothing more.
+    "fonttools>=4.50",
 ]
 
 [project.urls]
@@ -146,7 +155,20 @@ ignore = [
 # RUF012: `_tied_weights_keys` is declared as an instance variable on `PreTrainedModel`,
 #         so annotating the override `ClassVar` is a mypy error. The two rules disagree
 #         and the library decides.
-"src/agbalu/hub/**" = ["ANN401", "ARG002", "PLR0913", "RUF012", "TID252", "PLC0415", "T201", "N806"]
+# S107:   `pad_token`, `bos_token` and `eos_token` are `PreTrainedTokenizer`'s own parameter
+#         names, and their defaults are the phoneme table's boundary symbol. The rule reads
+#         any string default on a parameter ending in `_token` as a credential.
+"src/agbalu/hub/**" = [
+    "ANN401",
+    "ARG002",
+    "PLR0913",
+    "RUF012",
+    "TID252",
+    "PLC0415",
+    "T201",
+    "N806",
+    "S107",
+]
 # PLC0415: `torch`, `transformers`, `soundfile`, `librosa` and `pyctcdecode` are the optional
 #          `models` and `speech` extras. `audio_files` and `read_vocabulary` are what a test
 #          exercises without any of them, and a module-scope import would make the whole
@@ -302,6 +324,7 @@ ignore = [
 # S105: `<pad>`, `<s>`, `</s>` and `<unk>` are the four special symbols of a character
 #       table. The rule reads `*_TOKEN = "..."` as a credential.
 "src/agbalu/ocr/vocabulary.py" = ["S105"]
+"src/agbalu/ocr/vocabulary_pro.py" = ["S105"]
 # S311: the renderer draws a font, a size and an offset. Where those must reproduce — the
 #       un-augmented validation render and the line chunking — a seeded `random.Random` is
 #       threaded in explicitly; the training draws are meant to differ every epoch. A
@@ -310,6 +333,20 @@ ignore = [
 "src/agbalu/ocr/augment.py" = ["S311"]
 "src/agbalu/ocr/dataset.py" = ["S311"]
 "src/agbalu/ocr/cli.py" = ["S311", "PLC0415"]
+# The Feraoun-Pro half of the package, same rules for the same reasons.
+# PLR2004: pixel thresholds and canvas dimensions read as magic values. Each is a rendering
+#          constant named at the top of its module or stated inline in the units it is in.
+"src/agbalu/ocr/synthetic_pro.py" = ["S311", "PLR2004"]
+"src/agbalu/ocr/backgrounds_pro.py" = ["S311", "PLR2004"]
+"src/agbalu/ocr/adlis_gold.py" = ["S311", "PLR2004"]
+"src/agbalu/ocr/augment_pro.py" = ["S311"]
+"src/agbalu/ocr/dataset_pro.py" = ["S311", "PLR2004", "PLC0415"]
+"src/agbalu/ocr/cli_pro.py" = ["PLC0415", "T201"]
+"src/agbalu/ocr/model_pro.py" = ["PLR0913"]
+# PLR0912/PLR0915/PLR0913: as `trainer.py`. `train_feraoun_pro` is setup, resume, the loop,
+#          two evaluations and the summary over shared state; the one part worth isolating,
+#          the checkpoint gate that protects the Latin capability, is `CheckpointGate`.
+"src/agbalu/ocr/trainer_pro.py" = ["PLR0912", "PLR0913", "PLR0915", "PLC0415"]
 # S311: a fixed-seed draw over the held-out split, so two checkpoints are scored on the
 #       same pairs. A cryptographic generator would make that irreproducible.
 "src/agbalu/standardise/cli.py" = ["S311"]
@@ -335,6 +372,7 @@ ignore = [
 # S310:    `urlretrieve` fetches one module constant — the published KabTifinagh parquet —
 #          over https, into a staging path it then renames. No value comes from outside.
 "modal_app/ocr.py" = ["S310"]
+"modal_app/ocr_pro.py" = ["S310"]
 # PLR0915/PLR0912: a training entrypoint is one long function on purpose. Setup, resume,
 #          the loop, evaluation, checkpointing and the summary share the state they pass
 #          between them, and splitting them puts that state in a class whose only caller
@@ -420,9 +458,30 @@ disallow_any_unimported = false
 module = ["cut_cross_entropy.*"]
 ignore_missing_imports = true
 
+# `PreTrainedModel.eval` is `def eval(self):` in transformers 5 — untyped, so any caller
+# holding a *typed* model trips `disallow_untyped_calls`. Everywhere else in the tree the
+# model comes back from `from_pretrained` as `Any` and the call is invisible; these two
+# construct a `MatoubForTextToWaveform` directly. Both spellings, because `tools/` has no
+# `__init__.py` and mypy names the module by how it was reached.
+[[tool.mypy.overrides]]
+module = ["tools.export_matoub", "export_matoub", "tests.unit.test_hub_matoub"]
+disallow_untyped_calls = false
+
 # `pyarrow` ships no py.typed marker and no stubs on PyPI.
 [[tool.mypy.overrides]]
 module = ["pyarrow.*"]
+ignore_missing_imports = true
+
+# `editdistance` is a C extension with no stubs. It is one call returning an int, and the
+# metric functions that use it declare what they return.
+[[tool.mypy.overrides]]
+module = ["editdistance.*"]
+ignore_missing_imports = true
+
+# `fontTools` ships no py.typed marker. Reached from one test, which reads a face's cmap to
+# check the rendered glyph probe against the font's own declaration.
+[[tool.mypy.overrides]]
+module = ["fontTools.*"]
 ignore_missing_imports = true
 
 
@@ -465,6 +524,7 @@ module = [
     "agbalu.bench.tifinagh",
     "agbalu.bench.inflect",
     "agbalu.ocr.dataset",
+    "agbalu.ocr.dataset_pro",
     "modal_app.boulifa",
     "tools.build_kabinflect",
     "tools.build_kabtifinagh",

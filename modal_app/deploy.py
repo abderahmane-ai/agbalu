@@ -6,6 +6,9 @@ Deploying `modal_app.train` alone leaves `finetune` unreachable by name; deployi
 `modal_app.mt` alone drops `pretrain` from the same app. Importing all of them here is what
 makes `modal_app.launch --function` able to address any of them.
 
+`ocr_pro` and `asr_pro` are absent: each owns its own app, so importing them here would
+build their images for functions this deploy cannot publish.
+
     modal deploy -m modal_app.deploy
 """
 

@@ -3,7 +3,7 @@
 python3 -m agbalu.punctuation.cli corpus
 python3 -m agbalu.punctuation.cli train --epochs 3
 python3 -m agbalu.punctuation.cli evaluate --split test
-python3 -m agbalu.punctuation.cli --run artifacts/runs/punctuation-v2 restore --text "azul"
+python3 -m agbalu.punctuation.cli --run artifacts/runs/punctuation restore --text "azul"
 
 `--run` is a global option and precedes the subcommand. `restore` reads stdin one line per
 utterance, so `agbalu.speech.cli transcribe` pipes straight into it.

@@ -278,9 +278,9 @@ and then reported as unexpected keys.
 ```
 make punctuation TASK=corpus
 make modal-upload TASK=punctuation
-make modal-punctuation TASK=train EPOCHS=3 RUN=punctuation-v2
-make modal-punctuation TASK=evaluate SPLIT=test RUN=punctuation-v2
-make modal-punctuation TASK=evaluate SPLIT=ood RUN=punctuation-v2
+make modal-punctuation TASK=train EPOCHS=3 RUN=punctuation
+make modal-punctuation TASK=evaluate SPLIT=test RUN=punctuation
+make modal-punctuation TASK=evaluate SPLIT=ood RUN=punctuation
 make release REPO=belaid
 ```
 

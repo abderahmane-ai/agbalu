@@ -2,6 +2,7 @@
 language:
 - kab
 license: apache-2.0
+library_name: transformers
 base_model: hexgrad/Kokoro-82M
 tags:
 - kabyle
@@ -12,17 +13,17 @@ tags:
 - speech-synthesis
 - styletts2
 - low-resource
-- preview
 pipeline_tag: text-to-speech
 ---
 
-# Matoub-82M · Preview
+# Matoub-82M
 
-A text-to-speech model for **Kabyle** (Taqbaylit, `kab`), released as a **preview checkpoint**. An 82M-parameter StyleTTS2 fine-tune of [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) trained on 21,953 restored Common Voice Kabyle clips from a fifties male speaker. It synthesises 24 kHz speech that reproduces the gemination, spirantisation, emphatics, and pharyngeals of Kabyle phonology in a native speaker voice — twice the sample rate of `mms-tts-kab`, the incumbent Kabyle TTS model, and under a licence that permits commercial use where that one does not.
+A text-to-speech model for **Kabyle** (Taqbaylit, `kab`): an 82M-parameter StyleTTS2 fine-tune of [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) trained on 21,953 restored Common Voice Kabyle clips from a fifties male speaker. It synthesises 24 kHz speech that reproduces the gemination, spirantisation, emphatics, and pharyngeals of Kabyle phonology in a native speaker voice — twice the sample rate of `mms-tts-kab`, the incumbent Kabyle TTS model, and under a licence that permits commercial use where that one does not.
 
 The work that makes it Kabyle is the front end. Kokoro's token table maps 114 symbols and carries none of `ˤ ʕ ħ` — pharyngealisation, and the letters `ɛ` and `ḥ` — while its G2P is built with `unk=''` and drops a phoneme it cannot represent rather than raising, which would have deleted three consonants from every training target behind a healthy loss curve. The 42-symbol Kabyle inventory was diffed against that table, the three missing symbols assigned to unused embedding rows and trained, the affricate tie bar folded onto `ʧ` and `ʤ`, and the front end made to validate against the vocabulary and raise. That is why the emphatics and pharyngeals survive to the decoder.
 
-Released as a preview: it publishes one voice, and its Cycle-CER is not yet measured.
+One voice is published here — `kab_male`. The female Stage 2 and the Cycle-CER are the next
+two, and this repository carries no claim about either until they land.
 
 Named after **Lounès Matoub** (1956-1998), Kabyle singer, poet, and tireless voice of Taqbaylit, who gave his life to its language and culture.
 
@@ -35,7 +36,7 @@ The baseline for Kabyle TTS is `mms-tts-kab` (Meta's MMS). Cycle-CER measures th
 | `mms-tts-kab` | 11.89 | 8.33 | +3.56 |
 | **Matoub-82M** | *not yet measured* | | |
 
-**That baseline row is itself a result of this project.** `mms-tts-kab` had been published without a Kabyle score by anyone; the +3.56 delta above was measured here on 2026-08-14 over 1,000 held-out non-biblical prompts, against a real-audio control on the same text. Kabyle TTS now has a number to be judged against. Matoub-82M's own Cycle-CER is not yet measured, and this card carries no claim about it until it is.
+**That baseline row is itself a result of this project.** `mms-tts-kab` had been published without a Kabyle score by anyone; the +3.56 delta was measured here on 2026-08-14 over 1,000 held-out non-biblical prompts, against a real-audio control on the same text. Kabyle TTS now has a number to be judged against, and this model will be judged against it too — the run has not been made, so the row stays empty rather than estimated.
 
 Three things worth reading carefully.
 
@@ -43,7 +44,9 @@ Three things worth reading carefully.
 
 **The training audio has a hard frequency ceiling.** The `kab_male` clips are band-limited at approximately 7.9 kHz -- not 11.5 kHz or 24 kHz -- because the recording conditions for Common Voice Kabyle combined with phone microphones, lossy encoding, and upload artefacts cut the spectral content. The model cannot synthesise what was not in its training data; any evaluation above 7.9 kHz measures silence. This is a property of the Kabyle speech record rather than of this checkpoint — the incumbent synthesises at 16 kHz, so both systems are band-limited, and closing it needs recordings that do not currently exist.
 
-**Diffusion was not trained in this checkpoint.** `lambda_diff: 0.0` in the training config. Passing `beta > 0.0` to the inference function injects Gaussian noise from an untrained sampler directly into the decoder. Use `alpha=0.0, beta=0.0` (pure reference style). This is the correct inference mode for this checkpoint and the one the sample audio was produced with.
+**Diffusion was never trained, so it is not in the release.** `lambda_diff: 0.0` for every epoch, which left the style sampler exactly as Kokoro initialised it — blending its output into the decoder injects noise from a module that learned nothing. The export drops it, along with the two style encoders, and carries the speaker style as a 256-dim vector instead. There is no `alpha` or `beta` to set and no way to set one wrong.
+
+**The vocoder is stochastic.** The harmonic-plus-noise source draws its noise floor and initial phase from the global RNG, so two calls on the same text return different samples. Seed `torch` if you need one waveform twice.
 
 ## Intended use
 
@@ -59,40 +62,51 @@ Producing spoken Kabyle from text for:
 
 This checkpoint establishes the parts that carry forward: a Kabyle phoneme inventory the base model can represent, a G2P front end that raises instead of dropping, a two-stage recipe that trains to a monotone validation curve on 17.9 hours, and an end-to-end path from Kabyle text to 24 kHz audio.
 
-What it does not yet have is a second voice and a perceptual measurement. The `kab_female` Stage 2, the Cycle-CER, and UTMOSv2 and speaker-similarity scoring are the next three, in that order.
+Next, in order: the `kab_female` Stage 2, the Cycle-CER against the `mms-tts-kab` baseline above, then UTMOSv2 and speaker similarity.
 
-This preview stays permanently published. The production voices that follow it are released under their own names as standalone repositories rather than replacing this checkpoint.
+This repository stays permanently published at this URL. Voices that follow are released under their own names as standalone repositories rather than replacing it.
 
 ## Usage
 
-**Not a `from_pretrained` model.** StyleTTS2 is not a `transformers` architecture and this is
-a training checkpoint rather than an export, so the repository ships `inference.py` and that
-is the interface. Download the repository and run from inside it:
-
 ```bash
-pip install torch torchaudio librosa soundfile huggingface_hub
-hf download agbalu/Matoub-82M --local-dir Matoub-82M && cd Matoub-82M
+pip install "transformers>=5" torch soundfile
 ```
 
 ```python
-from inference import MatoubTTS
+import soundfile as sf
+from transformers import AutoModelForTextToWaveform, AutoTokenizer
 
-tts = MatoubTTS.load()
-tts.synthesise("Azul fell-awen, amek i telliḍ taṣebḥit-a?", "output.wav")
+tokenizer = AutoTokenizer.from_pretrained("agbalu/Matoub-82M", trust_remote_code=True)
+model = AutoModelForTextToWaveform.from_pretrained("agbalu/Matoub-82M", trust_remote_code=True)
+model.eval()
+
+inputs = tokenizer("Azul fell-awen, amek i telliḍ taṣebḥit-a?", return_tensors="pt")
+audio = model(**inputs).waveform[0]
+
+sf.write("output.wav", audio.numpy(), model.config.sampling_rate)
 ```
 
-Or from the command line:
+`trust_remote_code=True` is required: StyleTTS2 is not a `transformers` architecture, so the
+repository ships the modelling code beside the weights and nothing else is needed to run it —
+no StyleTTS2 checkout, no reference clip, no separate G2P package.
 
-```bash
-python inference.py --text "Azul fell-awen, amek i telliḍ taṣebḥit-a?" --out output.wav
-```
+`forward` takes `speed` (a duration multiplier, default `1.0`) and `voice` (a 256-dim style
+vector, defaulting to the one in the weights). It returns `waveform`, `waveform_lengths` and
+`durations` — frames per input phoneme, which is the alignment. A padded batch is synthesised
+item by item and right-padded; read `waveform_lengths` before trimming.
+
+**Text in, phonemes out.** The tokenizer is the front end: it runs the Kabyle G2P, folds the
+tie-bar affricates (`t͡ʃ` → `ʧ`, `d͡ʒ` → `ʤ`) onto the symbols in the token table, and raises
+on a character it has no rule for rather than dropping it. Inspect what it produced with
+`tokenizer.phonemize(text)`. Punctuation is discarded and the clitic hyphen is a word
+boundary, because that is what the training transcripts carried — the model has never been
+supervised on a comma. PL-BERT positions 510 tokens, so synthesise one sentence at a time.
 
 The synthesis pipeline:
 
-1. **G2P** -- converts Kabyle Latin text to IPA, folding affricate tie-bar sequences (`t͡ʃ` -> `ʧ`, `d͡ʒ` -> `ʤ`) to the symbols in Kokoro's token table.
-2. **Style extraction** -- a reference clip from the training voice is encoded by `style_encoder` and `predictor_encoder` to produce a 256-dim speaker style vector.
-3. **Duration and pitch prediction** -- `bert` (PL-BERT, 12 layers), `bert_encoder`, `predictor`, and `predictor_encoder` predict phoneme durations and F0 contours from the token sequence and style vector.
-4. **Waveform decoding** -- the HiFi-GAN `decoder` renders 24 kHz mono audio.
+1. **G2P** — Kabyle Latin orthography to IPA, with gemination, spirantisation, `a`-backing and nasal assimilation.
+2. **Duration and pitch prediction** — `bert` (PL-BERT, 12 layers), `bert_encoder` and `predictor` predict per-phoneme durations and the F0 and energy contours from the token sequence and the prosodic half of the style vector.
+3. **Waveform decoding** — `text_encoder`'s features are expanded to frames by the predicted durations, and the iSTFTNet `decoder` renders 24 kHz mono audio conditioned on the acoustic half.
 
 ## Architecture
 
@@ -100,18 +114,22 @@ Matoub-82M is a StyleTTS2 model initialised from Kokoro-82M weights and fine-tun
 
 | | |
 |---|---|
-| Parameters | **82M** (Kokoro base) |
+| Parameters | **81,731,256** across `bert`, `bert_encoder`, `predictor`, `text_encoder`, `decoder` |
 | Base model | hexgrad/Kokoro-82M |
-| Vocoder | HiFi-GAN decoder |
-| Style encoder | 128-dim acoustic style vector |
-| Predictor encoder | 128-dim prosodic style vector |
+| Vocoder | iSTFTNet — HiFi-GAN upsampling with an inverse-STFT head, 20-point FFT, hop 5 |
+| Speaker style | one 256-dim vector in the weights: 128 acoustic, 128 prosodic |
 | Language model | PL-BERT (12 layers) + BERT encoder projection |
-| Duration predictor | LSTM + linear projection |
-| F0 predictor | JDC pitch extractor |
-| Discriminators | MPD + MSD (Stage 1 only) |
+| Duration predictor | LSTM + linear projection, 50-frame maximum per phoneme |
 | Token table | 178 tokens (Kokoro base), 3 new rows trained for Kabyle phonemes |
 | Sample rate | 24 kHz |
-| Mel filterbank | 80 bins, f_min 0, f_max 8000, n_fft 2048, hop 300 |
+| Weights | `model.safetensors`, 327 MB, fp32, weight normalisation fused |
+
+The training checkpoint also held the two style encoders, the style diffusion sampler, the
+text aligner, the JDC pitch extractor, the MPD and MSD discriminators, the WavLM
+discriminator and the optimizer state — 1.93 GB of instruments that produce nothing at
+inference. None of them is in the release. The style encoders' one output, the 256-dim
+speaker vector, is; it was extracted from a restored `kab_male` corpus clip on the
+filterbank the recipe trains on, 80 mel bins over n_fft 2048 and hop 300 with f_max 8 kHz.
 
 **Stage 1 (multi-speaker)** trains `text_encoder`, `style_encoder`, `decoder`, `mpd`, `msd` on both voices merged under global speaker IDs. It builds the acoustic backbone from the Kokoro base.
 
@@ -193,29 +211,43 @@ make modal-matoub TASK=stage2 ARM=restored VOICE=kab_male EPOCHS=5
 
 **No safety evaluation of any kind** has been performed.
 
-## What was not measured
+## What the numbers cover, and what they do not
 
-- **Cycle-CER against Matoub-82M.** The evaluation has not been completed; the card will be updated when it is.
-- **MOS / UTMOS.** No perceptual evaluation has been performed.
-- **Speaker similarity.** No speaker embedding comparison against the source voice has been performed.
-- **Long-form synthesis quality.** Degradation on multi-sentence or paragraph-length inputs has not been measured.
-- **Female voice.** The `kab_female` Stage 2 checkpoint has not been trained.
+The `mms-tts-kab` row in Results is measured. Everything below is open, listed so you can
+plan around it:
+
+- **This model's own Cycle-CER.** The instrument and the baseline both exist; the run has not been made.
+- **MOS and UTMOSv2.** No perceptual evaluation has been performed.
+- **Speaker similarity.** No embedding comparison against the source voice has been performed.
+- **Long-form synthesis.** Degradation on multi-sentence or paragraph-length input is unquantified, and the training clips give a strong prior that it exists — see Limitations.
+- **The female voice.** `kab_female` Stage 2 has not been trained.
 
 ## Files
 
-| file | size | description |
+| file | size | contents |
 |---|---|---|
-| `epoch_2nd_00003.pth` | ~1.8 GiB | full training state: 13-module `net` dict + AdamW `opt` + `epoch 3`, `iters 13944`, `val_loss 0.3475` |
+| `model.safetensors` | 327 MB | 81,731,256 parameters — `bert`, `bert_encoder`, `predictor`, `text_encoder`, `decoder`, and the 256-dim speaker style |
+| `config.json` | | the architecture and the `auto_map` that points at the modules below |
+| `configuration_matoub.py`, `modeling_matoub.py`, `istftnet.py` | | the architecture, importing only `torch` and `transformers` |
+| `tokenization_matoub.py`, `tokenizer_config.json`, `vocab.json` | | the G2P front end and the 178-token table, id for id with the one the model was trained on |
 
-The published file includes optimiser state and is resumable. A stripped inference-only export is planned for a future revision.
+Nothing else is needed to run it: no StyleTTS2 checkout, no reference clip, no separate G2P
+package. Training cannot be resumed from these files — the optimizer, the discriminators and
+the style diffusion sampler stay in the 1.93 GB source checkpoint on the training volume,
+because none of them produces anything at inference.
 
 ## Reproduction
 
 ```bash
-make modal-matoub TASK=pull             # download the checkpoint to artifacts/matoub/
-make push REPO=matoub                   # restage and upload to agbalu/Matoub-82M
-make infer-matoub TEXT="Azul fell-awen, amek i telliḍ taṣebḥit-a?"
+make modal-matoub TASK=pull                       # the training checkpoint
+make modal-matoub-reference                       # list the voice's restored clips
+make modal-matoub-reference CLIP=<the first>.wav  # the clip the speaker style is taken from
+make push REPO=matoub                             # export, stage, verify, upload
 ```
+
+The export bakes the speaker style into the weights, and that style is a function of one
+restored clip — the alphabetically first in the voice's directory. Its name is a Common
+Voice clip id and is not derivable, which is why the listing step exists.
 
 Full training reproduction:
 
@@ -241,7 +273,8 @@ The naming is homage; it implies no endorsement by anyone.
   author = {AƔBALU},
   year   = {2026},
   url    = {https://huggingface.co/agbalu/Matoub-82M},
-  note   = {StyleTTS2 fine-tune of Kokoro-82M on 21,953 restored Common Voice clips; preview}
+  note   = {StyleTTS2 fine-tune of Kokoro-82M on 21,953 restored Common Voice Kabyle
+            clips; 24 kHz, Apache-2.0, one published voice}
 }
 ```
 

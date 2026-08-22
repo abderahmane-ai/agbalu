@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import shutil
 import sys
 from collections.abc import Sequence
@@ -26,11 +27,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Final, Literal
 
 if TYPE_CHECKING:
-    from transformers import PreTrainedTokenizerFast
+    from transformers import PreTrainedTokenizerBase, PreTrainedTokenizerFast
 
-Repo = Literal["belaid", "boulifa", "feraoun", "juba", "masinissa"]
+Repo = Literal["belaid", "boulifa", "feraoun", "feraoun_pro", "juba", "masinissa", "matoub"]
 
 HUB: Final = Path("src/agbalu/hub")
+
+TIFINAGH_PROBE: Final = "ⵜⴰⵇⴱⴰⵢⵍⵉⵜ ⴷ ⵜⵓⵜⵍⴰⵢⵜ ⵜⴰⵢⴻⵎⵎⴰⵜ ⵏⵏⴻⵖ."
+"""Feraoun-Pro's second script. Its Latin probe cannot fail on a Tifinagh-blind checkpoint."""
 
 DOTTED_CAPITAL_I: Final = chr(0x0130)
 """The only codepoint in Unicode whose lowercase expands to two, so the only one where a
@@ -53,6 +57,10 @@ AUTO_MAP: Final[dict[Repo, dict[str, str]]] = {
         "AutoConfig": "configuration_feraoun.FeraounConfig",
         "AutoModel": "modeling_feraoun.FeraounForVision2Seq",
     },
+    "feraoun_pro": {
+        "AutoConfig": "configuration_feraoun_pro.FeraounProConfig",
+        "AutoModel": "modeling_feraoun_pro.FeraounProForCTC",
+    },
     "juba": {
         "AutoConfig": "configuration_juba.JubaConfig",
         "AutoModelForSeq2SeqLM": "modeling_juba.JubaForSeq2SeqLM",
@@ -62,15 +70,38 @@ AUTO_MAP: Final[dict[Repo, dict[str, str]]] = {
         "AutoModel": "modeling_masinissa.MasinissaModel",
         "AutoModelForMaskedLM": "modeling_masinissa.MasinissaForMaskedLM",
     },
+    "matoub": {
+        "AutoConfig": "configuration_matoub.MatoubConfig",
+        "AutoModel": "modeling_matoub.MatoubForTextToWaveform",
+        "AutoModelForTextToWaveform": "modeling_matoub.MatoubForTextToWaveform",
+    },
 }
+
+TOKENIZER_AUTO_MAP: Final[dict[Repo, list[str | None]]] = {
+    "matoub": ["tokenization_matoub.MatoubTokenizer", None],
+}
+"""Repositories whose tokenizer is remote code too. `AutoTokenizer` reads this from
+`tokenizer_config.json` and expects the pair `[slow, fast]`; Matoub has no fast half,
+because its front end is a rule table rather than a merge table."""
 
 ARCHITECTURES: Final[dict[Repo, str]] = {
     "belaid": "BelaidForTokenClassification",
     "boulifa": "BoulifaForSeq2SeqLM",
     "feraoun": "FeraounForVision2Seq",
+    "feraoun_pro": "FeraounProForCTC",
     "juba": "JubaForSeq2SeqLM",
     "masinissa": "MasinissaForMaskedLM",
+    "matoub": "MatoubForTextToWaveform",
 }
+
+MATOUB_PROBE: Final = "Azul fell-awen, amek i telliḍ taṣebḥit-a?"
+
+MATOUB_SILENCE_PEAK: Final = 0.01
+"""Below this the directory synthesised silence, which is what a mis-slotted style vector
+or a half-loaded decoder produces — and a shape check cannot see it."""
+
+MATOUB_MIN_SECONDS: Final = 0.5
+"""A 40-phoneme probe under half a second is a duration head that clamped to its floor."""
 
 PIECE_REPOS: Final[frozenset[Repo]] = frozenset({"belaid", "masinissa"})
 """Repositories whose vocabulary is the Mammeri SentencePiece model rather than an alphabet."""
@@ -134,6 +165,32 @@ def build_feraoun_tokenizer() -> PreTrainedTokenizerFast:
         bos_token=BOS_TOKEN,
         eos_token=EOS_TOKEN,
         model_max_length=256,
+    )
+
+
+def build_feraoun_pro_tokenizer() -> PreTrainedTokenizerFast:
+    """Feraoun-Pro's 173-symbol table, id for id with `agbalu.ocr.vocabulary_pro`."""
+    from tokenizers import Regex, Tokenizer, decoders, models, pre_tokenizers
+    from tokenizers import processors as tokenizer_processors
+    from transformers import PreTrainedTokenizerFast
+
+    from agbalu.ocr.vocabulary_pro import BOS_ID, BOS_TOKEN, EOS_ID, EOS_TOKEN, VOCABULARY
+
+    vocab = {symbol: index for index, symbol in enumerate(VOCABULARY)}
+    backend = Tokenizer(models.WordLevel(vocab=vocab, unk_token="<unk>"))
+    backend.pre_tokenizer = pre_tokenizers.Split(Regex(r"[\s\S]"), behavior="isolated")
+    backend.post_processor = tokenizer_processors.TemplateProcessing(
+        single=f"{BOS_TOKEN} $A {EOS_TOKEN}",
+        special_tokens=[(BOS_TOKEN, BOS_ID), (EOS_TOKEN, EOS_ID)],
+    )
+    backend.decoder = decoders.Fuse()
+    return PreTrainedTokenizerFast(
+        tokenizer_object=backend,
+        unk_token="<unk>",
+        pad_token="<pad>",
+        bos_token=BOS_TOKEN,
+        eos_token=EOS_TOKEN,
+        model_max_length=1024,
     )
 
 
@@ -219,6 +276,32 @@ def build_piece_tokenizer(model_file: Path) -> PreTrainedTokenizerFast:
     )
 
 
+def build_matoub_tokenizer(directory: Path) -> PreTrainedTokenizerBase:
+    """Matoub's phoneme table, written where the tokenizer's own loader will find it."""
+    from agbalu.hub.matoub.tokenization_matoub import MatoubTokenizer
+    from agbalu.tts.vocabulary import Vocabulary
+
+    vocabulary = Vocabulary.load()
+    path = MatoubTokenizer.write_vocabulary(vocabulary.symbols, directory)
+    return MatoubTokenizer(vocab_file=str(path))
+
+
+def write_tokenizer_auto_map(repo: Repo, directory: Path) -> None:
+    """Point `AutoTokenizer` at the module the repository ships.
+
+    `save_pretrained` records the class name and nothing that resolves it, so without this
+    a downloader gets `Tokenizer class MatoubTokenizer does not exist` — on the Hub, where
+    it is visible only to whoever tries.
+    """
+    mapping = TOKENIZER_AUTO_MAP.get(repo)
+    if mapping is None:
+        return
+    path = directory / "tokenizer_config.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["auto_map"] = {"AutoTokenizer": mapping}
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
 def copy_modules(repo: Repo, directory: Path) -> list[str]:
     """The standalone modelling code, verbatim. Byte-identical or the copy is a fork."""
     source = HUB / repo
@@ -241,8 +324,10 @@ def write_config(repo: Repo, directory: Path) -> None:
     from agbalu.hub.belaid.configuration_belaid import BelaidConfig
     from agbalu.hub.boulifa.configuration_boulifa import BoulifaConfig
     from agbalu.hub.feraoun.configuration_feraoun import FeraounConfig
+    from agbalu.hub.feraoun_pro.configuration_feraoun_pro import FeraounProConfig
     from agbalu.hub.juba.configuration_juba import JubaConfig
     from agbalu.hub.masinissa.configuration_masinissa import MasinissaConfig
+    from agbalu.hub.matoub.configuration_matoub import MatoubConfig
 
     path = directory / "config.json"
     if not path.is_file():
@@ -256,8 +341,10 @@ def write_config(repo: Repo, directory: Path) -> None:
         "belaid": BelaidConfig,
         "boulifa": BoulifaConfig,
         "feraoun": FeraounConfig,
+        "feraoun_pro": FeraounProConfig,
         "juba": JubaConfig,
         "masinissa": MasinissaConfig,
+        "matoub": MatoubConfig,
     }
     config = classes[repo](**existing)
     config.auto_map = dict(AUTO_MAP[repo])
@@ -297,6 +384,7 @@ def verify(repo: Repo, directory: Path) -> dict[str, object]:
         AutoModel,
         AutoModelForMaskedLM,
         AutoModelForSeq2SeqLM,
+        AutoModelForTextToWaveform,
         AutoModelForTokenClassification,
         AutoTokenizer,
     )
@@ -305,8 +393,10 @@ def verify(repo: Repo, directory: Path) -> dict[str, object]:
         "belaid": AutoModelForTokenClassification,
         "boulifa": AutoModelForSeq2SeqLM,
         "feraoun": AutoModel,
+        "feraoun_pro": AutoModel,
         "juba": AutoModelForSeq2SeqLM,
         "masinissa": AutoModelForMaskedLM,
+        "matoub": AutoModelForTextToWaveform,
     }
     tokenizer = AutoTokenizer.from_pretrained(directory, trust_remote_code=True)
     model = loaders[repo].from_pretrained(directory, trust_remote_code=True)
@@ -316,8 +406,12 @@ def verify(repo: Repo, directory: Path) -> dict[str, object]:
         "belaid": "azul fell-awen amek i tellam",
         "boulifa": "achimi ur d-thekhedmedh ara tamazight g l'ecole?",
         "feraoun": "Aḍris n uḥric ɣef tɛeṛṛamt d uẓekka.",
+        "feraoun_pro": "Aḍris n uḥric ɣef tɛeṛṛamt d uẓekka ţ-ţili.",
+        # Both halves of the probe are reported, so the staging record shows what each
+        # script produced rather than an average that hides one of them.
         "juba": "ⵜⵛⴼⵉⴹ ⴼⵍⵍⵉ ?",
         "masinissa": "Azul fell-awen, amek i tellam?",
+        "matoub": MATOUB_PROBE,
     }
     probe = probes[repo]
     with torch.inference_mode():
@@ -335,6 +429,44 @@ def verify(repo: Repo, directory: Path) -> dict[str, object]:
 
             image = render_text_line(probe, augment=False, rng=random.Random(3))
             produced = model.transcribe([image], tokenizer)[0]
+        elif repo == "feraoun_pro":
+            # Both scripts, for the same reason and one more: this checkpoint's Neo-Tifinagh
+            # arm was added after its Latin one, and a staging that exercises only Latin
+            # cannot tell a working dual-script release from a half-trained one.
+            import random
+
+            from agbalu.ocr.synthetic_pro import LineRenderer
+
+            renderer = LineRenderer()
+            produced = " | ".join(
+                model.transcribe(
+                    renderer.render_line(line, rng=random.Random(3), apply_augmentation=False)[0]
+                )
+                for line in (probe, TIFINAGH_PROBE)
+            )
+        elif repo == "matoub":
+            # Synthesised and measured, not a shape: a mis-slotted style vector, a decoder
+            # loaded with half its weights and a duration head that collapsed all produce a
+            # tensor of exactly the right rank. What separates them is the audio.
+            audio = model(**tokenizer(probe, return_tensors="pt")).waveform[0]
+            peak = float(audio.abs().max())
+            seconds = audio.shape[-1] / model.config.sampling_rate
+            if peak < MATOUB_SILENCE_PEAK:
+                message = f"{directory} synthesised silence: peak {peak:.5f}"
+                raise StagingError(message)
+            if seconds < MATOUB_MIN_SECONDS:
+                message = (
+                    f"{directory} gave {len(tokenizer(probe)['input_ids'])} phonemes "
+                    f"{seconds:.2f} s of audio; the duration head is not predicting"
+                )
+                raise StagingError(message)
+            rms = float(audio.pow(2).mean().sqrt())
+            produced = (
+                f"{tokenizer.phonemize(probe)}  ->  {seconds:.2f} s at "
+                f"{model.config.sampling_rate} Hz, peak {peak:.3f}, "
+                f"rms {20 * math.log10(rms):.1f} dBFS, "
+                f"{int((audio.abs() >= 1.0).sum())} clipped"
+            )
         elif repo in ("boulifa", "juba"):
             produced = tokenizer.decode(
                 model.generate(
@@ -360,10 +492,15 @@ def stage(repo: Repo, directory: Path) -> dict[str, object]:
         raise StagingError(message)
 
     copied = copy_modules(repo, directory)
-    if repo == "boulifa":
+    tokenizer: PreTrainedTokenizerBase
+    if repo == "matoub":
+        tokenizer = build_matoub_tokenizer(directory)
+    elif repo == "boulifa":
         tokenizer = build_boulifa_tokenizer()
     elif repo == "feraoun":
         tokenizer = build_feraoun_tokenizer()
+    elif repo == "feraoun_pro":
+        tokenizer = build_feraoun_pro_tokenizer()
     elif repo not in PIECE_REPOS:
         tokenizer = build_char_tokenizer()
     else:
@@ -373,6 +510,7 @@ def stage(repo: Repo, directory: Path) -> dict[str, object]:
             raise StagingError(message)
         tokenizer = build_piece_tokenizer(pieces[0])
     tokenizer.save_pretrained(directory)
+    write_tokenizer_auto_map(repo, directory)
     write_config(repo, directory)
     refresh_manifest(directory)
 

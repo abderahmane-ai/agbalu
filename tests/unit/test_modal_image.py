@@ -29,6 +29,7 @@ from modal_app.common import (
     MATOUB_PIP_PACKAGES,
     MT_PIP_PACKAGES,
     OCR_PIP_PACKAGES,
+    OCR_PRO_PIP_PACKAGES,
     PIP_PACKAGES,
     RESOURCES,
     TIFINAGH_PIP_PACKAGES,
@@ -57,6 +58,7 @@ IMAGES: Final[tuple[tuple[str, str, tuple[str, ...]], ...]] = (
     ("boulifa", "modal_app.boulifa", PIP_PACKAGES),
     ("simohand", "modal_app.simohand", EMBED_PIP_PACKAGES),
     ("ocr", "modal_app.ocr", OCR_PIP_PACKAGES),
+    ("ocr_pro", "modal_app.ocr_pro", OCR_PRO_PIP_PACKAGES),
 )
 """Each entrypoint with the package list of the image it runs under. Three images, because
 the bench and MT stacks pull transformers and sacrebleu and adding them to the training
@@ -104,6 +106,8 @@ RUNTIME_ONLY: Final[dict[str, frozenset[str]]] = {
     "simohand": frozenset({"accelerate", "numpy", "safetensors", "sentencepiece"}),
     # Same two, for the same reason: the DeiT encoder arrives through `from_pretrained`.
     "ocr": frozenset({"accelerate", "safetensors"}),
+    # `safetensors` and `transformers` arrive through the export path rather than the trainer.
+    "ocr_pro": frozenset({"safetensors", "transformers"}),
     "asr": frozenset({"accelerate", "https://github.com/kpu/kenlm/archive/master.zip"}),
     # The baseline runs on the ASR stack unchanged: `VitsModel` is transformers' own, and
     # the decoder it is scored through is Fadhma's. `tts_image` adds only `torchaudio`,
@@ -320,10 +324,13 @@ def test_the_resources_directory_shipped_to_the_container_exists() -> None:
 
 
 def test_the_deploy_module_registers_every_function_without_a_name_collision() -> None:
-    """Every module shares one `modal.App`, and `modal deploy -m modal_app.deploy` imports
-    all of them at once. A second function of the same name does **not** raise — modal 1.4.2
+    """The modules on the shared `modal.App`, which `modal deploy -m modal_app.deploy`
+    imports at once. A second function of the same name does **not** raise — modal 1.4.2
     logs a warning and *overrides* the first, so the deployed app silently loses one. The
-    assertion is therefore equality, not containment: an override shrinks the set."""
+    assertion is therefore equality, not containment: an override shrinks the set.
+
+    `ocr_pro` is absent because it owns its own app; `test_a_dedicated_app_owns_the_functions
+    _the_launcher_addresses_to_it` covers those."""
     deploy = importlib.import_module("modal_app.deploy")
     assert set(deploy.app.registered_functions) == {
         "jugurtha_pack",
@@ -381,3 +388,21 @@ def test_the_deploy_module_registers_every_function_without_a_name_collision() -
         "run_asr",
         "pack",
     } <= entrypoints
+
+
+def test_a_dedicated_app_owns_the_functions_the_launcher_addresses_to_it() -> None:
+    """`Function.from_name` reports a missing app exactly as it reports a missing function,
+    so a `FUNCTION_APP_NAME` entry naming an app no module declares fails only after the
+    deploy is paid for. Every spawnable function is checked against the app it resolves to."""
+    launch = importlib.import_module("modal_app.launch")
+    ocr_pro = importlib.import_module("modal_app.ocr_pro")
+    shared = importlib.import_module("modal_app.deploy").app
+
+    dedicated = {ocr_pro.APP_NAME: ocr_pro.app}
+    for function, app_name in launch.FUNCTION_APP_NAME.items():
+        assert app_name in dedicated, f"{function} is addressed to {app_name}, which no module has"
+
+    for function in launch.FUNCTIONS:
+        owner = launch.FUNCTION_APP_NAME.get(function)
+        app = dedicated[owner] if owner is not None else shared
+        assert function in set(app.registered_functions)

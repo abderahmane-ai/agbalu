@@ -119,7 +119,7 @@ punctuation: ## Restore marks and capitals on ASR output. TASK=corpus|train|eval
 listen: ## Fadhma then punctuation, end to end on local audio. AUDIO=path LIMIT RUN GREEDY=1
 	@$(PY) -m agbalu.speech.cli transcribe $(AUDIO) \
 		$(if $(LIMIT),--limit $(LIMIT),) $(if $(GREEDY),--greedy,) \
-	| $(PY) -m agbalu.punctuation.cli --run artifacts/runs/$(or $(RUN),punctuation-v2) restore
+	| $(PY) -m agbalu.punctuation.cli --run artifacts/runs/$(or $(RUN),$(PUNCTUATION_RUN)) restore
 
 tifinagh: ## Script conversion with Juba-27M. TASK=convert TEXT="ⴰⵣⵓⵍ"|evaluate. SPLIT LIMIT
 	$(call cli,tifinagh) $(or $(TASK),evaluate) \
@@ -139,6 +139,12 @@ ocr: ## Feraoun-36M OCR, GPU-free. TASK=generate|evaluate|infer (IMAGE=path)|tra
 		$(if $(IMAGE),--image $(IMAGE),) $(if $(PAGE),--page,) \
 		$(if $(CHECKPOINT),--checkpoint $(CHECKPOINT),) \
 		$(if $(BOOK),--book-dir $(BOOK),)
+
+ocr-pro: ## Feraoun-Pro OCR, GPU-free. TASK=generate|harvest-backgrounds|harvest-gold|infer|release. INPUT OUTPUT LINES SAMPLES IMAGE CHECKPOINT
+	$(PY) -m agbalu.ocr.cli_pro $(or $(TASK),generate) \
+		$(if $(INPUT),--input $(INPUT),) $(if $(OUTPUT),--output $(OUTPUT),) \
+		$(if $(LINES),--lines $(LINES),) $(if $(SAMPLES),--samples $(SAMPLES),) \
+		$(if $(IMAGE),--image $(IMAGE),) $(if $(CHECKPOINT),--checkpoint $(CHECKPOINT),)
 
 standardise: ## Boulifa-48M, GPU-free. TASK=standardise TEXT="achimi..."|evaluate. LIMIT BATCH CHECKPOINT
 	$(call cli,standardise) $(or $(TASK),evaluate) \
@@ -160,7 +166,7 @@ REPOS := $(MODEL_REPOS) $(DATASET_REPOS) org
 
 # Out of the default set on purpose: each needs a checkpoint pulled off a volume first, so
 # `make release` with no REPO would fail on whichever one this machine has not pulled.
-PULLED_REPOS := fadhma belaid boulifa matoub simohand feraoun kabstandard
+PULLED_REPOS := fadhma belaid boulifa matoub simohand feraoun feraoun-pro kabstandard
 
 release: $(addprefix release-,$(or $(REPO),$(REPOS))) ## Stage repos under artifacts/release. REPO=encoder|tokenizer|mt|juba|bench|lex|sentiment|inflect|tifinagh|punct|g2p|org, or fadhma|belaid|boulifa|matoub|simohand|feraoun|kabstandard once pulled
 	@echo 'staged under $(RELEASE) — review, then push each with: hf upload <repo> <dir> .'
@@ -225,7 +231,7 @@ release-fadhma:
 # and carries no architecture, so the config is written first from the preset and the label
 # tuples the heads were sized by. Out of the default `REPOS` because it needs a checkpoint
 # pulled off the volume, exactly as Fadhma does.
-PUNCTUATION_RUN ?= punctuation-v2
+PUNCTUATION_RUN ?= punctuation
 release-belaid:
 	$(call cli,punctuation) release
 	$(PY) -m tools.export_checkpoint --source artifacts/runs/$(PUNCTUATION_RUN)/best.pt \
@@ -277,6 +283,19 @@ release-feraoun:
 		--extra data/processed/bench/feraoun-v1-heldout.json
 	$(PY) -m tools.stage_hub --repo feraoun --dir $(RELEASE)/Feraoun-36M
 
+# `pos_encoding` stays in the export for the same reason as Feraoun-36M's `pe`: a registered
+# buffer comes back from `from_pretrained` as uninitialised memory when it is dropped as
+# derived, and every visual position is then offset by a garbage angle without raising.
+release-feraoun-pro:
+	$(PY) -m agbalu.ocr.cli_pro release
+	$(PY) -m tools.export_checkpoint \
+		--source artifacts/runs/$(FERAOUN_PRO_RUN)/best.pt \
+		--out $(RELEASE)/Feraoun-Pro \
+		--card docs/cards/feraoun-pro.md \
+		--config artifacts/ocr_pro/config.json \
+		--training-only aux_decoder.
+	$(PY) -m tools.stage_hub --repo feraoun_pro --dir $(RELEASE)/Feraoun-Pro
+
 release-kabstandard:
 	@mkdir -p $(RELEASE)/KabStandard
 	@cp data/kabstandard/train.jsonl data/kabstandard/dev.jsonl data/kabstandard/test.jsonl \
@@ -285,20 +304,36 @@ release-kabstandard:
 	@echo "$(RELEASE)/KabStandard: $$(ls $(RELEASE)/KabStandard | wc -l | tr -d ' ') files"
 
 MATOUB_EPOCH ?= epoch_2nd_00003
+MATOUB_VOICE ?= kab_male
+MATOUB_REFERENCE ?= artifacts/matoub/reference_$(MATOUB_VOICE).wav
 modal-matoub-pull:
 	@mkdir -p artifacts/matoub
 	modal volume get --force agbalu-checkpoints \
 		/tts/matoub/logs/kab_male/$(MATOUB_EPOCH).pth artifacts/matoub/$(MATOUB_EPOCH).pth
 
-# The one release that ships a training checkpoint rather than an export, because StyleTTS2
-# has no `save_pretrained` and its loader keys on the recipe's own component names. The card
-# says so: the file carries optimizer state and is larger than the weights alone.
+# The export bakes the speaker style into the weights, and the style is a function of one
+# restored clip — the alphabetically first, which is the one `matoub_infer` encoded for the
+# published preview. Its name is a Common Voice clip id and is not derivable off the volume,
+# so this lists the directory with no CLIP and pulls the named clip with one.
+modal-matoub-reference: ## Reference clip for the export. No CLIP lists them; CLIP=<name>.wav pulls one
+ifeq ($(CLIP),)
+	modal volume ls agbalu-data tts/voices/$(MATOUB_VOICE)/restored --json | head -c 4000
+	@echo
+	@echo 'then: make modal-matoub-reference CLIP=<the alphabetically first .wav above>'
+else
+	@mkdir -p artifacts/matoub
+	modal volume get --force agbalu-data \
+		tts/voices/$(MATOUB_VOICE)/restored/$(CLIP) $(MATOUB_REFERENCE)
+endif
+
+# Rebuilt from empty, not overwritten: the first publication's files are still in this
+# directory on any machine that staged it, and `hf upload` would put them back.
 release-matoub:
-	@mkdir -p $(RELEASE)/Matoub-82M
-	@cp artifacts/matoub/$(MATOUB_EPOCH).pth $(RELEASE)/Matoub-82M/$(MATOUB_EPOCH).pth
-	@cp src/agbalu/hub/matoub/inference.py $(RELEASE)/Matoub-82M/inference.py
+	@rm -rf $(RELEASE)/Matoub-82M
+	$(PY) -m tools.export_matoub --checkpoint artifacts/matoub/$(MATOUB_EPOCH).pth \
+		--reference $(MATOUB_REFERENCE) --out $(RELEASE)/Matoub-82M
 	@cp docs/cards/matoub-82m.md $(RELEASE)/Matoub-82M/README.md
-	@echo "$(RELEASE)/Matoub-82M: $$(ls $(RELEASE)/Matoub-82M | wc -l | tr -d ' ') files"
+	$(PY) -m tools.stage_hub --repo matoub --dir $(RELEASE)/Matoub-82M
 
 # One push target with a variable, not one per repository. The table is the only place a
 # staged directory is paired with the repository it belongs in; two copies of that pairing
@@ -321,10 +356,16 @@ HF_belaid      := models   agbalu/Belaid-31M     $(RELEASE)/Belaid-31M    $(CARD
 HF_boulifa     := models   agbalu/Boulifa-48M    $(RELEASE)/Boulifa-48M   $(CARDS)/boulifa-48m.md
 HF_matoub      := models   agbalu/Matoub-82M     $(RELEASE)/Matoub-82M    $(CARDS)/matoub-82m.md
 HF_feraoun     := models   agbalu/Feraoun-36M    $(RELEASE)/Feraoun-36M   $(CARDS)/feraoun-36m.md
+HF_feraoun-pro := models   agbalu/Feraoun-Pro    $(RELEASE)/Feraoun-Pro   $(CARDS)/feraoun-pro.md
 HF_simohand    := models   agbalu/SiMohand-278M  $(SIMOHAND_DIR)          $(CARDS)/simohand-278m.md
 
 ALL_REPOS := bench lex sentiment inflect tifinagh punct g2p kabstandard encoder tokenizer \
-	mt juba fadhma belaid boulifa matoub feraoun simohand
+	mt juba fadhma belaid boulifa matoub feraoun feraoun-pro simohand
+
+# `hf upload` adds and overwrites; it never removes. A repository whose file set shrank keeps
+# the superseded files beside their replacements, which for Matoub means a 1.93 GB training
+# checkpoint and a loader that no longer matches the weights.
+HF_DELETE_matoub := epoch_2nd_*.pth inference.py
 
 # Restaged first, always: `artifacts/release/` is git-ignored scratch and goes stale
 # silently, so a push from whatever is already there can un-publish correct live text.
@@ -333,8 +374,23 @@ push: ## Restage and upload one repo. REPO=<any name `make release` takes>. Need
 	@test -n "$(HF_$(REPO))" || { echo "no Hub repository registered for REPO=$(REPO)"; exit 1; }
 	$(MAKE) release-$(REPO)
 	hf upload $(word 2,$(HF_$(REPO))) $(word 3,$(HF_$(REPO))) . \
-		--repo-type=$(patsubst %s,%,$(word 1,$(HF_$(REPO))))
+		--repo-type=$(patsubst %s,%,$(word 1,$(HF_$(REPO)))) \
+		$(foreach glob,$(HF_DELETE_$(REPO)),--delete "$(glob)")
 	@echo "pushed $(word 2,$(HF_$(REPO))) — now diff the deployed card against docs/cards/"
+
+# Everything the Hub is behind on, in one command. The two weight repositories first,
+# because each carries its own card, then every card read back and diffed — which is also
+# what proves the two uploads above landed. A repository that does not exist yet is created
+# public here rather than by `hf upload`, whose default follows the organisation's setting.
+PUBLISH_WEIGHTS := matoub feraoun-pro
+publish: ## Push every repo the Hub is behind on: weights, all cards, the org Space
+	@$(PY) -c "\
+from huggingface_hub import HfApi;\
+api = HfApi();\
+[api.create_repo(repo, repo_type='model', private=False, exist_ok=True)\
+ for repo in ['$(word 2,$(HF_matoub))', '$(word 2,$(HF_feraoun-pro))']]"
+	@$(foreach repo,$(PUBLISH_WEIGHTS),$(MAKE) --no-print-directory push REPO=$(repo) &&) true
+	@$(MAKE) --no-print-directory push-cards
 
 # One file per repository, straight from `docs/cards/`. A card change needs no restaging and
 # no weights: `make push REPO=mt` would re-upload 4.65 GB to correct a paragraph. Every
@@ -395,6 +451,9 @@ modal-upload-mt:
 
 modal-upload-speech:
 	modal run -m modal_app.asr::upload_speech
+
+modal-upload-speech-pro:
+	modal run -m modal_app.asr_pro::upload_speech_pro
 
 modal-upload-llm:
 	modal run -m modal_app.llm::upload_llm
@@ -474,6 +533,14 @@ modal-asr: ## Phase 5 — Fadhma short jobs, attached. TASK=fetch|repack|lm|fine
 	modal run -m modal_app.asr::run_asr $(if $(TASK),--task $(TASK),) $(if $(RUN),--run $(RUN),) \
 		$(if $(SPLIT),--split $(SPLIT),) $(if $(STEPS),--max-steps $(STEPS),) \
 		$(if $(LIMIT),--limit $(LIMIT),) $(if $(FORCE),--force,)
+
+modal-asr-pro: ## Fadhma-Pro ASR on Modal. TASK=smoke|fetch|train. RUN EPOCHS LR
+	modal deploy -m modal_app.asr_pro
+	$(if $(filter smoke,$(TASK)),modal run -m modal_app.asr_pro::asr_pro_smoke,\
+	$(if $(filter fetch,$(TASK)),modal run -m modal_app.asr_pro::asr_pro_fetch,\
+	$(PY) -m modal_app.launch --function asr_pro_train \
+		$(if $(RUN),--run-name $(RUN),) $(if $(EPOCHS),--epochs $(EPOCHS),) \
+		$(if $(LR),--lr $(LR),)))
 
 modal-tts: modal-tts-$(or $(TASK),baseline) ## Phase 12. TASK=baseline (12.1)|voices (12.3)|corpus (12.4, spawned; FORCE=1 rebuilds)|pull. LIMIT=20 smokes each
 
@@ -559,6 +626,35 @@ modal-ocr-pull: ## Copy the Feraoun checkpoint off the volume. RUN=feraoun-36m-v
 	modal volume get --force agbalu-checkpoints \
 		/feraoun/$(or $(RUN),$(FERAOUN_RUN))/best.pt \
 		artifacts/runs/$(or $(RUN),$(FERAOUN_RUN))/best.pt
+
+# RESUME is the lever this model is normally driven by: RESUME=best continues the trained
+# checkpoint, RESUME=none starts over. RATIO is the script mix — 0.40 puts Neo-Tifinagh in
+# both the training set and the held-out split, and the Latin remainder is the rehearsal
+# that keeps the Latin capability rather than merely measuring its loss. Every default
+# lives in `_ocr_pro_kwargs`, so no second target restates them.
+#
+# 🪤 **A continuation needs its own RUN, named for what it adds.** Adding a script to a
+# trained checkpoint is a new lineage, not a restart: reusing the source run's name inherits
+# its step counter against this run's shorter schedule, and the already-done guard refuses
+# before training anything. A new name restarts the schedule *and* leaves the source
+# checkpoint intact, which is what makes a regression recoverable:
+#   make modal-ocr-pro RUN=feraoun-pro-tifinagh RESUME=best RATIO=0.40 EPOCHS=1 LR=2e-5
+modal-ocr-pro: ## Feraoun-Pro on GPU — deploy, spawn, tail. TASK=train|smoke. RUN EPOCHS BATCH LR EVAL LINES RESUME RATIO
+	$(call deploy,ocr_pro)
+	$(PY) -m modal_app.launch --function ocr_pro_$(or $(TASK),train) \
+		$(if $(RUN),--run-name $(RUN),) $(if $(EPOCHS),--epochs $(EPOCHS),) \
+		$(if $(BATCH),--batch-size $(BATCH),) $(if $(LR),--lr $(LR),) \
+		$(if $(EVAL),--eval-every $(EVAL),) $(if $(LINES),--max-lines $(LINES),) \
+		$(if $(RESUME),--resume-from $(RESUME),) $(if $(RATIO),--tifinagh-ratio $(RATIO),)
+
+# RUN names the directory on the volume; the local copy always lands under one name, which
+# is the one `release-feraoun-pro` reads. A training lineage is a run, not a release.
+FERAOUN_PRO_RUN ?= feraoun-pro
+modal-ocr-pro-pull: ## Copy the Feraoun-Pro checkpoint off the volume. RUN=<the run that trained it>
+	@mkdir -p artifacts/runs/$(FERAOUN_PRO_RUN)
+	modal volume get --force agbalu-checkpoints \
+		/$(or $(RUN),$(FERAOUN_PRO_RUN))/best.pt \
+		artifacts/runs/$(FERAOUN_PRO_RUN)/best.pt
 
 modal-sentiment: ## Phase 7 sentiment on GPU. TASK=benchmark scores the encoder; TASK=build relabels from Tatoeba
 	$(call deploy,sentiment)

@@ -628,6 +628,38 @@ ocr_image: Final = _with_local_sources(
     )
 )
 
+OCR_PRO_PIP_PACKAGES: Final[tuple[str, ...]] = (
+    f"torch=={TORCH_VERSION}",
+    "numpy>=2.0",
+    "pyarrow>=17.0",
+    "transformers>=4.44.0",
+    "pillow>=10.0.0",
+    "safetensors>=0.4.4",
+    "editdistance>=0.8",
+)
+"""No SentencePiece, registry schema or normalisation table: Feraoun-Pro is character-level
+over its own 173-symbol inventory. No `augraphy` or `opencv` either, and the numpy pin came
+off with them; `agbalu.ocr.augment_pro` records why."""
+
+ocr_pro_image: Final = _with_local_sources(
+    modal.Image.debian_slim(python_version=PYTHON_VERSION)
+    .apt_install(
+        "fonts-dejavu-core",
+        "fonts-freefont-ttf",
+        "fonts-liberation",
+        "fonts-noto-core",
+        "libgl1-mesa-glx",
+        "libglib2.0-0",
+    )
+    .pip_install(*OCR_PRO_PIP_PACKAGES)
+    .env(
+        {
+            "HF_HOME": str(MODELS_PATH),
+            "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
+        }
+    )
+)
+
 TRAIN_TIMEOUT: Final = 24 * 60 * 60
 """Modal's ceiling. The run is expected to finish inside it; the retry policy below is
 what covers preemption, and resume is what makes a retry cheap rather than fatal."""

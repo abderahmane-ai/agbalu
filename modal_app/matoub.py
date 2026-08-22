@@ -3,9 +3,9 @@
 The recipe is [`semidark/kikiri-tts`](https://github.com/semidark/kikiri-tts) (Apache-2.0)
 over a patched StyleTTS2, pinned by commit in `modal_app.common`. Stage 1 adapts the base
 to Kabyle across both voices; Stage 2 fine-tunes one voice out of it. Stage 1 is not
-optional for a new language — Stage 2 loads its output. No voicepack is extracted: the
-published `inference.py` encodes a reference clip on the filterbank `meldataset` trains
-with, where both of the recipe's extractors use a different one.
+optional for a new language — Stage 2 loads its output. No voicepack is extracted here:
+`tools.export_matoub` reads the speaker style off a reference clip on the filterbank
+`meldataset` trains with, where both of the recipe's extractors use a different one.
 
 **Every deterministic failure is made to happen on a CPU container.** `matoub_prepare`
 asks for no GPU and no retries, and it is where the filelists are validated, the symbol

@@ -11,6 +11,7 @@ from tools.export_checkpoint import (
     ExportError,
     config_of,
     drop_derived,
+    drop_modules,
     load,
     stage,
     untie,
@@ -67,12 +68,35 @@ def test_a_derived_table_is_dropped_by_suffix_and_recorded() -> None:
     assert dropped == ["layers.0.position_indices", "layers.1.position_indices"]
 
 
-def test_nothing_is_dropped_when_no_suffix_is_given() -> None:
+def test_a_training_only_submodule_is_dropped_by_prefix() -> None:
+    """Feraoun-Pro's auxiliary decoder routes gradients and infers nothing. Published it is
+    35 MB of weights and twenty-one unexpected keys for every downloader, and `--derived`
+    cannot reach it: its keys share a prefix, not a suffix."""
+    tensors = {
+        "aux_decoder.lm_head.weight": torch.zeros(2, 2),
+        "aux_decoder.embedding.weight": torch.zeros(2, 2),
+        "encoder.layers.0.weight": torch.zeros(2, 2),
+    }
+    kept, dropped = drop_modules(tensors, ["aux_decoder."])
+
+    assert list(kept) == ["encoder.layers.0.weight"]
+    assert dropped == ["aux_decoder.embedding.weight", "aux_decoder.lm_head.weight"]
+
+
+def test_a_prefix_that_matches_nothing_drops_nothing() -> None:
+    tensors = {"encoder.weight": torch.zeros(2, 2)}
+    kept, dropped = drop_modules(tensors, ["aux_decoder."])
+
+    assert kept == tensors
+    assert dropped == []
+
+
+def test_nothing_is_dropped_when_no_suffix_or_prefix_is_given() -> None:
     """The default must publish every tensor: a silent drop is a silently broken model."""
     tensors = {"a.position_indices": torch.zeros(2, 2), "b.weight": torch.zeros(2, 2)}
     kept, dropped = drop_derived(tensors, [])
-
     assert kept == tensors
+    assert drop_modules(tensors, [])[0] == tensors
     assert dropped == []
 
 

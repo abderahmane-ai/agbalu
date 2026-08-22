@@ -153,6 +153,21 @@ def drop_derived(
     return kept, sorted(set(tensors) - set(kept))
 
 
+def drop_modules(
+    tensors: dict[str, Tensor], prefixes: Sequence[str]
+) -> tuple[dict[str, Tensor], list[str]]:
+    """The tensors with every training-only submodule removed, and the names removed.
+
+    A branch that exists to route gradients is not part of the model a downloader loads.
+    Feraoun-Pro's auxiliary decoder is 8.6M of 60.2M parameters and would report twenty-one
+    unexpected keys to everyone who calls `from_pretrained`.
+    """
+    if not prefixes:
+        return tensors, []
+    kept = {k: v for k, v in tensors.items() if not k.startswith(tuple(prefixes))}
+    return kept, sorted(set(tensors) - set(kept))
+
+
 def config_of(checkpoint: dict[str, object]) -> dict[str, object]:
     """The architecture the checkpoint records, as a mapping.
 
@@ -180,6 +195,7 @@ def stage(
     extras: Sequence[Path] = (),
     config_path: Path | None = None,
     derived: Sequence[str] = (),
+    training_only: Sequence[str] = (),
 ) -> list[Staged]:
     """Write the release, after every check has passed.
 
@@ -204,6 +220,7 @@ def stage(
     checkpoint = load(source)
     kept, tied = untie(weights(checkpoint))
     kept, derived_dropped = drop_derived(kept, derived)
+    kept, module_dropped = drop_modules(kept, training_only)
     config = (
         json.loads(config_path.read_text(encoding="utf-8"))
         if config_path is not None
@@ -235,6 +252,7 @@ def stage(
                 "dropped_state": dropped,
                 "dropped_tied": tied,
                 "dropped_derived": derived_dropped,
+                "dropped_training_only": module_dropped,
                 "tensors": len(kept),
                 "parameters": sum(tensor.numel() for tensor in kept.values()),
                 "files": [entry.as_dict() for entry in staged],
@@ -264,10 +282,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=[],
         help="repeatable key suffix the module rebuilds on load; dropped from the weights",
     )
+    parser.add_argument(
+        "--training-only",
+        action="append",
+        default=[],
+        help="repeatable key prefix of a submodule that trains but does not infer",
+    )
     args = parser.parse_args(argv)
 
     try:
-        staged = stage(args.source, args.out, args.card, args.extra, args.config, args.derived)
+        staged = stage(
+            args.source,
+            args.out,
+            args.card,
+            args.extra,
+            args.config,
+            args.derived,
+            args.training_only,
+        )
     except ExportError as error:
         print(f"error: {error}", file=sys.stderr)
         return 1

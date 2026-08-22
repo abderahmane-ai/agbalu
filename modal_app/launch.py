@@ -36,6 +36,10 @@ from agbalu.tts.training import DEFAULT_RUN_NAME as MATOUB_RUN_NAME
 from modal_app.asr import DEFAULT_RUN as ASR_RUN_NAME
 from modal_app.common import APP_NAME, MATOUB_BATCH
 from modal_app.jugurtha import DEFAULT_RUN as JUGURTHA_RUN_NAME
+from modal_app.ocr_pro import APP_NAME as OCR_PRO_APP_NAME
+from modal_app.ocr_pro import DEFAULT_RUN as OCR_PRO_RUN_NAME
+from modal_app.ocr_pro import MAX_LINES as OCR_PRO_MAX_LINES
+from modal_app.ocr_pro import TIFINAGH_RATIO as OCR_PRO_TIFINAGH_RATIO
 
 FUNCTIONS: Final = (
     "pretrain",
@@ -59,6 +63,8 @@ FUNCTIONS: Final = (
     "boulifa_train",
     "feraoun_train",
     "feraoun_smoke",
+    "ocr_pro_train",
+    "ocr_pro_smoke",
 )
 
 
@@ -104,15 +110,37 @@ def _modal_cli(*arguments: str, purpose: str) -> list[str]:
     return [executable, *arguments]
 
 
-def log_command(app_name: str = APP_NAME, call_id: str | None = None) -> list[str]:
-    """The log stream, scoped to one call when its id is known.
+FUNCTION_APP_NAME: Final[dict[str, str]] = {
+    "ocr_pro_train": OCR_PRO_APP_NAME,
+    "ocr_pro_smoke": OCR_PRO_APP_NAME,
+}
+"""The functions not on the shared app. `from_name` reports a missing app the same way it
+reports a missing function, so each value is imported from the module that declares it."""
 
-    Every function in this project shares one app, so an unscoped stream interleaves whatever
-    else is running — a Kokoro fine-tune's per-step lines arriving in the middle of a
-    distillation run's is unreadable, and neither can be followed. `--function-call` filters
-    by the call id, which is resolved against the *app name*: it therefore keeps working when
-    the function itself is no longer deployed, unlike `--status`.
-    """
+
+def resolve_app_name(function: str | None) -> str:
+    """The app that owns a function: its own, or the shared one."""
+    if not function:
+        return APP_NAME
+    return FUNCTION_APP_NAME.get(function, APP_NAME)
+
+
+RESUME_NAMES: Final = ("latest", "best")
+
+DIRECTORY_RESUME: Final = frozenset({"ocr_pro_train", "feraoun_train"})
+"""Whose `--resume-from` also takes another run's name, or `none` to train from scratch."""
+
+
+def check_resume(function: str, resume_from: str) -> None:
+    """Refuse a checkpoint name the function cannot resolve, before a GPU is paid for."""
+    if resume_from in RESUME_NAMES or function in DIRECTORY_RESUME:
+        return
+    message = f"--resume-from {resume_from!r} is not one of {list(RESUME_NAMES)} for {function}"
+    raise SystemExit(message)
+
+
+def log_command(app_name: str = APP_NAME, call_id: str | None = None) -> list[str]:
+    """The log stream, scoped to one call when its id is known."""
     scope = ("--function-call", call_id) if call_id else ()
     return _modal_cli(
         "app", "logs", app_name, "--follow", *scope, purpose="logs cannot be followed"
@@ -125,12 +153,7 @@ def stop_command(app_name: str = APP_NAME) -> list[str]:
 
 
 def follow(app_name: str = APP_NAME, call_id: str | None = None) -> int:
-    """Stream one call's logs as a reader.
-
-    This process is not the run's parent — the job was spawned on a *deployed* app, whose
-    lifetime no client shares. Interrupting here stops the reader and nothing else, which is
-    the whole point of the deploy-and-spawn arrangement.
-    """
+    """Stream one call's logs as a reader."""
     try:
         return subprocess.call(log_command(app_name, call_id))
     except KeyboardInterrupt:
@@ -143,10 +166,11 @@ def start(function: str, **kwargs: object) -> str:
     if function not in FUNCTIONS:
         message = f"{function!r} is not spawnable; have {list(FUNCTIONS)}"
         raise SystemExit(message)
-    call = modal.Function.from_name(APP_NAME, function).spawn(**kwargs)
+    app_name = resolve_app_name(function)
+    call = modal.Function.from_name(app_name, function).spawn(**kwargs)
     call_id = call.object_id
     _remember(function, call_id)
-    print(f"spawned {function} on the deployed app {APP_NAME!r}")
+    print(f"spawned {function} on the deployed app {app_name!r}")
     print(f"  call id   {call_id}   (saved to {call_id_file(function)})")
     print(
         "\nThe run is detached. Ctrl-C, closing this terminal, sleeping or shutting down\n"
@@ -167,11 +191,7 @@ _STATUS_TEXT: Final[dict[InputStatus, str]] = {
 
 
 def status(call_id: str) -> int:
-    """Report the call's state without attaching to it or consuming its result.
-
-    Modal's input status does not separate queued from running, so both read as pending;
-    the step counter exists only in the log.
-    """
+    """Report the call's state without attaching to it or consuming its result."""
     graph = modal.FunctionCall.from_id(call_id).get_call_graph()
     if not graph:
         print(f"{call_id}: no input record — Modal's retention is limited. Try `make modal-logs`.")
@@ -184,11 +204,7 @@ def status(call_id: str) -> int:
 
 
 def cancel(call_id: str, app_name: str = APP_NAME) -> int:
-    """Terminate the run, then stop the deployed app.
-
-    Stopping the app terminates any container the cancelled call left behind, so the next
-    `modal deploy` starts from nothing rather than rolling a live deployment forward.
-    """
+    """Terminate the run, then stop the deployed app."""
     modal.FunctionCall.from_id(call_id).cancel()
     print(f"{call_id}: cancelled")
     code = subprocess.call(stop_command(app_name))
@@ -235,9 +251,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--resume-from",
-        choices=("latest", "best"),
         default="latest",
-        help="which checkpoint to continue from",
+        help="which checkpoint or run directory to continue from; `none` trains from scratch",
     )
     parser.add_argument(
         "--epochs", type=int, default=0, help="asr_finetune: 0 uses the configured EPOCHS"
@@ -311,6 +326,7 @@ def main(argv: list[str] | None = None) -> int:
         "--max-lines", "--lines", type=int, default=0, help="feraoun_train: max lines"
     )
     parser.add_argument("--lr", type=float, default=0.0, help="learning rate override")
+    parser.add_argument("--eval-every", type=int, default=0, help="evaluation interval in steps")
     parser.add_argument(
         "--tifinagh-ratio",
         type=float,
@@ -318,15 +334,17 @@ def main(argv: list[str] | None = None) -> int:
         help="feraoun_train: ratio of Tifinagh lines for dual-script CPT (e.g. 0.25)",
     )
     args = parser.parse_args(argv)
+    app_name = resolve_app_name(args.function)
 
     if args.cancel:
-        return cancel(args.call_id or _recall(args.function))
+        return cancel(args.call_id or _recall(args.function), app_name=app_name)
     if args.status:
         return status(args.call_id or _recall(args.function))
     if args.logs:
-        return follow(call_id=args.call_id or _recall(args.function))
+        return follow(app_name=app_name, call_id=args.call_id or _recall(args.function))
+    check_resume(args.function, args.resume_from)
     call_id = start(args.function, **spawn_kwargs(args))
-    return follow(call_id=call_id)
+    return follow(app_name=app_name, call_id=call_id)
 
 
 def _document_kwargs(args: argparse.Namespace) -> dict[str, object]:
@@ -511,6 +529,32 @@ def _feraoun_smoke_kwargs(_args: argparse.Namespace) -> dict[str, object]:
     }
 
 
+def _ocr_pro_kwargs(args: argparse.Namespace) -> dict[str, object]:
+    kwargs: dict[str, object] = {
+        "run_name": args.run_name if args.run_name != DEFAULT_RUN_NAME else OCR_PRO_RUN_NAME,
+        "epochs": args.epochs or 1,
+        "batch_size": args.batch or 64,
+        "lr": args.lr or 2e-5,
+        "max_lines": args.max_lines or OCR_PRO_MAX_LINES,
+        # `none` is the from-scratch opt-out. Without it the launcher's own default would
+        # make a fresh run unreachable, and a resume that silently finds nothing would
+        # train a paid run from random weights behind a healthy-looking loss curve.
+        "resume_from": None if args.resume_from == "none" else args.resume_from,
+    }
+    # 0.0 is a meaningful ratio — the Latin-only arm — so it cannot share `or` with a
+    # default, and `--tifinagh-ratio` defaults to 0.0 for `feraoun_train`'s sake.
+    kwargs["tifinagh_ratio"] = (
+        args.tifinagh_ratio if args.tifinagh_ratio else OCR_PRO_TIFINAGH_RATIO
+    )
+    if args.eval_every:
+        kwargs["eval_every"] = args.eval_every
+    return kwargs
+
+
+def _ocr_pro_smoke_kwargs(_args: argparse.Namespace) -> dict[str, object]:
+    return {}
+
+
 KWARGS: Final[dict[str, Callable[[argparse.Namespace], dict[str, object]]]] = {
     "finetune": _mt_finetune_kwargs,
     "mt_predict": _document_kwargs,
@@ -533,6 +577,8 @@ KWARGS: Final[dict[str, Callable[[argparse.Namespace], dict[str, object]]]] = {
     "boulifa_train": _boulifa_kwargs,
     "feraoun_train": _feraoun_kwargs,
     "feraoun_smoke": _feraoun_smoke_kwargs,
+    "ocr_pro_train": _ocr_pro_kwargs,
+    "ocr_pro_smoke": _ocr_pro_smoke_kwargs,
 }
 
 

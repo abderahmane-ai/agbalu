@@ -33,6 +33,9 @@ from modal_app.launch import (
     stop_command,
 )
 from modal_app.mt import finetune as mt_finetune
+from modal_app.ocr_pro import DEFAULT_RUN as OCR_PRO_RUN_NAME
+from modal_app.ocr_pro import TIFINAGH_RATIO as OCR_PRO_TIFINAGH_RATIO
+from modal_app.ocr_pro import ocr_pro_train
 from modal_app.train import pretrain
 from modal_app.translate import mt_predict
 
@@ -225,6 +228,55 @@ class TestStart:
         self._spawner(monkeypatch, tmp_path, seen)
         main(["--function", "jugurtha_train", "--run-name", "jugurtha-smoke"])
         assert seen["run"] == "jugurtha-smoke"
+
+    def test_feraoun_pro_continues_the_trained_checkpoint_with_tifinagh_mixed_in(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The continuation this model exists for. Its Neo-Tifinagh arm was absent from the
+        first run's corpus, so a launcher that drops `tifinagh_ratio` or `resume_from`
+        retrains Latin and reports it as a dual-script result."""
+        seen: dict[str, object] = {}
+        self._spawner(monkeypatch, tmp_path, seen)
+
+        main(
+            [
+                "--function",
+                "ocr_pro_train",
+                "--resume-from",
+                "best",
+                "--tifinagh-ratio",
+                "0.40",
+                "--epochs",
+                "1",
+            ]
+        )
+        inspect.signature(ocr_pro_train.get_raw_f()).bind(**seen)
+        assert seen["resume_from"] == "best"
+        assert seen["tifinagh_ratio"] == 0.40
+        assert seen["epochs"] == 1
+        assert seen["run_name"] == OCR_PRO_RUN_NAME
+
+    def test_feraoun_pro_defaults_mix_tifinagh_rather_than_inheriting_a_latin_only_zero(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """`--tifinagh-ratio` defaults to 0.0 for `feraoun_train`'s sake, and 0.0 is the
+        Latin-only arm — read as falsy it would silently train no Tifinagh at all."""
+        seen: dict[str, object] = {}
+        self._spawner(monkeypatch, tmp_path, seen)
+        main(["--function", "ocr_pro_train"])
+        assert seen["tifinagh_ratio"] == OCR_PRO_TIFINAGH_RATIO
+        assert seen["tifinagh_ratio"] > 0.0
+
+    def test_feraoun_pro_can_be_told_to_start_from_scratch(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """`--resume-from` defaults to `latest`, so without an opt-out a fresh run is
+        unreachable — and a resume that finds nothing must refuse, not train from random
+        weights on a paid GPU."""
+        seen: dict[str, object] = {}
+        self._spawner(monkeypatch, tmp_path, seen)
+        main(["--function", "ocr_pro_train", "--resume-from", "none"])
+        assert seen["resume_from"] is None
 
     def test_the_spawn_kwargs_bind_to_the_deployed_function(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
