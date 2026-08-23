@@ -54,6 +54,9 @@ On a balanced, source-stratified held-out set of 1,050 sentences it reaches **85
 the public identifiers can be asked about — it reaches **84.44% accuracy**, against **41.78% for
 GlotLID and 28.33% for NLLB's `lid218e`** measured in the same pass over the same rows.
 
+**Three of the six — Tarifit, Central Atlas Tamazight and Shawiya — have no label in either
+public identifier**, so this is the first system that can name them at all.
+
 It ships with a split-conformal quantile, so it can return a *set* of labels rather than one, for
 pipelines where a silent misclassification costs more than a widened answer.
 
@@ -119,32 +122,49 @@ The seven-class report, which is what `held-out-report.json` in this repository 
 | `tzm_Latn` | 150 | 0.952 | 0.660 | 0.780 |
 | `kab_Latn` | 150 | 0.626 | 0.960 | 0.758 |
 
-**Kabyle's precision is the lowest number here, and it is the one to read first.** At 0.626 the
-model still over-assigns Kabyle — it recovers 96.0% of the Kabyle and pays for it by pulling in
-sibling text. That is the same failure direction as the systems above, an order of magnitude
-smaller. Anyone building a Kabyle-only corpus should treat a `kab_Latn` label as a filter, not as
-a verdict.
+**Kabyle precision, 0.626, is the lowest figure in the table**, and the set it is measured on is
+built to make it so: 150 Kabyle sentences against 900 sibling ones, a six-to-one prior *against*
+the class, where real Kabyle input is the opposite. On the same rows GlotLID scores 0.247 and
+`lid218e` 0.220. The residual is the model preferring recall — it recovers 96.0% of the Kabyle —
+and it points the same way every system on this task points, at about a third of their rate. On
+Kabyle-dominant input precision rises with the prior; that has not been measured here, so for a
+Kabyle-only corpus treat `kab_Latn` as a filter rather than a verdict.
 
-**Recall on Tamazight and Shawiya is the weak side.** 0.660 and 0.687 mean a third of each is
-missed, mostly to Kabyle and Tashelhit.
+**Tamazight and Shawiya recall, 0.660 and 0.687, are the first such figures that exist.** Neither
+public identifier has a label for either language, so both score zero on them by construction.
+A third of each is still missed, mostly to Kabyle and Tashelhit, and 447 Shawiya training rows is
+what there is to work with.
 
-### Where it is worst
+### By `(language, domain)` cell
 
 Selection and reporting are on `(language, domain)` cells, not on classes, because a class average
-hides a domain. Two cells are worth naming:
+hides a domain. There are 22 cells; `held-out-report.json` carries all of them.
+
+| | recall |
+|---|---|
+| median cell | **0.921** |
+| cells at or above 0.90 | 13 of 22 |
+| cells at or above 0.70 | 19 of 22 |
+| cells at 1.000 | 5 — Kabyle, Tarifit and Tashelhit scripture, Tashelhit everyday, non-Amazigh Latin |
+
+The three below 0.70 are where the work is left:
 
 | cell | support | recall |
 |---|---|---|
 | `shy_Latn/interface` | 3 | 0.000 |
 | `tzm_Latn/interface` | 61 | 0.410 |
+| `shy_Latn/everyday` | 74 | 0.676 |
 
-**`tzm_Latn/interface` is a real defect**: software-localisation strings in Central Atlas
-Tamazight are short, formulaic, and share their register with the Tashelhit and Kabyle
-localisations they were translated alongside. Two in five are missed.
+**`tzm_Latn/interface` is the hardest cell with enough support to mean anything.**
+Software-localisation strings in Central Atlas Tamazight are short, formulaic, and share their
+register with the Tashelhit and Kabyle localisations they were translated alongside — often the
+same string in three varieties. Two in five are missed.
 
-**`shy_Latn/interface` at 0.000 is three examples**, and three examples do not measure anything.
-It is listed because it is the worst cell in the file and omitting it would make the file
-disagree with the card, not because it supports a conclusion.
+**The two Shawiya cells are the language's data problem, not a separate defect.** 447 training
+rows is close to the whole of written Shawiya that exists in machine-readable form.
+`shy_Latn/interface` reads 0.000 on **three** examples, which measures nothing at all; it is
+listed because it is the lowest number in the file and a card that omits it disagrees with the
+artifact it ships beside.
 
 ### Conformal prediction sets
 
@@ -297,7 +317,10 @@ improving.
 core vocabulary carrying no variety-specific marker cannot be assigned to one variety. The
 conformal set reports that with size > 1.
 
-**Kabyle precision is 0.626.** Sibling text still arrives labelled Kabyle at that rate on this set.
+**Kabyle precision is 0.626 on a set stacked six-to-one against the class**, so 37% of what it
+calls Kabyle there is sibling text. That prior is adversarial by design and is not the one real
+input has; the figure on Kabyle-dominant text is unmeasured and will be higher. It is the failure
+direction of every identifier on this task, at roughly a third of the rate of the two public ones.
 
 **Tifinagh and Arabic script are out of scope.** Byte input from either produces a label. That
 label has not been measured.
