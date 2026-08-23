@@ -126,6 +126,7 @@ Each model is named for someone whose life was the work that model does, in two 
 | voice | speaks Kabyle | **Matoub** | Lounès Matoub (1956–1998) — recorded 36 albums in Kabyle at a time when the Algerian state was suppressing Berber language and culture, making the language audible to an entire generation. Assassinated on 25 June 1998, ten days before the Arabisation law he had spent years opposing took effect. His voice is inseparable from the survival of Kabyle as a spoken language in collective memory |
 | orthography standardisation | writes Kabyle correctly from any input | **Boulifa** | Si Amar ou Saïd Boulifa (1865–1931) — the first grammarian to systematically codify Kabyle Latin orthography. His *Recueil de poésies kabyles* (1904) set 555 pages of Kabyle in one consistent Latin notation, solving in print what this model solves from a keyboard |
 | document OCR | reads Kabyle from printed paper and books | **Feraoun** | Mouloud Feraoun (1913–1962), novelist and teacher who taught reading and transcribed the oral poetry of Si Mohand onto the printed page |
+| language identification | tells Kabyle from its siblings | **Dihya** | the Amazigh leader who fought the Umayyad conquest from the Aurès, died c. 703 CE — the Shawiya homeland, and Shawiya is the variety this model exists to stop being absorbed into Kabyle |
 | generative | generates; sovereign | **Jugurtha** | Masinissa's grandson, who fought Rome 111–104 BCE and was never taken in battle |
 
 Two lineages carry the design. **Masinissa and Jugurtha are grandfather and grandson**, so
