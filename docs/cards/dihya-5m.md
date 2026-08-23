@@ -253,7 +253,7 @@ already truncated at inference.
 | schedule | 8 epochs, 5,176 steps; batch 12 cells × 10 rows |
 | published checkpoint | step 2,898, selected on dev |
 | dev score there | 0.9363 macro-F1, 0.8125 worst-group recall |
-| hardware | one A10G |
+| hardware | one A10G, 18.4 minutes at 564 rows/s |
 
 Three objectives address three separate failures of an earlier build that read 98.26% on a dev
 split drawn from the training sources and 76.27% on held-out text:
@@ -277,8 +277,19 @@ corpus: 120 steps with margins from step 0 reached a loss of 4.01 where the same
 reached 0.76, at the same accuracy. This is LDAM's own deferred schedule.
 
 **Selection is on the mean of dev macro-F1 and dev worst-group recall, never on the test set and
-never on loss.** Macro-F1 alone picks the checkpoint that wins the large domains; worst-group
-alone picks one that has learned a single hard cell and forgotten the rest.
+never on loss**, and on this run that is not a formality. The published checkpoint is step 2,898;
+training ran to 5,176:
+
+| dev, at step | accuracy | macro-F1 | worst-group recall |
+|---|---|---|---|
+| 2,898 — published | 97.51% | 0.9363 | **0.8125** |
+| 5,176 — final | 97.87% | 0.9401 | 0.6875 |
+
+**Both of the usual criteria pick the wrong one.** The final checkpoint is 0.37 points better on
+accuracy and 0.004 better on macro-F1, and it has lost **12.5 points of worst-group recall** on the
+Shawiya/lexicon cell. Selecting on either headline would have published a model that recovered
+Shawiya halfway through training and gave part of it back, with every reported average still
+improving.
 
 ## Limitations
 
