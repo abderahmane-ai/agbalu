@@ -102,3 +102,4 @@ paper/**/*.fdb_latexmk
 paper/**/*.fls
 
 .agents/
+paper/
