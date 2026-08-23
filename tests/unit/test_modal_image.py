@@ -56,6 +56,7 @@ IMAGES: Final[tuple[tuple[str, str, tuple[str, ...]], ...]] = (
     ("sentiment", "modal_app.sentiment", BENCH_PIP_PACKAGES),
     ("punctuation", "modal_app.punctuation", PIP_PACKAGES),
     ("boulifa", "modal_app.boulifa", PIP_PACKAGES),
+    ("dihya", "modal_app.dihya", PIP_PACKAGES),
     ("simohand", "modal_app.simohand", EMBED_PIP_PACKAGES),
     ("ocr", "modal_app.ocr", OCR_PIP_PACKAGES),
     ("ocr_pro", "modal_app.ocr_pro", OCR_PRO_PIP_PACKAGES),
@@ -72,6 +73,11 @@ RUNTIME_ONLY: Final[dict[str, frozenset[str]]] = {
     # Shares the training image, which carries pyarrow for `agbalu.model.data`. This
     # entrypoint reads JSONL splits and reaches no parquet.
     "punctuation": frozenset({"pyarrow"}),
+    # Also shares the training image. `pyarrow` backs the source table's parquet readers,
+    # which only `make lid-dataset` reaches and which runs locally; the identifier trains on
+    # JSONL splits. `sentencepiece` belongs to the encoder that shares the image and nothing
+    # under `agbalu.lid` tokenizes — the model reads UTF-8 bytes.
+    "dihya": frozenset({"pyarrow", "sentencepiece"}),
     "bench": frozenset({"sentencepiece", "numpy"}),
     "mt": frozenset({"sentencepiece", "accelerate"}),
     "translate": frozenset({"sentencepiece", "sacrebleu", "numpy"}),
@@ -374,6 +380,7 @@ def test_the_deploy_module_registers_every_function_without_a_name_collision() -
         "simohand_eval",
         "feraoun_train",
         "feraoun_smoke",
+        "dihya_train",
     }
 
     entrypoints = set(deploy.app.registered_entrypoints)

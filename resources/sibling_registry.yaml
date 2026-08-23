@@ -18,8 +18,8 @@
 #
 # Validated by: make sibling-registry
 
-version: "1.0.0"
-surveyed: 2026-08-09
+version: "1.2.0"
+surveyed: 2026-08-23
 
 sources:
 
@@ -111,6 +111,89 @@ sources:
       trained on.
 
   # =========================================================================
+  # Bible New Testaments — the content-controlled gold spine. Same verses across
+  # languages, human-translated, editorially single-language. All-rights-reserved:
+  # never redistributed and never ingested; used locally to hold topic constant so
+  # a classifier cannot win on domain, the way FLORES+ does for kab/taq but larger.
+  # =========================================================================
+  - id: archive.tarifit-nt
+    name: Tarifit New Testament, Latin script (Tira Iqedsen, Tmaziɣt n Arif)
+    modality: text
+    tier: reference
+    access: http
+    uri: https://archive.org/download/bible-tarifit/Latin-MERGED_djvu.txt
+    licence: all-rights-reserved
+    languages: [rif_Latn]
+    size: { bytes: 4200000 }
+    retrieved: 2026-08-23
+    notes: >-
+      Copyright 2009 DHIMH Multimedia, all rights reserved. Latin script, New
+      Testament. Full-text .txt (4.2 MB, DjVu OCR layer) at
+      archive.org/download/bible-tarifit. Tarifit's only content-controlled
+      source: before this, rif had nothing but silver GlotCC. Verse-aligned to a
+      Kabyle NT it holds topic constant, so LID cannot win on domain. Never
+      ingested into AƔBALU-Text; redistribution restricted, so excluded from any
+      permissive release by code.
+
+  - id: opus.bible-uedin-shi
+    name: OPUS bible-uedin — Tashelhit (Latin)
+    modality: text
+    tier: reference
+    access: http
+    uri: https://object.pouta.csc.fi/OPUS-bible-uedin/v1/mono/shi.txt.gz
+    licence: cc-by-4.0
+    languages: [shi_Latn]
+    size: { tokens: 129200 }
+    retrieved: 2026-08-23
+    notes: >-
+      Monolingual Tashelhit from OPUS bible-uedin v1, ~129,200 tokens, Latin
+      script, one verse per line. Aligned to the Kabyle side (opus.bible-uedin-kab)
+      through the same massively-parallel corpus, so it is the redistributable
+      content-controlled contrast for shi. cc-by-4.0, so unlike the ARR standalone
+      Bibles it can ship. Domain scripture, label-trust gold; register is narrow
+      and archaic.
+
+  # =========================================================================
+  # Everyday register — Tatoeba, per-record language-labelled, Latin. Offsets the
+  # scripture-heavy gold so the model is not learning register instead of language.
+  # =========================================================================
+  - id: hf.tamazight-nlp.tatoeba
+    name: Tamazight-NLP Tatoeba-Translations — sibling slices
+    modality: text
+    tier: reference
+    access: hf
+    uri: https://huggingface.co/datasets/Tamazight-NLP/Tatoeba-Translations
+    licence: cc-by-2.0
+    languages: [rif_Latn, shi_Latn, shy_Latn]
+    size: { rows: 805112 }
+    retrieved: 2026-08-23
+    notes: >-
+      Tatoeba pairs carrying per-record source_lang/target_lang, so the sibling
+      side of each row is labelled by a contributor, not a crawl classifier. Latin
+      script. Only the rif/shi/shy slices are taken (the corpus also carries kab,
+      zgh, thv); the Tashelhit slice alone is ~16k sentences. cc-by-2.0 via Tatoeba.
+
+  # =========================================================================
+  # Central Atlas Tamazight — the one substantial Latin tzm source found anywhere
+  # =========================================================================
+  - id: hf.tamazight-nlp.beni-mellal
+    name: Tamazight-NLP Beni-Mellal-Tamazight (Anki)
+    modality: text
+    tier: reference
+    access: hf
+    uri: https://huggingface.co/datasets/Tamazight-NLP/Beni-Mellal-Tamazight
+    licence: unknown
+    languages: [tzm_Latn]
+    size: { rows: 2322 }
+    retrieved: 2026-08-23
+    notes: >-
+      English-to-Tamazight Anki deck, 2,322 rows; the Tamazight column is Central
+      Atlas Tamazight (Beni Mellal variety). GlotCC-tzm yields ~283 lines, almost
+      all consumed by the held-out set, so without this tzm is untrainable.
+      Licence unstated upstream, registered unknown so it is not redistributed but
+      is usable for training. Latin script confirmed on fetch.
+
+  # =========================================================================
   # Shawiya — the ṯ contamination lead (CLAUDE.md §6.2)
   # =========================================================================
   - id: wikimedia.shywiktionary
@@ -131,3 +214,95 @@ sources:
       and that lead cannot be settled without the text it points at. Dump
       20260801, pages-articles. No sibling appears in GlotCC for shy, so this is
       the only acquirable Shawiya text in the survey.
+
+  # =========================================================================
+  # Registered 2026-08-23 after the first classifier was measured. A char n-gram
+  # scored 98.26% on a same-source dev split and 76.27% on the held-out set: the
+  # gap was domain, not language. Every source below buys a *domain* some class
+  # did not have, which is the only thing that moves the held-out number.
+  # =========================================================================
+
+  - id: hf.tamazight-nlp.nllb-seed-taq
+    name: NLLB-Seed — Tamasheq, Latin script
+    modality: parallel
+    tier: reference
+    access: hf
+    uri: https://huggingface.co/datasets/Tamazight-NLP/NLLB-Seed_Tamasheq-Latin-Script
+    licence: cc-by-sa-4.0
+    languages: [taq_Latn]
+    size: { rows: 6193 }
+    retrieved: 2026-08-23
+    notes: >-
+      Professionally translated Wikipedia sentences from the NLLB-Seed effort,
+      2.6x the whole previous Tamasheq pool and 100% Latin on inspection. It is
+      what lets FLORES+ leave the training set: taq was 78.7% FLORES+ rows, which
+      is the split the held-out set is drawn from.
+
+  - id: hf.tamazight-nlp.translatewiki-siblings
+    name: Tamazight-NLP translatewiki — sibling slices
+    modality: parallel
+    tier: reference
+    access: hf
+    uri: https://huggingface.co/datasets/Tamazight-NLP/translatewiki
+    licence: cc-by-3.0
+    languages: [rif_Latn, shi_Latn, tzm_Latn, shy_Latn]
+    size: { rows: 3260 }
+    retrieved: 2026-08-23
+    notes: >-
+      MediaWiki interface strings, translated per language by a named contributor,
+      so the label is human rather than crawl-inferred. rif 610, shi 1,592, tzm
+      1,038, shy 20. The tzm slice is largely Tifinagh and the reader drops it on
+      script; the value is rif, which had no non-scripture gold at all. The `kab`
+      slice belongs to the Kabyle registry as `hf.tamazight-nlp.translatewiki`.
+
+  - id: hf.tamazight-nlp.pontoon-siblings
+    name: Tamazight-NLP Pontoon — sibling slices
+    modality: parallel
+    tier: reference
+    access: hf
+    uri: https://huggingface.co/datasets/Tamazight-NLP/Pontoon-Translations
+    licence: mpl-2.0
+    languages: [tzm_Latn, shi_Latn]
+    size: { rows: 269 }
+    retrieved: 2026-08-23
+    notes: >-
+      Mozilla product strings. tzm 266, shi 3. Small, and carries printf
+      placeholders that the reader strips before a line counts. Registered because
+      tzm's entire gold pool was one Anki deck, and one deck is a register, not a
+      language.
+
+  - id: hf.tamazight-nlp.amawar
+    name: Tamazight-NLP AmaWar — Amazigh oral heritage
+    modality: text
+    tier: reference
+    access: hf
+    uri: https://huggingface.co/datasets/Tamazight-NLP/AmaWar
+    licence: apache-2.0
+    languages: [tzm_Tfng]
+    size: { rows: 2324 }
+    retrieved: 2026-08-23
+    notes: >-
+      Proverbs, riddles, poems, stories, idioms and dictionary examples of the Ait
+      Warain variety, scraped from amawalwarayni.com. Registered as surveyed and
+      NOT usable here: the Amazigh side is Neo-Tifinagh and the gloss is Modern
+      Standard Arabic, so nothing in it is Latin script. It was fetched on the
+      card's `language: [ber, rif, tzm, ar]`, which names no script; the bytes
+      settled it. Kept because it is the only oral-register Amazigh corpus found
+      and the Tifinagh models can use it.
+
+  - id: wikimedia.shiwiki
+    name: Tachelhit Wikipedia (shi.wikipedia.org)
+    modality: text
+    tier: reference
+    access: wikimedia
+    uri: https://dumps.wikimedia.org/shiwiki/
+    licence: cc-by-sa-4.0
+    languages: [shi_Latn]
+    size: { bytes: 5108285 }
+    retrieved: 2026-08-23
+    notes: >-
+      10,893 articles, 97% Latin on a random sample, with Arabic glosses inline
+      that the 80% Latin-share filter already tolerates. Larger than kab.wikipedia
+      (7,164) and the only encyclopaedic register any sibling has. Confirmed
+      against the Meta sitematrix on 2026-08-23: shi, kab and zgh are the live
+      Berber Wikipedias, shy has a Wiktionary only, and rif has neither.

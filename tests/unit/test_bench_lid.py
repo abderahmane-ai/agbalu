@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -15,12 +16,17 @@ from agbalu.bench.lid import (
     SourceAudit,
     audit_sources,
     build_evalset,
+    kabyle_side,
+    read_evalset,
+    score,
+    write_evalset,
+)
+from agbalu.bench.lid_sources import (
+    SourceError,
     candidates,
     is_usable,
-    kabyle_side,
     latin_share,
     read_flores,
-    score,
     sentences,
     strip_wikitext,
 )
@@ -130,31 +136,87 @@ def test_candidates_deduplicates_and_preserves_order() -> None:
     assert candidates([f"{line}. {other}.", f"{line}."]) == [f"{line}.", f"{other}."]
 
 
+def pool(language: str, source: str, count: int, domain: str = "web") -> list[Example]:
+    return [
+        Example(text=f"{source} line {index}", language=language, source=source, domain=domain)
+        for index in range(count)
+    ]
+
+
 def test_build_evalset_is_balanced_and_deterministic() -> None:
-    pools = {lang: [f"{lang} line {i}" for i in range(50)] for lang in ("kab_Latn", "shi_Latn")}
+    pools = {lang: pool(lang, f"{lang}.a", 50) for lang in ("kab_Latn", "shi_Latn")}
     first = build_evalset(pools, per_language=10, seed=7)
-    second = build_evalset(pools, per_language=10, seed=7)
-    assert first == second
+    assert first == build_evalset(pools, per_language=10, seed=7)
     assert len(first) == 20
-    assert sum(1 for x in first if x.language == "kab_Latn") == 10
+    assert sum(1 for example in first if example.language == "kab_Latn") == 10
 
 
 def test_build_evalset_changes_with_the_seed() -> None:
-    pools = {"kab_Latn": [f"line {i}" for i in range(200)]}
+    pools = {"kab_Latn": pool("kab_Latn", "kab.a", 200)}
     assert build_evalset(pools, per_language=20, seed=1) != build_evalset(
         pools, per_language=20, seed=2
     )
 
 
+def test_build_evalset_draws_evenly_across_sources_not_proportionally() -> None:
+    """The whole point of the rebuild: one source of 5,000 lines and one of 40 must not
+    give a 125:1 evaluation split, because that measures the big source."""
+    pools = {"rif_Latn": pool("rif_Latn", "big", 5_000) + pool("rif_Latn", "small", 40)}
+    drawn = build_evalset(pools, per_language=60, seed=3)
+    counts = Counter(example.source for example in drawn)
+    assert counts["big"] == 30
+    assert counts["small"] == 30
+
+
+def test_build_evalset_spends_a_small_source_then_takes_the_rest_from_the_large() -> None:
+    pools = {"shy_Latn": pool("shy_Latn", "big", 100) + pool("shy_Latn", "small", 4)}
+    drawn = build_evalset(pools, per_language=20, seed=3)
+    counts = Counter(example.source for example in drawn)
+    assert counts == {"big": 16, "small": 4}
+
+
 def test_build_evalset_refuses_an_unbalanced_draw() -> None:
-    pools = {"kab_Latn": ["a"] * 10, "tzm_Latn": ["b"] * 3}
+    pools = {"kab_Latn": pool("kab_Latn", "a", 10), "tzm_Latn": pool("tzm_Latn", "b", 3)}
     with pytest.raises(LidError, match="tzm_Latn has 3"):
         build_evalset(pools, per_language=10, seed=1)
 
 
 def test_build_evalset_refuses_a_non_positive_draw() -> None:
     with pytest.raises(LidError, match="must be positive"):
-        build_evalset({"kab_Latn": ["a"]}, per_language=0, seed=1)
+        build_evalset({"kab_Latn": pool("kab_Latn", "a", 1)}, per_language=0, seed=1)
+
+
+def test_evalset_round_trips_its_provenance(tmp_path: Path) -> None:
+    """The published set carried the language in the `source` field, so nothing could be
+    told about where a row came from. Provenance survives the write or the set is a
+    list of strings again."""
+    examples = build_evalset(
+        {"rif_Latn": pool("rif_Latn", "tatoeba.rif", 20)}, per_language=5, seed=1
+    )
+    destination = tmp_path / "lid-eval.jsonl"
+    write_evalset(examples, destination)
+    assert read_evalset(destination) == examples
+    assert {example.source for example in read_evalset(destination)} == {"tatoeba.rif"}
+
+
+def test_read_evalset_refuses_a_missing_or_empty_file(tmp_path: Path) -> None:
+    with pytest.raises(LidError, match="not found"):
+        read_evalset(tmp_path / "absent.jsonl")
+    (tmp_path / "empty.jsonl").write_text("\n\n", encoding="utf-8")
+    with pytest.raises(LidError, match="carried no records"):
+        read_evalset(tmp_path / "empty.jsonl")
+
+
+def test_score_ignores_a_class_public_identifiers_cannot_be_asked_about() -> None:
+    """`NOT_AMAZIGH` is a decision the trained model makes; GlotLID has no such label,
+    so scoring it against one would report the label inventory."""
+    examples = [
+        Example("a", "kab_Latn", "s", "web"),
+        Example("b", "NOT_AMAZIGH", "s", "negative-latin"),
+    ]
+    matrix = score(StubIdentifier(["kab_Latn"], EVAL_LANGUAGES), examples)
+    assert matrix.total() == 1
+    assert matrix.labels == ("kab_Latn",)
 
 
 def matrix_of(pairs: dict[tuple[str, str], int], known: Sequence[str]) -> ConfusionMatrix:
@@ -229,8 +291,8 @@ def test_predicted_labels_keep_off_set_answers_visible() -> None:
 
 def test_score_tabulates_true_against_predicted() -> None:
     examples = [
-        Example(text="a", language="kab_Latn", source="s"),
-        Example(text="b", language="shi_Latn", source="s"),
+        Example(text="a", language="kab_Latn", source="s", domain="web"),
+        Example(text="b", language="shi_Latn", source="s", domain="web"),
     ]
     system = StubIdentifier(["kab_Latn", KABYLE], known=["kab_Latn"])
     matrix = score(system, examples)
@@ -239,7 +301,7 @@ def test_score_tabulates_true_against_predicted() -> None:
 
 
 def test_score_rejects_a_length_mismatch() -> None:
-    examples = [Example(text="a", language="kab_Latn", source="s")] * 3
+    examples = [Example(text="a", language="kab_Latn", source="s", domain="web")] * 3
     with pytest.raises(LidError, match="returned 1 labels"):
         score(StubIdentifier(["kab_Latn"], known=["kab_Latn"]), examples)
 
@@ -249,9 +311,9 @@ def test_score_over_no_examples_is_empty_not_an_error() -> None:
     assert matrix.total() == 0
 
 
-def test_read_flores_reports_a_missing_split(tmp_path: Path) -> None:
-    with pytest.raises(LidError, match="FLORES\\+ split not found"):
-        list(read_flores(tmp_path / "absent.jsonl"))
+def test_read_flores_reports_a_missing_language(tmp_path: Path) -> None:
+    with pytest.raises(SourceError, match="no FLORES\\+ split for taq_Latn"):
+        list(read_flores(tmp_path, "taq_Latn"))
 
 
 @pytest.mark.parametrize(

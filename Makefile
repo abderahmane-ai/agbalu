@@ -81,6 +81,12 @@ bench: ## TASK=audit|contamination|score|pos|lid|lid-sources|lid-audit|tifinagh|
 bench-ceiling: ## What a perfect system scores against the uncorrected FLORES+ reference
 	$(PY) tools/benchmark_ceiling.py
 
+lid-dataset: ## Build the Berber LID training set (task 7.4, model side). CAP caps lines per source
+	$(PY) -m agbalu.bench.lid_dataset $(if $(CAP),--cap $(CAP),)
+
+lid: ## Dihya-5M language identifier. TASK=train|evaluate|calibrate|predict (TEXT="...")
+	$(call cli,lid) $(or $(TASK),predict) $(if $(TEXT),--text "$(TEXT)",) $(if $(EPOCHS),--epochs $(EPOCHS),)
+
 parallel: ## Build AƔBALU-Parallel v1. TASK=agreement partitions the mined NLLB pool
 	$(call cli,parallel) $(or $(TASK),build)
 
@@ -166,9 +172,9 @@ REPOS := $(MODEL_REPOS) $(DATASET_REPOS) org
 
 # Out of the default set on purpose: each needs a checkpoint pulled off a volume first, so
 # `make release` with no REPO would fail on whichever one this machine has not pulled.
-PULLED_REPOS := fadhma belaid boulifa matoub simohand feraoun feraoun-pro kabstandard
+PULLED_REPOS := fadhma belaid boulifa matoub simohand feraoun feraoun-pro kabstandard dihya
 
-release: $(addprefix release-,$(or $(REPO),$(REPOS))) ## Stage repos under artifacts/release. REPO=encoder|tokenizer|mt|juba|bench|lex|sentiment|inflect|tifinagh|punct|g2p|org, or fadhma|belaid|boulifa|matoub|simohand|feraoun|kabstandard once pulled
+release: $(addprefix release-,$(or $(REPO),$(REPOS))) ## Stage repos under artifacts/release. REPO=encoder|tokenizer|mt|juba|bench|lex|sentiment|inflect|tifinagh|punct|g2p|org, or fadhma|belaid|boulifa|matoub|simohand|feraoun|kabstandard|dihya once pulled
 	@echo 'staged under $(RELEASE) — review, then push each with: hf upload <repo> <dir> .'
 
 $(addprefix release-,$(DATASET_REPOS)): release-%:
@@ -335,6 +341,12 @@ release-matoub:
 	@cp docs/cards/matoub-82m.md $(RELEASE)/Matoub-82M/README.md
 	$(PY) -m tools.stage_hub --repo matoub --dir $(RELEASE)/Matoub-82M
 
+DIHYA_RUN ?= dihya
+release-dihya:
+	$(PY) -m tools.export_dihya --run artifacts/runs/$(DIHYA_RUN) --out $(RELEASE)/Dihya-5M \
+		--card $(CARDS)/dihya-5m.md
+	$(PY) -m tools.stage_hub --repo dihya --dir $(RELEASE)/Dihya-5M
+
 # One push target with a variable, not one per repository. The table is the only place a
 # staged directory is paired with the repository it belongs in; two copies of that pairing
 # is how a directory gets published under the wrong name.
@@ -358,9 +370,10 @@ HF_matoub      := models   agbalu/Matoub-82M     $(RELEASE)/Matoub-82M    $(CARD
 HF_feraoun     := models   agbalu/Feraoun-36M    $(RELEASE)/Feraoun-36M   $(CARDS)/feraoun-36m.md
 HF_feraoun-pro := models   agbalu/Feraoun-Pro    $(RELEASE)/Feraoun-Pro   $(CARDS)/feraoun-pro.md
 HF_simohand    := models   agbalu/SiMohand-278M  $(SIMOHAND_DIR)          $(CARDS)/simohand-278m.md
+HF_dihya       := models   agbalu/Dihya-5M       $(RELEASE)/Dihya-5M      $(CARDS)/dihya-5m.md
 
 ALL_REPOS := bench lex sentiment inflect tifinagh punct g2p kabstandard encoder tokenizer \
-	mt juba fadhma belaid boulifa matoub feraoun feraoun-pro simohand
+	mt juba fadhma belaid boulifa matoub feraoun feraoun-pro simohand dihya
 
 # `hf upload` adds and overwrites; it never removes. A repository whose file set shrank keeps
 # the superseded files beside their replacements, which for Matoub means a 1.93 GB training
@@ -691,5 +704,15 @@ modal-mt-train: ## Trim then fine-tune NLLB-1.3B, detached. SMALL=1 FREEZE=1 STE
 	$(PY) -m modal_app.launch --function finetune \
 		$(if $(SMALL),--small,) $(if $(FREEZE),--freeze,) $(if $(STEPS),--steps $(STEPS),) \
 		$(if $(RUN),--run-name $(RUN),)
+
+modal-lid: ## Train Dihya-5M on remote GPU via Modal. EPOCHS=n
+	modal run modal_app/dihya.py::train $(if $(EPOCHS),--epochs $(EPOCHS),)
+
+modal-lid-pull: ## Pull the Dihya checkpoint, calibration and held-out report
+	@mkdir -p artifacts/runs/dihya
+	modal volume get --force agbalu-checkpoints /dihya/best.pt artifacts/runs/dihya/best.pt
+	modal volume get --force agbalu-checkpoints /dihya/config.json artifacts/runs/dihya/config.json
+	modal volume get --force agbalu-checkpoints /dihya/calibration.json artifacts/runs/dihya/calibration.json
+	modal volume get --force agbalu-checkpoints /dihya/held-out-report.json artifacts/runs/dihya/held-out-report.json
 
 .PHONY: $(shell grep -hoE '^[a-zA-Z_-]+:' $(MAKEFILE_LIST) | tr -d ':')

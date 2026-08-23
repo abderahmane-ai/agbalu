@@ -217,14 +217,26 @@ ignore = [
 # PLC0415: same reason — `fasttext` is the optional `models` extra, imported at
 #          load time so the gate and every other bench command run without it.
 "src/agbalu/bench/lid_systems.py" = ["PLC0415"]
-# S311: `random.Random` draws the LID evaluation sample. It is seeded precisely so
-#       the draw is reproducible and auditable; a cryptographic generator would
-#       make the eval set unreproducible, which is the opposite of what is wanted.
-# S314: `xml.etree` parses the Shawiya Wiktionary dump. The bytes are not
-#       untrusted input: they are fetched from dumps.wikimedia.org by
-#       `agbalu.acquire`, SHA-256 recorded in the manifest, and re-hashed by
-#       `make acquire-verify` before any read.
-"src/agbalu/bench/lid.py" = ["S311", "S314"]
+# S311: `random.Random` draws the LID evaluation sample and the per-source reservoir. Both
+#       are seeded precisely so the draw is reproducible and auditable; a cryptographic
+#       generator would make the sets unreproducible, the opposite of what is wanted.
+# S314: `xml.etree` parses the Shawiya and Tachelhit Wikimedia dumps. The bytes are not
+#       untrusted input: they are fetched from dumps.wikimedia.org by `agbalu.acquire`,
+#       SHA-256 recorded in the manifest, and re-hashed by `make acquire-verify` before
+#       any read.
+"src/agbalu/bench/lid_sources.py" = ["S311", "S314"]
+"src/agbalu/bench/lid.py" = ["S311"]
+# S311: `random.Random(seed)` draws the dev split. Seeded so the split reproduces across
+#       builds; a cryptographic generator would make the dataset unreproducible.
+"src/agbalu/bench/lid_dataset.py" = ["S311"]
+# S311: `random.Random(seed)` drives the phrase augmentation and the group sampler, both
+#       seeded from `TrainConfig.seed` so a run reproduces.
+# PLR0913: `train_identifier` takes the two configs, the data directory, the checkpoint
+#          directory, the device and the resume flag. Bundling them would hide which of
+#          the two configs a caller is actually setting, which is the distinction the
+#          split into `ModelConfig` and `TrainConfig` exists to draw.
+"src/agbalu/lid/dataset.py" = ["S311"]
+"src/agbalu/lid/train.py" = ["PLR0913"]
 # PLC0415: `likelihoods` imports torch at call time, so `measure`, `prepare` and every
 #          figure derived from them stay importable on an install without a training stack.
 # PLR0913: it takes the population, the tokenizer, the model, the two special ids, the
@@ -460,11 +472,19 @@ ignore_missing_imports = true
 
 # `PreTrainedModel.eval` is `def eval(self):` in transformers 5 — untyped, so any caller
 # holding a *typed* model trips `disallow_untyped_calls`. Everywhere else in the tree the
-# model comes back from `from_pretrained` as `Any` and the call is invisible; these two
-# construct a `MatoubForTextToWaveform` directly. Both spellings, because `tools/` has no
-# `__init__.py` and mypy names the module by how it was reached.
+# model comes back from `from_pretrained` as `Any` and the call is invisible; these
+# construct a `MatoubForTextToWaveform` or a `DihyaForSequenceClassification` directly.
+# Both spellings, because `tools/` has no `__init__.py` and mypy names the module by how
+# it was reached.
 [[tool.mypy.overrides]]
-module = ["tools.export_matoub", "export_matoub", "tests.unit.test_hub_matoub"]
+module = [
+    "tools.export_matoub",
+    "export_matoub",
+    "tests.unit.test_hub_matoub",
+    "tools.export_dihya",
+    "export_dihya",
+    "tests.unit.test_hub_dihya",
+]
 disallow_untyped_calls = false
 
 # `pyarrow` ships no py.typed marker and no stubs on PyPI.
@@ -520,7 +540,7 @@ disallow_untyped_calls = false
 module = [
     "agbalu.extract.readers",
     "agbalu.lexicon.readers",
-    "agbalu.bench.lid",
+    "agbalu.bench.lid_sources",
     "agbalu.bench.tifinagh",
     "agbalu.bench.inflect",
     "agbalu.ocr.dataset",
@@ -530,6 +550,7 @@ module = [
     "tools.build_kabtifinagh",
     "tools.export_datasets",
     "tests.unit.test_lexicon_readers",
+    "tests.unit.test_lid_sources",
 ]
 disallow_untyped_calls = false
 disallow_any_unimported = false

@@ -1,8 +1,10 @@
-"""The public language identifiers scored by task 7.4.
+"""The language identifiers scored by task 7.4.
 
-Both are fastText classifiers, and both are `reference` tier: scored, never
-redistributed, never ingested. `fasttext` is imported inside the loader so the
-gate (`make check`) does not need the models extra.
+The two public systems are fastText classifiers at `reference` tier: scored, never
+redistributed, never ingested. Dihya is this project's own, and it is built here rather
+than scored by a second harness — a baseline computed elsewhere on a different sample is
+not a comparison. `fasttext` and `torch` are imported inside their loaders so the gate
+(`make check`) needs neither the models extra nor a checkpoint on disk.
 """
 
 from __future__ import annotations
@@ -13,17 +15,23 @@ from pathlib import Path
 from typing import Any, Final, Protocol, cast
 
 from agbalu.acquire.storage import sha256_file
+from agbalu.bench.lid import Identifier
 
 GLOTLID_MODEL: Final = Path("data/raw/hf.glotlid-model/model.bin")
 NLLB_LID_MODEL: Final = Path("data/raw/hf.nllb-lid218e/model.bin")
+DIHYA_CHECKPOINT_DIR: Final = Path("artifacts/runs/dihya")
 
 LABEL_PREFIX: Final = "__label__"
+
+DIHYA: Final = "dihya"
 
 SYSTEMS: Final[dict[str, Path]] = {
     "glotlid": GLOTLID_MODEL,
     "nllb-lid218e": NLLB_LID_MODEL,
+    DIHYA: DIHYA_CHECKPOINT_DIR,
 }
-"""Identifier name to the model file `make acquire TASK=siblings` lands."""
+"""Identifier name to the file or directory it loads from. The two fastText models are
+what `make acquire TASK=siblings` lands; Dihya's is what `make modal-lid-pull` writes."""
 
 
 class LidModelError(Exception):
@@ -99,15 +107,33 @@ class FastTextIdentifier:
         return labels
 
 
-def build(name: str) -> FastTextIdentifier:
+def _build_dihya(directory: Path) -> Identifier:
+    """Dihya behind the same protocol as the fastText systems.
+
+    The import is local because `agbalu.lid` pulls in torch, and `make bench TASK=lid`
+    must still run for the two public systems on a machine with no checkpoint pulled.
+    """
+    from agbalu.lid.infer import Identifier as DihyaIdentifier
+    from agbalu.lid.infer import InferenceError
+
+    try:
+        return cast(Identifier, DihyaIdentifier.load(directory))
+    except InferenceError as exc:
+        msg = f"{exc}. Pull it with `make modal-lid-pull`"
+        raise LidModelError(msg) from exc
+
+
+def build(name: str) -> Identifier:
     """The identifier registered under `name`.
 
     Raises:
-        LidModelError: `name` is not a known system.
+        LidModelError: `name` is not a known system, or its weights are not on disk.
     """
     path = SYSTEMS.get(name)
     if path is None:
         known = ", ".join(sorted(SYSTEMS))
         msg = f"unknown LID system {name!r}; known systems are {known}"
         raise LidModelError(msg)
+    if name == DIHYA:
+        return _build_dihya(path)
     return FastTextIdentifier(_name=name, path=path)

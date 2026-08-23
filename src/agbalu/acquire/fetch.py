@@ -52,6 +52,11 @@ FETCH_PATTERNS: Final[dict[str, tuple[str, ...]]] = {
     "hf.tamazight-nlp.pontoon": ("*kab*",),
     "hf.tamazight-nlp.translatewiki": ("*kab*",),
     "hf.tamazight-nlp.anki": ("*kab*",),
+    # The same three repositories again, sibling side. Two entries per repo is the
+    # point: the Kabyle registry may never hold a sibling and the sibling registry
+    # refuses `kab`, so the split has to happen at the fetch pattern.
+    "hf.tamazight-nlp.translatewiki-siblings": ("*-rif.*", "*-shi.*", "*-tzm.*", "*-shy.*"),
+    "hf.tamazight-nlp.pontoon-siblings": ("*-tzm.*", "*-shi.*"),
     # Common Voice ships 103 languages and 18.6 GB. Only the Kabyle transcripts
     # belong on this machine: the audio is 7.89 GiB that nothing local reads, and
     # it goes straight to the Modal volume instead (docs/asr_design.md §2).

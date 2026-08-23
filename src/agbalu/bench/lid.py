@@ -5,86 +5,50 @@ answering is which sibling Kabyle is mistaken for and in which direction, becaus
 that is what silently contaminates every dataset labelled "Tamazight"
 (docs/benchmark.md §3.3, CLAUDE.md §1).
 
-Latin script only. Every sibling that FLORES+ or GlotCC carries in Tifinagh is
-separable from Latin-script Kabyle on the encoding alone, so including it would
-measure the script and report the result as language identification.
+The held-out set is drawn round-robin across every source a language has, so no
+class is one source wearing a language's name. Sampling per language instead of per
+source is how the first set came to be four-fifths GlotCC — whose labels are GlotLID
+output, which made the ceiling agreement with the system being beaten.
 
-Sibling text is never normalised. The reference normaliser encodes *Kabyle*
-orthography, and applying it to a sibling would rewrite the very distinctions the
-classifier is being asked to find.
+Sources, readers and filters live in `lid_sources`, which the training-set builder
+reads from too. One table, because two descriptions of the same corpus drift and the
+drift is invisible until both are measured.
 """
 
 from __future__ import annotations
 
-import bz2
 import json
 import random
-import re
-import unicodedata
-import xml.etree.ElementTree as ET
 from collections import Counter
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from itertools import chain
 from pathlib import Path
-from typing import Final, Protocol
+from typing import Final, Protocol, runtime_checkable
 
-import pyarrow.parquet as pq
-
-KABYLE: Final = "kab_Latn"
-
-EVAL_LANGUAGES: Final[tuple[str, ...]] = (
-    "kab_Latn",
-    "shi_Latn",
-    "rif_Latn",
-    "taq_Latn",
-    "tzm_Latn",
-    "shy_Latn",
+from agbalu.bench.lid_sources import (
+    BERBER_LANGUAGES,
+    KABYLE,
+    MIN_WORDS,
+    NOT_AMAZIGH,
+    Source,
+    SourceError,
 )
-"""The label set, as `ISO639-3_ISO15924`.
+from agbalu.bench.lid_sources import SOURCES as ALL_SOURCES
+from agbalu.bench.lid_sources import lines as source_lines
 
-`zgh` is absent deliberately: the survey of 2026-08-09 found no Latin-script
-Standard Moroccan Tamazight anywhere, and its Tifinagh text would be separable on
-script alone.
+EVAL_LANGUAGES: Final[tuple[str, ...]] = BERBER_LANGUAGES
+"""The label set public identifiers are scored over. `NOT_AMAZIGH` is deliberately
+absent: it is a decision the trained classifier makes, not a language GlotLID or
+`lid218e` can be asked about."""
+
+HELD_OUT_SOURCES: Final[frozenset[str]] = frozenset({"hf.flores-plus-taq"})
+"""Sources that exist only to be evaluated on.
+
+FLORES+ Tamasheq is the whole of it. The sibling registry records it as never
+ingested, and it was 78.7% of the Tamasheq training rows until `nllb-seed.taq`
+replaced it — training on the corpus the evaluation is drawn from is not a
+decontamination question, it is the same 2,009 sentences and one translator.
 """
-
-MIN_WORDS: Final = 5
-MAX_WORDS: Final = 120
-MIN_LATIN_SHARE: Final = 0.80
-"""Share of cased letters that must be Latin for a line to count as Latin script.
-
-Below 1.0 because Berber Latin orthography legitimately carries `ɛ ɣ ḥ ḍ ṣ ṭ ẓ`,
-some of which normalise to non-Latin script names, and because Arabic or Tifinagh
-glosses appear inline in wiki-derived text.
-"""
-
-_WIKI_RESIDUE: Final[tuple[str, ...]] = (
-    "vignette",
-    "Taggayt:",
-    "Afaylu:",
-    "Template:",
-    "Wp/",
-    "http://",
-    "https://",
-    "{{",
-    "}}",
-    "[[",
-    "]]",
-)
-"""Markup that survives a crude wikitext strip. A line carrying any of it is
-dropped rather than cleaned: a half-stripped template is not a sentence of any
-language, and letting it through would teach the eval set to reward markup."""
-
-_SENTENCE_SPLIT: Final = re.compile(r"(?<=[.!?])\s+|\n+")
-_WS: Final = re.compile(r"\s+")
-
-_TEMPLATE: Final = re.compile(r"\{\{[^{}]*\}\}")
-_WIKILINK: Final = re.compile(r"\[\[(?:[^\[\]|]*\|)?([^\[\]]*)\]\]")
-_MARKUP_LINE: Final = re.compile(r"^[#*:;].*$", re.MULTILINE)
-_EMPHASIS: Final = re.compile(r"''+|=+")
-_HTML: Final = re.compile(r"<[^>]+>")
-
-_MEDIAWIKI_NS: Final = "{http://www.mediawiki.org/xml/export-0.11/}"
 
 
 class LidError(Exception):
@@ -93,21 +57,25 @@ class LidError(Exception):
 
 @dataclass(frozen=True, slots=True)
 class Example:
-    """One evaluation line and the language it is held to be."""
+    """One evaluation line, the language it is held to be, and where it came from."""
 
     text: str
     language: str
     source: str
+    domain: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "text": self.text,
+            "language": self.language,
+            "source": self.source,
+            "domain": self.domain,
+        }
 
 
+@runtime_checkable
 class Identifier(Protocol):
-    """A language identifier, scored as a closed-set classifier over `EVAL_LANGUAGES`.
-
-    `identify` returns one raw label per input, in order. Labels outside the eval
-    set are kept verbatim and counted as errors rather than remapped: a system
-    that answers `ber_Latn` for Kabyle has made a real mistake, and folding it
-    into a correct answer would hide the confusion being measured.
-    """
+    """A language identifier, scored as a closed-set classifier over `EVAL_LANGUAGES`."""
 
     @property
     def name(self) -> str: ...
@@ -121,96 +89,133 @@ class Identifier(Protocol):
     def identify(self, texts: Sequence[str]) -> list[str]: ...
 
 
-def latin_share(text: str) -> float:
-    """Fraction of alphabetic characters whose Unicode name says LATIN."""
-    letters = [c for c in text if c.isalpha()]
-    if not letters:
-        return 0.0
-    latin = sum(1 for c in letters if unicodedata.name(c, "").startswith("LATIN"))
-    return latin / len(letters)
+FLORES_TAMASHEQ: Final = Source(
+    id="hf.flores-plus-taq",
+    language="taq_Latn",
+    domain="encyclopaedia",
+    trust="gold",
+    licence="cc-by-sa-4.0",
+    reader="flores",
+    location="hf.flores-plus-taq",
+    argument="taq_Latn",
+)
 
 
-def is_usable(line: str) -> bool:
-    """Whether a candidate line belongs in the evaluation set."""
-    if any(marker in line for marker in _WIKI_RESIDUE):
-        return False
-    words = line.split()
-    if not MIN_WORDS <= len(words) <= MAX_WORDS:
-        return False
-    return latin_share(line) >= MIN_LATIN_SHARE
+def evaluation_sources() -> tuple[Source, ...]:
+    """Every source the held-out set may draw from, including the held-out-only ones."""
+    return (*ALL_SOURCES, FLORES_TAMASHEQ)
 
 
-def sentences(document: str) -> Iterator[str]:
-    """Split a document into candidate lines, without judging them."""
-    for chunk in _SENTENCE_SPLIT.split(document):
-        cleaned = _WS.sub(" ", chunk).strip()
-        if cleaned:
-            yield cleaned
-
-
-def strip_wikitext(raw: str) -> str:
-    """Remove the markup a MediaWiki dump carries around its prose."""
-    text = _TEMPLATE.sub(" ", raw)
-    text = _WIKILINK.sub(r"\1", text)
-    text = _MARKUP_LINE.sub(" ", text)
-    text = _EMPHASIS.sub(" ", text)
-    return _HTML.sub(" ", text)
-
-
-def read_glotcc(directory: Path) -> Iterator[str]:
-    """Every document in a GlotCC language partition."""
-    files = sorted(directory.rglob("*.parquet"))
-    if not files:
-        msg = f"no parquet under {directory}"
+def build_pools(raw: Path) -> dict[str, list[Example]]:
+    """Every usable line, per language, tagged with the source and domain it came from."""
+    pools: dict[str, list[Example]] = {language: [] for language in (*EVAL_LANGUAGES, NOT_AMAZIGH)}
+    for source in evaluation_sources():
+        if source.language not in pools:
+            msg = f"{source.id}: label {source.language!r} is outside the label set"
+            raise LidError(msg)
+        pools[source.language].extend(
+            Example(text=line, language=source.language, source=source.id, domain=source.domain)
+            for line in source_lines(source, raw)
+        )
+    empty = sorted(language for language, pool in pools.items() if not pool)
+    if empty:
+        msg = f"no usable lines for {', '.join(empty)}"
         raise LidError(msg)
-    for path in files:
-        table = pq.read_table(path, columns=["content"])
-        for value in table.column("content"):
-            content = value.as_py()
-            if isinstance(content, str):
-                yield content
+    return pools
 
 
-def read_flores(path: Path) -> Iterator[str]:
-    """Sentences from one FLORES+ language split."""
+def _round_robin(groups: Sequence[Sequence[Example]], total: int) -> list[Example]:
+    """Take from each group in turn until `total` is reached or every group is spent.
+
+    Round-robin rather than proportional: a language whose largest source is 71,114
+    lines and whose smallest is 177 would otherwise be measured almost entirely on
+    the large one, which is the domain confound the set exists to avoid.
+    """
+    taken: list[Example] = []
+    cursors = [0] * len(groups)
+    while len(taken) < total:
+        progressed = False
+        for index, group in enumerate(groups):
+            if len(taken) >= total:
+                break
+            if cursors[index] < len(group):
+                taken.append(group[cursors[index]])
+                cursors[index] += 1
+                progressed = True
+        if not progressed:
+            break
+    return taken
+
+
+def build_evalset(
+    pools: Mapping[str, Sequence[Example]], *, per_language: int, seed: int
+) -> tuple[Example, ...]:
+    """Sample a balanced, source-stratified evaluation set, one fixed draw per seed.
+
+    Balanced because an unbalanced confusion matrix reports the prior, not the
+    confusion: with 10x more Kabyle than Tamasheq, always answering Kabyle scores
+    well and the matrix says nothing about either language.
+
+    Raises:
+        LidError: a language has fewer usable lines than `per_language`, which
+            would silently unbalance the matrix.
+    """
+    if per_language < 1:
+        msg = f"per_language must be positive, got {per_language}"
+        raise LidError(msg)
+    short = {lang: len(pool) for lang, pool in pools.items() if len(pool) < per_language}
+    if short:
+        detail = ", ".join(f"{lang} has {count}" for lang, count in sorted(short.items()))
+        msg = f"per_language={per_language} exceeds the available lines: {detail}"
+        raise LidError(msg)
+
+    examples: list[Example] = []
+    for language in sorted(pools):
+        by_source: dict[str, list[Example]] = {}
+        for example in pools[language]:
+            by_source.setdefault(example.source, []).append(example)
+        groups = []
+        for source in sorted(by_source):
+            group = by_source[source]
+            random.Random(f"{seed}:{language}:{source}").shuffle(group)
+            groups.append(group)
+        examples.extend(_round_robin(groups, per_language))
+    return tuple(examples)
+
+
+def write_evalset(examples: Sequence[Example], path: Path) -> None:
+    """Write the held-out set, one record per line, provenance included."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    staging = path.with_suffix(path.suffix + ".part")
+    with staging.open("w", encoding="utf-8") as handle:
+        for example in examples:
+            handle.write(json.dumps(example.to_dict(), ensure_ascii=False) + "\n")
+    staging.replace(path)
+
+
+def read_evalset(path: Path) -> tuple[Example, ...]:
+    """Read a written held-out set back."""
     if not path.is_file():
-        msg = f"FLORES+ split not found: {path}"
+        msg = f"evaluation set not found: {path}"
         raise LidError(msg)
+    examples: list[Example] = []
     with path.open(encoding="utf-8") as handle:
         for line in handle:
+            if not line.strip():
+                continue
             record = json.loads(line)
-            text = record.get("text")
-            if isinstance(text, str):
-                yield text
-
-
-def read_mediawiki(path: Path) -> Iterator[str]:
-    """Page text from a `pages-articles` dump, with markup stripped."""
-    if not path.is_file():
-        msg = f"MediaWiki dump not found: {path}"
+            examples.append(
+                Example(
+                    text=record["text"],
+                    language=record["language"],
+                    source=record.get("source", "?"),
+                    domain=record.get("domain", "?"),
+                )
+            )
+    if not examples:
+        msg = f"evaluation set carried no records: {path}"
         raise LidError(msg)
-    with bz2.open(path, "rb") as handle:
-        for _, element in ET.iterparse(handle, events=("end",)):
-            if not element.tag.endswith("}page"):
-                continue
-            revision = element.find(f"{_MEDIAWIKI_NS}revision")
-            node = revision.find(f"{_MEDIAWIKI_NS}text") if revision is not None else None
-            if node is not None and node.text:
-                yield strip_wikitext(node.text)
-            element.clear()
-
-
-def candidates(documents: Iterable[str]) -> list[str]:
-    """Usable, deduplicated lines from a stream of documents, in first-seen order."""
-    seen: set[str] = set()
-    kept: list[str] = []
-    for document in documents:
-        for line in sentences(document):
-            if line in seen or not is_usable(line):
-                continue
-            seen.add(line)
-            kept.append(line)
-    return kept
+    return tuple(examples)
 
 
 def kabyle_side(record: Mapping[str, object]) -> str | None:
@@ -302,71 +307,7 @@ def audit_sources(
                 labels=dict(labels.most_common()),
             )
         )
-    return sorted(audits, key=lambda a: a.kabyle_share)
-
-
-def build_evalset(
-    pools: Mapping[str, Sequence[str]], *, per_language: int, seed: int
-) -> tuple[Example, ...]:
-    """Sample a balanced evaluation set, one fixed draw per seed.
-
-    Balanced because an unbalanced confusion matrix reports the prior, not the
-    confusion: with 10x more Kabyle than Tamasheq, always answering Kabyle scores
-    well and the matrix says nothing about either language.
-
-    Raises:
-        LidError: a language has fewer usable lines than `per_language`, which
-            would silently unbalance the matrix.
-    """
-    if per_language < 1:
-        msg = f"per_language must be positive, got {per_language}"
-        raise LidError(msg)
-    short = {lang: len(pool) for lang, pool in pools.items() if len(pool) < per_language}
-    if short:
-        detail = ", ".join(f"{lang} has {count}" for lang, count in sorted(short.items()))
-        msg = f"per_language={per_language} exceeds the available lines: {detail}"
-        raise LidError(msg)
-
-    examples: list[Example] = []
-    for language in sorted(pools):
-        pool = list(pools[language])
-        random.Random(f"{seed}:{language}").shuffle(pool)
-        examples.extend(
-            Example(text=text, language=language, source=language) for text in pool[:per_language]
-        )
-    return tuple(examples)
-
-
-def build_pools(raw: Path) -> dict[str, list[str]]:
-    """Usable lines per language, from the acquired sibling and Kabyle sources.
-
-    Kabyle is drawn from GlotCC rather than from AƔBALU-Text so that it shares a
-    crawl, a cleaning pipeline and a domain with four of the five siblings: a
-    matrix built from our curated corpus against web-crawled siblings would
-    measure provenance and report it as language.
-
-    Tamasheq is the exception and comes from FLORES+, because its GlotCC
-    partition holds five documents. That is a real heterogeneity in the eval set
-    and is recorded rather than hidden.
-    """
-    dumps = sorted((raw / "wikimedia.shywiktionary").glob("*pages-articles*.bz2"))
-    if not dumps:
-        msg = f"no Shawiya dump under {raw / 'wikimedia.shywiktionary'}"
-        raise LidError(msg)
-    flores = raw / "hf.flores-plus-taq"
-    return {
-        "kab_Latn": candidates(read_glotcc(raw / "hf.glotcc-v1-kab")),
-        "shi_Latn": candidates(read_glotcc(raw / "hf.glotcc-v1-shi")),
-        "rif_Latn": candidates(read_glotcc(raw / "hf.glotcc-v1-rif")),
-        "tzm_Latn": candidates(read_glotcc(raw / "hf.glotcc-v1-tzm")),
-        "taq_Latn": candidates(
-            chain(
-                read_flores(flores / "dev" / "taq_Latn.jsonl"),
-                read_flores(flores / "devtest" / "taq_Latn.jsonl"),
-            )
-        ),
-        "shy_Latn": candidates(read_mediawiki(dumps[-1])),
-    }
+    return sorted(audits, key=lambda audit: audit.kabyle_share)
 
 
 @dataclass(frozen=True, slots=True)
@@ -562,12 +503,36 @@ def score(system: Identifier, examples: Sequence[Example]) -> ConfusionMatrix:
     Raises:
         LidError: the system returned a different number of labels than it was given.
     """
-    predictions = system.identify([example.text for example in examples])
-    if len(predictions) != len(examples):
-        msg = f"{system.name} returned {len(predictions)} labels for {len(examples)} inputs"
+    scored = [example for example in examples if example.language in EVAL_LANGUAGES]
+    predictions = system.identify([example.text for example in scored])
+    if len(predictions) != len(scored):
+        msg = f"{system.name} returned {len(predictions)} labels for {len(scored)} inputs"
         raise LidError(msg)
     counts: Counter[tuple[str, str]] = Counter()
-    for example, predicted in zip(examples, predictions, strict=True):
+    for example, predicted in zip(scored, predictions, strict=True):
         counts[(example.language, predicted)] += 1
-    labels = tuple(x for x in EVAL_LANGUAGES if any(t == x for t, _ in counts))
+    labels = tuple(x for x in EVAL_LANGUAGES if any(true == x for true, _ in counts))
     return ConfusionMatrix(labels=labels, counts=dict(counts), system_labels=system.labels)
+
+
+__all__ = [
+    "EVAL_LANGUAGES",
+    "HELD_OUT_SOURCES",
+    "KABYLE",
+    "NOT_AMAZIGH",
+    "ConfusionMatrix",
+    "Example",
+    "Identifier",
+    "LidError",
+    "MarkerAudit",
+    "SourceAudit",
+    "SourceError",
+    "audit_marker",
+    "audit_sources",
+    "build_evalset",
+    "build_pools",
+    "kabyle_side",
+    "read_evalset",
+    "score",
+    "write_evalset",
+]

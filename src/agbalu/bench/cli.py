@@ -76,11 +76,15 @@ DEFAULT_LEXICON: Final = Path("data/processed/lexicon/agbalu-lexicon-v1.jsonl")
 SYSTEMS: Final[tuple[str, ...]] = ("neural", "lexicon", "baseline", "encoder")
 
 DEFAULT_RAW: Final = Path("data/raw")
-LID_PER_LANGUAGE: Final = 250
-"""Lines drawn per language. The binding pool is Central Atlas Tamazight at 285
-usable lines (2026-08-09), the only Latin-script tzm text the survey found."""
+LID_PER_LANGUAGE: Final = 150
+"""Lines drawn per language, round-robin across that language's sources.
 
-LID_SEED: Final = 20260809
+The binding pool is Shawiya at 622 usable lines across three sources — the whole of
+the Shawiya text that exists, since shy.wiktionary is its only Wikimedia project and
+no crawl carries it. At 150 the class keeps 472 lines to train on; at the earlier
+250 it kept 372, drawn from one source."""
+
+LID_SEED: Final = 20260823
 
 DEFAULT_MT_CORPUS: Final = Path("data/processed/mt/train.jsonl")
 LID_PER_SOURCE: Final = 3000
@@ -521,9 +525,7 @@ def command_lid(args: argparse.Namespace) -> int:
     examples = lid.build_evalset(pools, per_language=args.per_language, seed=args.seed)
     args.out.mkdir(parents=True, exist_ok=True)
     evalset_path = args.out / "lid-eval.jsonl"
-    with evalset_path.open("w", encoding="utf-8") as handle:
-        for example in examples:
-            handle.write(json.dumps(asdict(example), ensure_ascii=False) + "\n")
+    lid.write_evalset(examples, evalset_path)
     log.info(
         "evalset languages=%d per_language=%d total=%d path=%s",
         len(pools),

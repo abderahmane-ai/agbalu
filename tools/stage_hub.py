@@ -24,12 +24,18 @@ import shutil
 import sys
 from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Final, Literal
+from typing import TYPE_CHECKING, Final, Literal, Protocol, TypedDict
 
 if TYPE_CHECKING:
-    from transformers import PreTrainedTokenizerBase, PreTrainedTokenizerFast
+    from transformers import (
+        PreTrainedConfig,
+        PreTrainedTokenizerBase,
+        PreTrainedTokenizerFast,
+    )
 
-Repo = Literal["belaid", "boulifa", "feraoun", "feraoun_pro", "juba", "masinissa", "matoub"]
+Repo = Literal[
+    "belaid", "boulifa", "dihya", "feraoun", "feraoun_pro", "juba", "masinissa", "matoub"
+]
 
 HUB: Final = Path("src/agbalu/hub")
 
@@ -52,6 +58,11 @@ AUTO_MAP: Final[dict[Repo, dict[str, str]]] = {
     "boulifa": {
         "AutoConfig": "configuration_boulifa.BoulifaConfig",
         "AutoModelForSeq2SeqLM": "modeling_boulifa.BoulifaForSeq2SeqLM",
+    },
+    "dihya": {
+        "AutoConfig": "configuration_dihya.DihyaConfig",
+        "AutoModel": "modeling_dihya.DihyaForSequenceClassification",
+        "AutoModelForSequenceClassification": ("modeling_dihya.DihyaForSequenceClassification"),
     },
     "feraoun": {
         "AutoConfig": "configuration_feraoun.FeraounConfig",
@@ -87,6 +98,7 @@ because its front end is a rule table rather than a merge table."""
 ARCHITECTURES: Final[dict[Repo, str]] = {
     "belaid": "BelaidForTokenClassification",
     "boulifa": "BoulifaForSeq2SeqLM",
+    "dihya": "DihyaForSequenceClassification",
     "feraoun": "FeraounForVision2Seq",
     "feraoun_pro": "FeraounProForCTC",
     "juba": "JubaForSeq2SeqLM",
@@ -95,6 +107,18 @@ ARCHITECTURES: Final[dict[Repo, str]] = {
 }
 
 MATOUB_PROBE: Final = "Azul fell-awen, amek i telliḍ taṣebḥit-a?"
+
+DIHYA_PROBES: Final[tuple[tuple[str, str], ...]] = (
+    ("Azul fell-awen, amek tettilim ass-a?", "kab_Latn"),
+    ("Mayemmi ur teccid ticemrarin nnecm a gma?", "rif_Latn"),
+    ("Bonjour tout le monde, comment allez-vous?", "NOT_AMAZIGH"),
+)
+"""Kabyle, Tarifit and French, checked against the label each must get.
+
+A logits *shape* is identical for a working classifier and for a head that collapsed to
+one class, and three of this model's seven classes are the ones a Kabyle-only probe can
+never exercise. The rejection class is in the probe because a filter that cannot say
+`NOT_AMAZIGH` is the one failure that silently contaminates a corpus."""
 
 MATOUB_SILENCE_PEAK: Final = 0.01
 """Below this the directory synthesised silence, which is what a mis-slotted style vector
@@ -191,6 +215,75 @@ def build_feraoun_pro_tokenizer() -> PreTrainedTokenizerFast:
         bos_token=BOS_TOKEN,
         eos_token=EOS_TOKEN,
         model_max_length=1024,
+    )
+
+
+BYTE_VALUES: Final = 256
+
+PRINTABLE_RUNS: Final[tuple[tuple[int, int], ...]] = (
+    (ord("!"), ord("~")),
+    (ord("\xa1"), ord("\xac")),
+    (ord("\xae"), ord("\xff")),
+)
+"""GPT-2's byte-level alphabet: the byte values that already have a printable, non-space
+character. Every other byte is displaced into the private-use range above U+0100, which is
+what lets a `str`-only tokenizer pipeline carry arbitrary bytes."""
+
+
+def byte_to_character() -> dict[int, str]:
+    """The byte-level table, byte value to the character `ByteLevel` represents it with.
+
+    Written out rather than read from `ByteLevel.alphabet()`, which returns the characters
+    with no byte attached — the position of a character in that list is not its byte value,
+    so building the vocabulary from it would map most of the alphabet to the wrong id.
+    """
+    printable = [value for low, high in PRINTABLE_RUNS for value in range(low, high + 1)]
+    table = {value: chr(value) for value in printable}
+    displaced = 0
+    for value in range(BYTE_VALUES):
+        if value not in table:
+            table[value] = chr(BYTE_VALUES + displaced)
+            displaced += 1
+    return table
+
+
+def build_byte_tokenizer() -> PreTrainedTokenizerFast:
+    """Dihya's vocabulary: the 256 UTF-8 byte values, shifted past `[PAD]` and `[UNK]`.
+
+    Built through `ByteLevel`, whose byte-to-character table is the only way to reach raw
+    bytes from a `tokenizers` pipeline, which works on `str`. The table is a bijection, so
+    `id - 2` is the byte — which is what `agbalu.lid.dataset.encode` produces, and
+    `tests/unit/test_hub_dihya.py` checks the two agree over a corpus rather than over a
+    fixture of ASCII.
+
+    `use_regex=False` because the GPT-2 word-splitting regex would isolate whitespace runs
+    into their own pieces; here every byte is its own piece and nothing is grouped.
+    """
+    from tokenizers import Regex, Tokenizer, decoders, models, pre_tokenizers
+    from transformers import PreTrainedTokenizerFast
+
+    from agbalu.lid.config import BYTE_OFFSET, PAD_ID, UNK_ID
+
+    table = byte_to_character()
+    vocab = {"[PAD]": PAD_ID, "[UNK]": UNK_ID}
+    vocab.update({character: value + BYTE_OFFSET for value, character in table.items()})
+    if len(vocab) != BYTE_VALUES + BYTE_OFFSET:
+        message = f"the byte vocabulary holds {len(vocab)} entries, not {BYTE_VALUES + 2}"
+        raise StagingError(message)
+
+    backend = Tokenizer(models.WordLevel(vocab=vocab, unk_token="[UNK]"))
+    backend.pre_tokenizer = pre_tokenizers.Sequence(
+        [
+            pre_tokenizers.ByteLevel(add_prefix_space=False, use_regex=False),
+            pre_tokenizers.Split(Regex(r"[\s\S]"), behavior="isolated"),
+        ]
+    )
+    backend.decoder = decoders.ByteLevel()
+    return PreTrainedTokenizerFast(
+        tokenizer_object=backend,
+        unk_token="[UNK]",
+        pad_token="[PAD]",
+        model_max_length=256,
     )
 
 
@@ -323,6 +416,7 @@ def write_config(repo: Repo, directory: Path) -> None:
     """
     from agbalu.hub.belaid.configuration_belaid import BelaidConfig
     from agbalu.hub.boulifa.configuration_boulifa import BoulifaConfig
+    from agbalu.hub.dihya.configuration_dihya import DihyaConfig
     from agbalu.hub.feraoun.configuration_feraoun import FeraounConfig
     from agbalu.hub.feraoun_pro.configuration_feraoun_pro import FeraounProConfig
     from agbalu.hub.juba.configuration_juba import JubaConfig
@@ -340,6 +434,7 @@ def write_config(repo: Repo, directory: Path) -> None:
     classes = {
         "belaid": BelaidConfig,
         "boulifa": BoulifaConfig,
+        "dihya": DihyaConfig,
         "feraoun": FeraounConfig,
         "feraoun_pro": FeraounProConfig,
         "juba": JubaConfig,
@@ -377,6 +472,68 @@ def refresh_manifest(directory: Path) -> None:
     path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
 
+class _Prediction(TypedDict):
+    """One row of `DihyaForSequenceClassification.identify`."""
+
+    language: str
+    confidence: float
+    prediction_set: tuple[str, ...]
+    probabilities: dict[str, float]
+
+
+class _Identifier(Protocol):
+    """What `verify_dihya` needs of the remote-code class `AutoModel` returned.
+
+    A protocol rather than the local `DihyaForSequenceClassification`: the loaded object is
+    built from the *staged* module, so it is a structurally identical class of a different
+    identity, and annotating it with the local one would be a claim staging exists to test.
+    """
+
+    @property
+    def config(self) -> PreTrainedConfig: ...
+
+    def identify(self, texts: list[str]) -> list[_Prediction]: ...
+
+
+def verify_dihya(model: _Identifier, tokenizer: PreTrainedTokenizerBase, directory: Path) -> str:
+    """Classify the probes and check the labels, and check the tokenizer against `encode`.
+
+    Neither check has a shape that could fail instead. A byte vocabulary built through the
+    wrong table encodes every string to ids in range, and the model then reads a different
+    language than the one on the page; a head that has collapsed to one class returns
+    logits of exactly the right rank.
+
+    Raises:
+        StagingError: the tokenizer disagrees with the training encoder, or a probe came
+            back as the wrong language.
+    """
+    from agbalu.lid.dataset import encode
+
+    for text, _ in DIHYA_PROBES:
+        ours = encode(text, model.config.max_position_embeddings)
+        theirs = tokenizer(text, add_special_tokens=False)["input_ids"]
+        if ours != theirs:
+            message = (
+                f"{directory}: the staged tokenizer disagrees with the training encoder "
+                f"on {text!r} — {theirs[:8]} against {ours[:8]}"
+            )
+            raise StagingError(message)
+
+    predicted = model.identify([text for text, _ in DIHYA_PROBES])
+    wrong = [
+        f"{text!r} -> {got['language']}, expected {expected}"
+        for (text, expected), got in zip(DIHYA_PROBES, predicted, strict=True)
+        if got["language"] != expected
+    ]
+    if wrong:
+        message = f"{directory} misclassified its probe: {'; '.join(wrong)}"
+        raise StagingError(message)
+    return " | ".join(
+        f"{row['language']} {row['confidence']:.4f} set={list(row['prediction_set'])}"
+        for row in predicted
+    )
+
+
 def verify(repo: Repo, directory: Path) -> dict[str, object]:
     """Load the directory the way a downloader would, and report what it produced."""
     import torch
@@ -384,6 +541,7 @@ def verify(repo: Repo, directory: Path) -> dict[str, object]:
         AutoModel,
         AutoModelForMaskedLM,
         AutoModelForSeq2SeqLM,
+        AutoModelForSequenceClassification,
         AutoModelForTextToWaveform,
         AutoModelForTokenClassification,
         AutoTokenizer,
@@ -392,6 +550,7 @@ def verify(repo: Repo, directory: Path) -> dict[str, object]:
     loaders = {
         "belaid": AutoModelForTokenClassification,
         "boulifa": AutoModelForSeq2SeqLM,
+        "dihya": AutoModelForSequenceClassification,
         "feraoun": AutoModel,
         "feraoun_pro": AutoModel,
         "juba": AutoModelForSeq2SeqLM,
@@ -406,6 +565,7 @@ def verify(repo: Repo, directory: Path) -> dict[str, object]:
         "belaid": "azul fell-awen amek i tellam",
         "boulifa": "achimi ur d-thekhedmedh ara tamazight g l'ecole?",
         "feraoun": "Aḍris n uḥric ɣef tɛeṛṛamt d uẓekka.",
+        "dihya": " | ".join(text for text, _ in DIHYA_PROBES),
         "feraoun_pro": "Aḍris n uḥric ɣef tɛeṛṛamt d uẓekka ţ-ţili.",
         # Both halves of the probe are reported, so the staging record shows what each
         # script produced rather than an average that hides one of them.
@@ -467,6 +627,8 @@ def verify(repo: Repo, directory: Path) -> dict[str, object]:
                 f"rms {20 * math.log10(rms):.1f} dBFS, "
                 f"{int((audio.abs() >= 1.0).sum())} clipped"
             )
+        elif repo == "dihya":
+            produced = verify_dihya(model, tokenizer, directory)
         elif repo in ("boulifa", "juba"):
             produced = tokenizer.decode(
                 model.generate(
@@ -495,6 +657,8 @@ def stage(repo: Repo, directory: Path) -> dict[str, object]:
     tokenizer: PreTrainedTokenizerBase
     if repo == "matoub":
         tokenizer = build_matoub_tokenizer(directory)
+    elif repo == "dihya":
+        tokenizer = build_byte_tokenizer()
     elif repo == "boulifa":
         tokenizer = build_boulifa_tokenizer()
     elif repo == "feraoun":
