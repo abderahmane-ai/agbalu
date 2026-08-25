@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Final, Literal, Protocol, TypedDict
 
 if TYPE_CHECKING:
+    from torch import Tensor
     from transformers import (
         PreTrainedConfig,
         PreTrainedTokenizerBase,
@@ -34,7 +35,15 @@ if TYPE_CHECKING:
     )
 
 Repo = Literal[
-    "belaid", "boulifa", "dihya", "feraoun", "feraoun_pro", "juba", "masinissa", "matoub"
+    "belaid",
+    "boulifa",
+    "dihya",
+    "feraoun",
+    "feraoun_pro",
+    "juba",
+    "masinissa",
+    "masinissa_sentiment",
+    "matoub",
 ]
 
 HUB: Final = Path("src/agbalu/hub")
@@ -81,6 +90,13 @@ AUTO_MAP: Final[dict[Repo, dict[str, str]]] = {
         "AutoModel": "modeling_masinissa.MasinissaModel",
         "AutoModelForMaskedLM": "modeling_masinissa.MasinissaForMaskedLM",
     },
+    "masinissa_sentiment": {
+        "AutoConfig": "configuration_masinissa_sentiment.MasinissaSentimentConfig",
+        "AutoModel": "modeling_masinissa_sentiment.MasinissaForSequenceClassification",
+        "AutoModelForSequenceClassification": (
+            "modeling_masinissa_sentiment.MasinissaForSequenceClassification"
+        ),
+    },
     "matoub": {
         "AutoConfig": "configuration_matoub.MatoubConfig",
         "AutoModel": "modeling_matoub.MatoubForTextToWaveform",
@@ -103,6 +119,7 @@ ARCHITECTURES: Final[dict[Repo, str]] = {
     "feraoun_pro": "FeraounProForCTC",
     "juba": "JubaForSeq2SeqLM",
     "masinissa": "MasinissaForMaskedLM",
+    "masinissa_sentiment": "MasinissaForSequenceClassification",
     "matoub": "MatoubForTextToWaveform",
 }
 
@@ -120,6 +137,18 @@ one class, and three of this model's seven classes are the ones a Kabyle-only pr
 never exercise. The rejection class is in the probe because a filter that cannot say
 `NOT_AMAZIGH` is the one failure that silently contaminates a corpus."""
 
+SENTIMENT_PROBES: Final[tuple[str, ...]] = (
+    "Ulac d acu i ixuṣṣen, kulci yelha aṭas.",
+    "Ayagi d ayen n diri, ur yelhi ara maḍi.",
+    "Yiwen wass, argaz-nni yuli ɣer taddart.",
+)
+"""One clearly positive line, one clearly negative, one narrative.
+
+Checked for *disagreement*, not against a gold label: this repository has no gold Kabyle
+sentiment to check against, and a staging assertion built on a guessed label would refuse
+a correct model. What it catches is the failure a logits shape cannot — a head that has
+collapsed to one class answers all three identically."""
+
 MATOUB_SILENCE_PEAK: Final = 0.01
 """Below this the directory synthesised silence, which is what a mis-slotted style vector
 or a half-loaded decoder produces — and a shape check cannot see it."""
@@ -127,7 +156,10 @@ or a half-loaded decoder produces — and a shape check cannot see it."""
 MATOUB_MIN_SECONDS: Final = 0.5
 """A 40-phoneme probe under half a second is a duration head that clamped to its floor."""
 
-PIECE_REPOS: Final[frozenset[Repo]] = frozenset({"belaid", "masinissa"})
+MIN_DISTINCT_LABELS: Final = 2
+"""Below this every probe got the same answer, which is what a collapsed head looks like."""
+
+PIECE_REPOS: Final[frozenset[Repo]] = frozenset({"belaid", "masinissa", "masinissa_sentiment"})
 """Repositories whose vocabulary is the Mammeri SentencePiece model rather than an alphabet."""
 
 
@@ -421,6 +453,9 @@ def write_config(repo: Repo, directory: Path) -> None:
     from agbalu.hub.feraoun_pro.configuration_feraoun_pro import FeraounProConfig
     from agbalu.hub.juba.configuration_juba import JubaConfig
     from agbalu.hub.masinissa.configuration_masinissa import MasinissaConfig
+    from agbalu.hub.masinissa_sentiment.configuration_masinissa_sentiment import (
+        MasinissaSentimentConfig,
+    )
     from agbalu.hub.matoub.configuration_matoub import MatoubConfig
 
     path = directory / "config.json"
@@ -439,6 +474,7 @@ def write_config(repo: Repo, directory: Path) -> None:
         "feraoun_pro": FeraounProConfig,
         "juba": JubaConfig,
         "masinissa": MasinissaConfig,
+        "masinissa_sentiment": MasinissaSentimentConfig,
         "matoub": MatoubConfig,
     }
     config = classes[repo](**existing)
@@ -534,6 +570,104 @@ def verify_dihya(model: _Identifier, tokenizer: PreTrainedTokenizerBase, directo
     )
 
 
+class _Scored(Protocol):
+    """The one field of a `SequenceClassifierOutput` this check reads.
+
+    Narrower than the library's own dataclass, which declares `logits` optional because a
+    generic output object may carry none. This one always does, and a `None` check here
+    would be dead code standing in for an annotation.
+    """
+
+    @property
+    def logits(self) -> Tensor: ...
+
+
+class _Sentiment(TypedDict):
+    """One row of `MasinissaForSequenceClassification.classify`."""
+
+    label: str
+    confidence: float
+    prediction_set: tuple[str, ...]
+    probabilities: dict[str, float]
+
+
+class _Classifier(Protocol):
+    """What `verify_masinissa_sentiment` needs of the class `AutoModel` returned.
+
+    A protocol rather than the local class, for the reason `_Identifier` carries: the
+    loaded object is built from the *staged* module, so it is a structurally identical
+    class of a different identity.
+    """
+
+    @property
+    def config(self) -> PreTrainedConfig: ...
+
+    def classify(self, texts: list[str], tokenizer: object) -> list[_Sentiment]: ...
+
+    def __call__(self, **kwargs: object) -> _Scored: ...
+
+
+def verify_masinissa_sentiment(
+    model: _Classifier, tokenizer: PreTrainedTokenizerBase, directory: Path
+) -> str:
+    """Check the tokenizer against `encode`, and that the calibrated path is the model's.
+
+    Three failures, none of which a logits shape can show. A SentencePiece vocabulary
+    rebuilt through the wrong pipeline encodes every string to ids in range and the model
+    then reads different words than the ones on the page. A head that has collapsed
+    returns logits of exactly the right rank for every input. And `classify` reading the
+    wrong axis, or a stale `q_hat`, still produces a plausible confidence.
+    """
+    import sentencepiece as spm
+    import torch
+
+    from agbalu.bench.sentiment import Item, encode
+
+    pieces = sorted(directory.glob("*.model"))
+    if len(pieces) != 1:
+        message = f"expected exactly one SentencePiece model in {directory}, found {pieces}"
+        raise StagingError(message)
+    processor = spm.SentencePieceProcessor(model_file=str(pieces[0]))
+
+    for text in SENTIMENT_PROBES:
+        ours = encode([Item(id="probe", text=text, label=0)], processor)[0]
+        theirs = list(tokenizer(text)["input_ids"])
+        if ours != theirs:
+            message = (
+                f"{directory}: the staged tokenizer disagrees with the training encoder "
+                f"on {text!r} — {theirs[:8]} against {ours[:8]}"
+            )
+            raise StagingError(message)
+
+    predicted = model.classify(list(SENTIMENT_PROBES), tokenizer)
+    if len({row["label"] for row in predicted}) < MIN_DISTINCT_LABELS:
+        message = (
+            f"{directory} answered every probe {predicted[0]['label']!r}: "
+            f"the head has collapsed to one class"
+        )
+        raise StagingError(message)
+
+    labels = list(model.config.labels)
+    with torch.inference_mode():
+        batch = tokenizer(list(SENTIMENT_PROBES), padding=True, return_tensors="pt")
+        raw = model(**batch).logits.argmax(dim=-1).tolist()
+    wrong = [
+        f"{text!r}: calibrated {row['label']}, raw {labels[index]}"
+        for text, row, index in zip(SENTIMENT_PROBES, predicted, raw, strict=True)
+        if row["label"] != labels[index] or not row["prediction_set"]
+    ]
+    if wrong:
+        message = (
+            f"{directory}: temperature scaling is monotone and cannot move an argmax, so "
+            f"`classify` is not reading what it thinks it is — {'; '.join(wrong)}"
+        )
+        raise StagingError(message)
+    return " | ".join(
+        f"{row['label']} {row['confidence']:.4f} set={list(row['prediction_set'])}"
+        for row in predicted
+    )
+
+
 def verify(repo: Repo, directory: Path) -> dict[str, object]:
     """Load the directory the way a downloader would, and report what it produced."""
     import torch
@@ -555,6 +689,7 @@ def verify(repo: Repo, directory: Path) -> dict[str, object]:
         "feraoun_pro": AutoModel,
         "juba": AutoModelForSeq2SeqLM,
         "masinissa": AutoModelForMaskedLM,
+        "masinissa_sentiment": AutoModelForSequenceClassification,
         "matoub": AutoModelForTextToWaveform,
     }
     tokenizer = AutoTokenizer.from_pretrained(directory, trust_remote_code=True)
@@ -571,6 +706,7 @@ def verify(repo: Repo, directory: Path) -> dict[str, object]:
         # script produced rather than an average that hides one of them.
         "juba": "ⵜⵛⴼⵉⴹ ⴼⵍⵍⵉ ?",
         "masinissa": "Azul fell-awen, amek i tellam?",
+        "masinissa_sentiment": " | ".join(SENTIMENT_PROBES),
         "matoub": MATOUB_PROBE,
     }
     probe = probes[repo]
@@ -629,6 +765,8 @@ def verify(repo: Repo, directory: Path) -> dict[str, object]:
             )
         elif repo == "dihya":
             produced = verify_dihya(model, tokenizer, directory)
+        elif repo == "masinissa_sentiment":
+            produced = verify_masinissa_sentiment(model, tokenizer, directory)
         elif repo in ("boulifa", "juba"):
             produced = tokenizer.decode(
                 model.generate(

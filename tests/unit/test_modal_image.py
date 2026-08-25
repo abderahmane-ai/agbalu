@@ -389,6 +389,7 @@ def test_the_deploy_module_registers_every_function_without_a_name_collision() -
         "punctuation_evaluate",
         "sentiment_label",
         "sentiment_benchmark",
+        "sentiment_train",
         "tts_baseline",
         "tts_voices",
         "tts_corpus",

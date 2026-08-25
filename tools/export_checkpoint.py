@@ -99,6 +99,11 @@ def weights(checkpoint: dict[str, object]) -> dict[str, Tensor]:
 
     `torch.load` returns `Any`, so without this a checkpoint whose `model` key holds a
     string reaches `save_file` and fails there instead of here.
+
+    A keyed spelling always wins. The bare state dict is the last thing tried and is
+    accepted only when *every* top-level value is a tensor, which is a check and not an
+    assumption: a resumable checkpoint carries an optimizer and a step count and can never
+    satisfy it, so this cannot swallow one whose weights are under a name nobody listed.
     """
     import torch
 
@@ -110,6 +115,12 @@ def weights(checkpoint: dict[str, object]) -> dict[str, Tensor]:
                 message = f"{key} holds non-tensors under {wrong[:3]}"
                 raise ExportError(message)
             return dict(found)
+    if checkpoint and all(isinstance(value, torch.Tensor) for value in checkpoint.values()):
+        return {
+            str(name): value
+            for name, value in checkpoint.items()
+            if isinstance(value, torch.Tensor)
+        }
     message = f"no weights under any of {WEIGHT_KEYS}; the file holds {sorted(checkpoint)}"
     raise ExportError(message)
 

@@ -1,4 +1,4 @@
-"""Build `agbalu/KabSentiment`, and score the encoder on it.
+"""Build `agbalu/KabSentiment`, score the encoder on it, and train the released classifier.
 
 `label` is the only part that needs a GPU: Kabyle has no sentiment-annotated text and no
 classifier, so the label is taken from the **English side of a Tatoeba pair** and carried
@@ -7,6 +7,9 @@ error — the same relationship that put the previously published Kabyle POS tag
 63.69% on gold against the 94.8% it reported against its own projection.
 
 `benchmark` fits the frozen probe and the full fine-tune and scores both once on test.
+`train` is the release path: the same fine-tune over several seeds, weight-averaged when
+the average wins on dev, then calibrated. It writes to the checkpoint volume; `benchmark`
+writes nothing and exists to say what the encoder alone is worth.
 
 The Kabyle side goes through `agbalu.normalise`, not a hand-written substitution. The
 first build used a single `ε`→`ɛ` replacement and shipped 34 rows of 15,000 still
@@ -23,7 +26,15 @@ import re
 from pathlib import Path
 from typing import Final
 
-from modal_app.common import BENCH_TIMEOUT, BENCH_VOLUMES, app, bench_image
+from modal_app.common import (
+    BENCH_TIMEOUT,
+    BENCH_VOLUMES,
+    CHECKPOINT_PATH,
+    VOLUMES,
+    app,
+    bench_image,
+    checkpoint_volume,
+)
 
 log: Final = logging.getLogger("agbalu.sentiment")
 
@@ -54,6 +65,7 @@ OUT_DIR: Final = Path("data/tasks/sentiment")
 RESULTS: Final = Path("data/processed/bench/sentiment.json")
 ENCODER_RUN: Final = Path("artifacts/runs/agbalu-encoder-v1")
 TOKENIZER: Final = Path("artifacts/tokenizer/agbalu-tok-base-16k.model")
+REMOTE_CHECKPOINT_DIR: Final = Path(CHECKPOINT_PATH) / "masinissa_sentiment"
 
 NOISE: Final = re.compile(r"https?://|www\.|[@#$£€]|\b\d+\b")
 """Rows the English classifier reads badly and the Kabyle side rarely translates: URLs,
@@ -134,6 +146,52 @@ def sentiment_benchmark() -> dict[str, object]:
     return {"dataset": "agbalu/KabSentiment", "test_sentences": len(splits["test"]), **reports}
 
 
+@app.function(image=benchmark_image, gpu=GPU, volumes=VOLUMES, timeout=BENCH_TIMEOUT)
+def sentiment_train(
+    epochs: int = 0, batch_size: int = 0, single_seed: bool = False
+) -> dict[str, object]:
+    """The release fine-tune: every seed, the soup if it wins on dev, then the calibration.
+
+    `epochs` and `batch_size` of 0 mean the recipe's own, so the defaults live in
+    `TrainConfig` and not in a second copy here. `single_seed` is the smoke: one seed with
+    no sweep, which exercises the whole path including the calibration and the write.
+    """
+    import torch
+
+    from agbalu.bench import sentiment
+    from agbalu.model.infer import load_encoder
+    from agbalu.sentiment import (
+        SentimentConfig,
+        SequenceClassifier,
+        TrainConfig,
+        save_checkpoint,
+        train_classifier,
+    )
+    from agbalu.tokenizer.evaluate import load as load_tokenizer
+
+    _configure_logging()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    splits = {name: sentiment.read_split(name, OUT_DIR) for name in ("train", "dev", "test")}
+    log.info("splits %s", {name: len(items) for name, items in splits.items()})
+
+    defaults = TrainConfig()
+    recipe = TrainConfig(
+        epochs=epochs or defaults.epochs,
+        batch_size=batch_size or defaults.batch_size,
+        seeds=(defaults.seeds[0],) if single_seed else defaults.seeds,
+    )
+    model = SequenceClassifier(
+        load_encoder(ENCODER_RUN, "kab", name="best.pt", device=device), SentimentConfig()
+    )
+    report, _, _ = train_classifier(
+        model, load_tokenizer(TOKENIZER), splits, device=device, config=recipe
+    )
+
+    save_checkpoint(REMOTE_CHECKPOINT_DIR, model, report)
+    checkpoint_volume.commit()
+    return report.as_dict()
+
+
 def _candidates() -> list[tuple[str, str]]:
     """Deduplicated, normalised Kabyle-English pairs inside the length and noise gates."""
     import csv
@@ -161,13 +219,22 @@ def _candidates() -> list[tuple[str, str]]:
 
 
 @app.local_entrypoint()
-def run_sentiment(task: str = "benchmark") -> None:
-    """`build` writes the splits from Tatoeba; `benchmark` scores the encoder on them."""
+def run_sentiment(
+    task: str = "benchmark", epochs: int = 0, batch_size: int = 0, single_seed: bool = False
+) -> None:
+    """`build` writes the splits from Tatoeba; `benchmark` scores the encoder on them;
+    `train` fits and calibrates the classifier that is published."""
+    if task == "train":
+        result = sentiment_train.remote(
+            epochs=epochs, batch_size=batch_size, single_seed=single_seed
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
     if task == "benchmark":
         print(json.dumps(sentiment_benchmark.remote(), ensure_ascii=False, indent=2))
         return
     if task != "build":
-        message = f"unknown task {task!r}; expected build or benchmark"
+        message = f"unknown task {task!r}; expected build, benchmark or train"
         raise SystemExit(message)
 
     from agbalu.bench.sentiment import LABEL_NAMES

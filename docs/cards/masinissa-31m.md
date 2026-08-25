@@ -247,6 +247,10 @@ everything else as unmeasured.
 capitalisation on Kabyle ASR output — two token-classification heads over this encoder, at
 0.793 macro-F1 over marks against a rule baseline's 0.227.
 
+[`agbalu/Masinissa-Sentiment`](https://huggingface.co/agbalu/Masinissa-Sentiment) classifies
+Kabyle sentiment into negative, neutral and positive — a calibrated multi-sample dropout head
+over this encoder, at 90.27% accuracy against a frozen probe's 77.53%.
+
 ## Files
 
 | file | size | SHA-256 |

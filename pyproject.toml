@@ -336,6 +336,9 @@ ignore = [
 # TRY400: a missing corpus or tokenizer is an operator error with a one-line remedy in the
 #         message. A traceback for "run `make punctuation TASK=corpus` first" is noise.
 "src/agbalu/punctuation/cli.py" = ["PLC0415", "TRY400"]
+# TRY400: same — a missing checkpoint, config or vocabulary is an operator error whose
+#         remedy is the one command the message names. A traceback would bury it.
+"src/agbalu/sentiment/cli.py" = ["TRY400"]
 # PLR0913: `Trainer.__init__` takes the two corpora, the settings, the run directory and the
 #          device separately because they have different lifetimes — folding them into one
 #          container would put a torch device inside a frozen settings object, and the
@@ -504,6 +507,14 @@ module = [
 ]
 disallow_untyped_calls = false
 
+# `Tensor.backward` and `LBFGS.step` are both `def f(self, ...):` in torch — untyped, so a
+# caller holding a *typed* tensor trips `disallow_untyped_calls`. Everywhere else in the tree
+# the loss arrives from `nn.Module.__call__` as `Any` and the call is invisible; this module
+# builds its own objective and annotates it. Confined to the one module that runs L-BFGS.
+[[tool.mypy.overrides]]
+module = ["agbalu.sentiment.calibrate"]
+disallow_untyped_calls = false
+
 # `pyarrow` ships no py.typed marker and no stubs on PyPI.
 [[tool.mypy.overrides]]
 module = ["pyarrow.*"]
@@ -650,6 +661,7 @@ module = [
     "tests.unit.test_hub_feraoun",
     "tests.unit.test_hub_juba",
     "tests.unit.test_hub_masinissa",
+    "tests.unit.test_hub_masinissa_sentiment",
     "tests.unit.test_stage_hub",
     "tests.unit.test_speech_release",
     "tests.integration.test_hub_release_directories",

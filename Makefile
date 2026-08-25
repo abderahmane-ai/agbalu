@@ -172,9 +172,10 @@ REPOS := $(MODEL_REPOS) $(DATASET_REPOS) org
 
 # Out of the default set on purpose: each needs a checkpoint pulled off a volume first, so
 # `make release` with no REPO would fail on whichever one this machine has not pulled.
-PULLED_REPOS := fadhma belaid boulifa matoub simohand feraoun feraoun-pro kabstandard dihya
+PULLED_REPOS := fadhma belaid boulifa matoub simohand feraoun feraoun-pro kabstandard dihya \
+	masinissa-sentiment
 
-release: $(addprefix release-,$(or $(REPO),$(REPOS))) ## Stage repos under artifacts/release. REPO=encoder|tokenizer|mt|juba|bench|lex|sentiment|inflect|tifinagh|punct|g2p|org, or fadhma|belaid|boulifa|matoub|simohand|feraoun|kabstandard|dihya once pulled
+release: $(addprefix release-,$(or $(REPO),$(REPOS))) ## Stage repos under artifacts/release. REPO=encoder|tokenizer|mt|juba|bench|lex|sentiment|inflect|tifinagh|punct|g2p|org, or fadhma|belaid|boulifa|matoub|simohand|feraoun|kabstandard|dihya|masinissa-sentiment once pulled
 	@echo 'staged under $(RELEASE) — review, then push each with: hf upload <repo> <dir> .'
 
 $(addprefix release-,$(DATASET_REPOS)): release-%:
@@ -347,6 +348,27 @@ release-dihya:
 		--card $(CARDS)/dihya-5m.md
 	$(PY) -m tools.stage_hub --repo dihya --dir $(RELEASE)/Dihya-5M
 
+# Weights and the report arrive from `make modal-sentiment-pull`; `release` turns the
+# report's calibration into the published `config.json`, so the temperature and the
+# quantile the card quotes are the ones the model applies. Two prefixes never reach the
+# download: the derived bucket tables, and the masked-LM head the encoder was pretrained
+# with — 6.1M parameters no forward pass here reads.
+MASINISSA_SENTIMENT_DIR ?= artifacts/masinissa-sentiment
+release-masinissa-sentiment:
+	@test -f $(MASINISSA_SENTIMENT_DIR)/model.pt || \
+		{ echo "no checkpoint in $(MASINISSA_SENTIMENT_DIR) — run: make modal-sentiment TASK=train, then make modal-sentiment-pull"; exit 1; }
+	$(call cli,sentiment) --dir $(MASINISSA_SENTIMENT_DIR) release
+	$(PY) -m tools.export_checkpoint \
+		--source $(MASINISSA_SENTIMENT_DIR)/model.pt \
+		--out $(RELEASE)/Masinissa-Sentiment \
+		--card $(CARDS)/masinissa-sentiment.md \
+		--config $(MASINISSA_SENTIMENT_DIR)/config.json \
+		--extra artifacts/tokenizer/agbalu-tok-base-16k.model \
+		--extra $(MASINISSA_SENTIMENT_DIR)/evaluation.json \
+		--derived position_indices \
+		--training-only encoder.classifier.
+	$(PY) -m tools.stage_hub --repo masinissa_sentiment --dir $(RELEASE)/Masinissa-Sentiment
+
 # One push target with a variable, not one per repository. The table is the only place a
 # staged directory is paired with the repository it belongs in; two copies of that pairing
 # is how a directory gets published under the wrong name.
@@ -371,9 +393,11 @@ HF_feraoun     := models   agbalu/Feraoun-36M    $(RELEASE)/Feraoun-36M   $(CARD
 HF_feraoun-pro := models   agbalu/Feraoun-Pro    $(RELEASE)/Feraoun-Pro   $(CARDS)/feraoun-pro.md
 HF_simohand    := models   agbalu/SiMohand-278M  $(SIMOHAND_DIR)          $(CARDS)/simohand-278m.md
 HF_dihya       := models   agbalu/Dihya-5M       $(RELEASE)/Dihya-5M      $(CARDS)/dihya-5m.md
+HF_masinissa-sentiment := models agbalu/Masinissa-Sentiment \
+	$(RELEASE)/Masinissa-Sentiment $(CARDS)/masinissa-sentiment.md
 
 ALL_REPOS := bench lex sentiment inflect tifinagh punct g2p kabstandard encoder tokenizer \
-	mt juba fadhma belaid boulifa matoub feraoun feraoun-pro simohand dihya
+	mt juba fadhma belaid boulifa matoub feraoun feraoun-pro simohand dihya masinissa-sentiment
 
 # `hf upload` adds and overwrites; it never removes. A repository whose file set shrank keeps
 # the superseded files beside their replacements, which for Matoub means a 1.93 GB training
@@ -728,9 +752,31 @@ modal-ocr-pro-pull: ## Copy the Feraoun-Pro checkpoint off the volume. RUN=<the 
 		/$(or $(RUN),$(FERAOUN_PRO_RUN))/best.pt \
 		artifacts/runs/$(FERAOUN_PRO_RUN)/best.pt
 
-modal-sentiment: ## Phase 7 sentiment on GPU. TASK=benchmark scores the encoder; TASK=build relabels from Tatoeba
+# `build` and `benchmark` are Phase 7 and write no checkpoint; `train` is the release
+# path. All three stay on `modal run`: five seeds of six epochs over 12,000 rows of a 31M
+# encoder is minutes, not the hours that force a detached spawn.
+modal-sentiment: modal-sentiment-$(or $(TASK),benchmark) ## Sentiment on GPU. TASK=benchmark|build|train. EPOCHS BATCH SEED1
+
+modal-sentiment-benchmark:
 	$(call deploy,sentiment)
-	modal run -m modal_app.sentiment::run_sentiment --task $(or $(TASK),benchmark)
+	modal run -m modal_app.sentiment::run_sentiment --task benchmark
+
+modal-sentiment-build:
+	$(call deploy,sentiment)
+	modal run -m modal_app.sentiment::run_sentiment --task build
+
+modal-sentiment-train:
+	$(call deploy,sentiment)
+	modal run -m modal_app.sentiment::run_sentiment --task train \
+		$(if $(EPOCHS),--epochs $(EPOCHS),) $(if $(BATCH),--batch-size $(BATCH),) \
+		$(if $(SEED1),--single-seed,)
+
+modal-sentiment-pull: ## Pull the Masinissa-Sentiment checkpoint and its report off the volume
+	@mkdir -p $(MASINISSA_SENTIMENT_DIR)
+	modal volume get --force agbalu-checkpoints \
+		/masinissa_sentiment/model.pt $(MASINISSA_SENTIMENT_DIR)/model.pt
+	modal volume get --force agbalu-checkpoints \
+		/masinissa_sentiment/evaluation.json $(MASINISSA_SENTIMENT_DIR)/evaluation.json
 
 modal-translate-doc: ## Translate a long document detached. FILE=doc.txt DIR=eng-kab. Then modal-translate-pull
 	$(call deploy,translate)

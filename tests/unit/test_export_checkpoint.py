@@ -128,6 +128,22 @@ def test_a_checkpoint_with_no_weights_lists_what_it_did_hold() -> None:
         weights({"config": {}, "val_acc": 0.9})
 
 
+def test_a_bare_state_dict_is_read_as_one() -> None:
+    """`torch.save(model.state_dict(), path)` writes no wrapper, and the sentiment trainer's
+    first pull is such a file."""
+    assert set(weights({"head.weight": torch.zeros(2), "head.bias": torch.zeros(1)})) == {
+        "head.weight",
+        "head.bias",
+    }
+
+
+def test_a_resumable_checkpoint_under_an_unlisted_key_is_still_refused() -> None:
+    """The bare-state-dict path must not swallow one: every top-level value has to be a
+    tensor, and a resume carries a step count and an optimizer that never are."""
+    with pytest.raises(ExportError, match="weights"):
+        weights({"net": {"w": torch.zeros(2)}, "step": 400})
+
+
 def test_a_checkpoint_with_no_config_cannot_say_what_shape_it_is() -> None:
     with pytest.raises(ExportError, match="no config"):
         config_of({"model_state_dict": {}})

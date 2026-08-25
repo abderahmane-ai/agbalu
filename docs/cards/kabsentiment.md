@@ -69,7 +69,7 @@ Each record:
 | `text_kab` | string | Kabyle sentence, normalised |
 | `label` | int | `0` negative · `1` neutral · `2` positive |
 | `label_name` | string | string form of the label |
-| `confidence_score` | float | classifier probability for the assigned class, ≥ 0.85 |
+| `confidence_score` | float | classifier probability for the assigned class, ≥ 0.80 |
 | `source` | string | provenance marker |
 
 ## Usage
@@ -175,7 +175,7 @@ cannot be recovered, so a "repaired" version cannot be produced from it at all.
 
 ## Known limits
 
-- **Labels are not human-verified at sentence level.** The confidence gate (≥ 0.85)
+- **Labels are not human-verified at sentence level.** The confidence gate (≥ 0.80)
   filters out ambiguous cases but is not a substitute for annotation. The classifier
   is trained on English Twitter data and applied to Kabyle text via the English
   reference sentence; cross-lingual transfer may introduce systematic errors on
