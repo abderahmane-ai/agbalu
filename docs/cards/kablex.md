@@ -146,10 +146,10 @@ carrying it, 43% have a `tt` counterpart and 34% a `t` one, against **0.7%** for
 repaired to the geminate on that evidence. 🟡 No audio confirms this mapping — `ţ` occurs
 zero times in Common Voice Kabyle.
 
-Eight entries are **left exactly as the source had them** and named in
-`agbalu-pronunciations-v1.stats.json`: `3d`, `mp3`, `androïd`, `rosé`, `supermarché`,
-`muḥ€nd`, `xelleṣ̣`, `ṭeyyeb‟`. Each carries a digit, a currency sign, a stray combining
-mark or a curly quote — outside the writing system, so repairing them would mean guessing.
+Eight entries are **left exactly as the source had them**: `3d`, `mp3`, `androïd`, `rosé`,
+`supermarché`, `muḥ€nd`, `xelleṣ̣`, `ṭeyyeb‟`. Each carries a digit, a currency sign, a stray
+combining mark or a curly quote — outside the writing system, so repairing them would mean
+guessing.
 
 Repairs are made only where the source reading is *shorter* than the reference table's.
 Sound entries are untouched, because the table does not model `i`/`u` laxing and

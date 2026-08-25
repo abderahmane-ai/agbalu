@@ -39,7 +39,7 @@ from the [AƔBALU](https://huggingface.co/agbalu) project.
 **25,634 Kabyle word–IPA pairs** recovered by aligning 292,921 tokens across 59,462
 sentence pairs at a 99.53% alignment rate, with a **0% ambiguity rate** across the entire
 vocabulary. Every attested word has exactly one IPA reading. It is the phonetics layer
-underlying [`agbalu/Matoub-TTS`](https://huggingface.co/agbalu) and
+underlying [`agbalu/Matoub-82M`](https://huggingface.co/agbalu/Matoub-82M) and
 [`agbalu/Fadhma-300M`](https://huggingface.co/agbalu/Fadhma-300M), and the reference
 target for any Kabyle G2P model.
 

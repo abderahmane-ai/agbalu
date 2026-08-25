@@ -135,7 +135,7 @@ the output is guaranteed canonical.
 
 ## Baseline Benchmarks
 
-Scored on `test.jsonl` — 1,500 sentences, 521 negative / 490 neutral / 489 positive.
+Scored on `test.parquet` — 1,500 sentences, 521 negative / 490 neutral / 489 positive.
 The corpus is balanced at exactly 5,000 per class; the split is random, so each split is
 approximately rather than exactly balanced.
 
