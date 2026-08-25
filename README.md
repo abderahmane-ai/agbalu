@@ -20,8 +20,8 @@ layer rather than a character filter.
 
 ## Published artifacts
 
-Twenty repositories on the Hugging Face Hub under [`agbalu`](https://huggingface.co/agbalu),
-twelve models and eight datasets, plus the organization Space. Every model loads with
+Twenty-one repositories on the Hugging Face Hub under [`agbalu`](https://huggingface.co/agbalu),
+thirteen models and eight datasets, plus the organization Space. Every model loads with
 `transformers` and `torch` alone, without this repository.
 
 | Model | | |
@@ -38,6 +38,7 @@ twelve models and eight datasets, plus the organization Space. Every model loads
 | [`Mammeri-Tok`](https://huggingface.co/agbalu/Mammeri-Tok) | tokenizer | ten vocabularies, 8k–32k |
 | [`Matoub-82M`](https://huggingface.co/agbalu/Matoub-82M) | speech synthesis (preview) | First neural TTS for Kabyle — 24 kHz, StyleTTS2, 42-symbol IPA inventory, male voice |
 | [`Dihya-5M`](https://huggingface.co/agbalu/Dihya-5M) | language identification, six Berber varieties plus rejection | 85.52% over seven classes; 84.44% on the six Berber classes against GlotLID's 41.78% and NLLB `lid218e`'s 28.33%, scored in one pass over the same rows |
+| [`Masinissa-Sentiment`](https://huggingface.co/agbalu/Masinissa-Sentiment) | sentiment, three classes | 90.27% accuracy and 0.9026 macro-F1, against 88.80% for an ordinary fine-tune of the same encoder and 77.53% for a frozen probe; unchanged under total homoglyph corruption |
 
 | Dataset | |
 |---|---|
