@@ -233,14 +233,25 @@ def _ceiling(ceiling_dbfs: float) -> float:
     return float(10.0 ** (ceiling_dbfs / 20.0))
 
 
+def level_gain(
+    speech_dbfs: float, peak: float, target_dbfs: float, *, ceiling_dbfs: float = PEAK_CEILING_DBFS
+) -> float:
+    """Linear gain onto `target_dbfs`, attenuated further if the peak would pass the ceiling.
+
+    Taken on the raw clip and shared with `agbalu.tts.corpus_pro`, which levels the same
+    clips before joining them: a seam between two differently levelled pieces is audible.
+    """
+    wanted = float(10.0 ** ((target_dbfs - speech_dbfs) / 20.0))
+    if peak <= 0.0:
+        return wanted
+    return float(min(wanted, _ceiling(ceiling_dbfs) / peak))
+
+
 def gain_for(
     utterance: Utterance, target_dbfs: float, *, ceiling_dbfs: float = PEAK_CEILING_DBFS
 ) -> float:
-    """Linear gain onto `target_dbfs`, attenuated further if the peak would pass the ceiling."""
-    wanted = float(10.0 ** ((target_dbfs - utterance.speech_dbfs) / 20.0))
-    if utterance.peak <= 0.0:
-        return wanted
-    return float(min(wanted, _ceiling(ceiling_dbfs) / utterance.peak))
+    """`level_gain` for one utterance."""
+    return level_gain(utterance.speech_dbfs, utterance.peak, target_dbfs, ceiling_dbfs=ceiling_dbfs)
 
 
 def levelled(utterances: Sequence[Utterance]) -> tuple[list[Utterance], float]:

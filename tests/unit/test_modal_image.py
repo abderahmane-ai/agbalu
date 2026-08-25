@@ -15,6 +15,7 @@ from __future__ import annotations
 import ast
 import importlib
 import sys
+import typing
 from pathlib import Path
 from typing import Final
 
@@ -52,6 +53,7 @@ IMAGES: Final[tuple[tuple[str, str, tuple[str, ...]], ...]] = (
     ("asr", "modal_app.asr", ASR_PIP_PACKAGES),
     ("tts", "modal_app.tts", TTS_PIP_PACKAGES),
     ("matoub", "modal_app.matoub", (*TTS_PIP_PACKAGES, *MATOUB_PIP_PACKAGES)),
+    ("matoub_pro", "modal_app.matoub_pro", (*TTS_PIP_PACKAGES, *MATOUB_PIP_PACKAGES)),
     ("tifinagh", "modal_app.tifinagh", TIFINAGH_PIP_PACKAGES),
     ("sentiment", "modal_app.sentiment", BENCH_PIP_PACKAGES),
     ("punctuation", "modal_app.punctuation", PIP_PACKAGES),
@@ -141,6 +143,28 @@ RUNTIME_ONLY: Final[dict[str, frozenset[str]]] = {
             "monotonic-align @ git+https://github.com/resemble-ai/monotonic_align.git",
             "numpy",
             "torchaudio",
+            "transformers",
+            "pandas",
+            "click",
+        }
+    ),
+    # Pro's launcher reaches the same recipe the same way, and its corpus build adds nothing
+    # to the image: `librosa`, `soundfile` and `torchaudio` are the restoration front end and
+    # already arrive with the TTS layer. `pyctcdecode` and kenlm belong to the ASR module it
+    # borrows `index_audio` and the clip decoder from, not to anything it calls.
+    "matoub_pro": frozenset(
+        {
+            "accelerate",
+            "https://github.com/kpu/kenlm/archive/master.zip",
+            "pyctcdecode",
+            "munch",
+            "pydub",
+            "nltk",
+            "matplotlib",
+            "einops",
+            "einops-exts",
+            "tensorboard",
+            "monotonic-align @ git+https://github.com/resemble-ai/monotonic_align.git",
             "transformers",
             "pandas",
             "click",
@@ -335,8 +359,8 @@ def test_the_deploy_module_registers_every_function_without_a_name_collision() -
     logs a warning and *overrides* the first, so the deployed app silently loses one. The
     assertion is therefore equality, not containment: an override shrinks the set.
 
-    `ocr_pro` is absent because it owns its own app; `test_a_dedicated_app_owns_the_functions
-    _the_launcher_addresses_to_it` covers those."""
+    `ocr_pro` and `matoub_pro` are absent because each owns its own app;
+    `test_a_dedicated_app_owns_the_functions_the_launcher_addresses_to_it` covers those."""
     deploy = importlib.import_module("modal_app.deploy")
     assert set(deploy.app.registered_functions) == {
         "jugurtha_pack",
@@ -403,9 +427,10 @@ def test_a_dedicated_app_owns_the_functions_the_launcher_addresses_to_it() -> No
     deploy is paid for. Every spawnable function is checked against the app it resolves to."""
     launch = importlib.import_module("modal_app.launch")
     ocr_pro = importlib.import_module("modal_app.ocr_pro")
+    matoub_pro = importlib.import_module("modal_app.matoub_pro")
     shared = importlib.import_module("modal_app.deploy").app
 
-    dedicated = {ocr_pro.APP_NAME: ocr_pro.app}
+    dedicated = {ocr_pro.APP_NAME: ocr_pro.app, matoub_pro.APP_NAME: matoub_pro.app}
     for function, app_name in launch.FUNCTION_APP_NAME.items():
         assert app_name in dedicated, f"{function} is addressed to {app_name}, which no module has"
 
@@ -413,3 +438,43 @@ def test_a_dedicated_app_owns_the_functions_the_launcher_addresses_to_it() -> No
         owner = launch.FUNCTION_APP_NAME.get(function)
         app = dedicated[owner] if owner is not None else shared
         assert function in set(app.registered_functions)
+
+
+SPAWN_ONLY: Final = frozenset(
+    {
+        # `ResumeFrom` is a `TYPE_CHECKING` name. `pretrain` is only ever spawned through
+        # `modal_app.launch`, which passes keywords and never asks the CLI to build a parser.
+        "pretrain",
+        # `Clip` is the same, and this one is a `.map` worker: it has no CLI to build at all.
+        "repack_shard_task",
+    }
+)
+"""Known unresolvable, and safe only for as long as nothing calls them with `modal run`.
+
+Both raise the moment they are, which is the trap `CLAUDE.md` §6.3 records. Named here rather
+than fixed in this change: they belong to `modal_app.train` and `modal_app.asr`, and a diff
+touching eight files is a claim that eight files were broken."""
+
+
+def test_every_entrypoint_carries_type_hints_the_modal_cli_can_resolve() -> None:
+    """`modal run` resolves a function's annotations at call time to build its CLI.
+
+    `from __future__ import annotations` makes every hint a string, so a parameter annotated
+    with a `TYPE_CHECKING`-only name resolves under `mypy` and raises under `modal run` —
+    which `spawn` never exercises, so the failure waits for whoever runs the attached smoke.
+    """
+    apps = [
+        importlib.import_module("modal_app.deploy").app,
+        importlib.import_module("modal_app.ocr_pro").app,
+        importlib.import_module("modal_app.matoub_pro").app,
+    ]
+    unresolved: dict[str, str] = {}
+    for app in apps:
+        for name, function in app.registered_functions.items():
+            if name in SPAWN_ONLY:
+                continue
+            try:
+                typing.get_type_hints(function.get_raw_f())
+            except (NameError, TypeError) as error:
+                unresolved[name] = str(error)
+    assert not unresolved, f"modal run cannot build a CLI for: {unresolved}"

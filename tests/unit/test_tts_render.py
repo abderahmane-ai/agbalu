@@ -149,13 +149,13 @@ class TestRenderArms:
         """One decode per clip, not one per arm: the restored pass and the raw resample are
         two derivations of the same decode, and the volume charges per read."""
         reads: Counter[str] = Counter()
-        original = tts._native
+        original = tts.native
 
         def _counted(path: Path) -> tuple[NDArray[np.float32], int]:
             reads[path.name] += 1
             return original(path)
 
-        monkeypatch.setattr(tts, "_native", _counted)
+        monkeypatch.setattr(tts, "native", _counted)
         utterances = [_utterance(f"clip{index}") for index in range(CLIPS)]
         _render(utterances, audio_map, _FakeRestorer(), tmp_path / "voice", resume=False)
 
@@ -205,13 +205,13 @@ class TestRenderArms:
         )
 
         sources: list[str] = []
-        original = tts._native
+        original = tts.native
 
         def _counted(path: Path) -> tuple[NDArray[np.float32], int]:
             sources.append(path.name)
             return original(path)
 
-        monkeypatch.setattr(tts, "_native", _counted)
+        monkeypatch.setattr(tts, "native", _counted)
         second = _FakeRestorer()
         rendered = _render(
             [_utterance(f"clip{index}") for index in range(CLIPS)],
@@ -292,7 +292,7 @@ class TestPartialWrites:
 
         monkeypatch.setattr(sf, "write", _spy)
         target = tmp_path / "clip0.wav"
-        tts._write_wav(target, np.zeros(100, dtype=np.float32), OUTPUT_RATE)
+        tts.write_wav(target, np.zeros(100, dtype=np.float32), OUTPUT_RATE)
 
         assert seen == ["clip0.wav.partial"]
         assert target.is_file()

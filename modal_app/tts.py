@@ -540,7 +540,7 @@ one-time global init. Only the decode is serialised; the resample, the filterban
 and the write stay on the pool."""
 
 
-def _native(path: Path) -> tuple[NDArray[np.float32], int]:
+def native(path: Path) -> tuple[NDArray[np.float32], int]:
     """One clip at the rate it was stored at.
 
     `asr._load_audio` resamples to 16 kHz, and the band is what a resample destroys: the
@@ -631,7 +631,7 @@ def tts_voices(*, top: int = TOP, limit: int = 0) -> dict[str, object]:
             at = time.monotonic()
 
             def _profile_clip(clip: Clip) -> ClipProfile:
-                return profile(*_native(audio[clip.clip]))
+                return profile(*native(audio[clip.clip]))
 
             profiles = list(stream(clips, _profile_clip, pool, workers))
             elapsed = time.monotonic() - at
@@ -724,7 +724,7 @@ def survey(
     from agbalu.tts.acoustics import profile
 
     def _profile_clip(clip: Clip) -> ClipProfile:
-        return profile(*_native(audio[clip.clip]))
+        return profile(*native(audio[clip.clip]))
 
     kept: list[Utterance] = []
     dropped: Counter[str] = Counter()
@@ -796,7 +796,7 @@ def _arms_todo(
     return todo, [arm for arm in already if arm not in todo]
 
 
-def _write_wav(path: Path, wave: NDArray[np.float32], rate: int) -> None:
+def write_wav(path: Path, wave: NDArray[np.float32], rate: int) -> None:
     """Write through a staged name, so a killed container leaves no half-clip behind.
 
     `resume` trusts the presence of a wav as proof it was rendered, which makes a partial
@@ -848,7 +848,7 @@ def _render_clip(
     from agbalu.tts.restore import resample
 
     cut = voice_corpus.apply(resample(wave, source, rate), rate, utterance)
-    _write_wav(_wav(root, utterance), cut, rate)
+    write_wav(_wav(root, utterance), cut, rate)
     return arm, profile(cut, rate)
 
 
@@ -856,7 +856,7 @@ def _profile_written(arm: str, root: Path, utterance: Utterance) -> Measured:
     """Measure a clip a resume found already rendered, so the summary is the whole arm's."""
     from agbalu.tts.acoustics import profile
 
-    return arm, profile(*_native(_wav(root, utterance)))
+    return arm, profile(*native(_wav(root, utterance)))
 
 
 @dataclass(frozen=True, slots=True)
@@ -927,7 +927,7 @@ def render_arms(
         # One read per clip, not one per arm: the restored pass and the raw resample are
         # two derivations of the same decode, and reading twice is what the volume charges
         # for twice.
-        loaded = _native(audio[utterance.clip])
+        loaded = native(audio[utterance.clip])
         rows, samples = restorer.prepare(*loaded) if "restored" in todo else (None, 0)
         return Prepared(
             utterance=utterance,

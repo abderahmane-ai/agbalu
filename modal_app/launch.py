@@ -36,6 +36,9 @@ from agbalu.tts.training import DEFAULT_RUN_NAME as MATOUB_RUN_NAME
 from modal_app.asr import DEFAULT_RUN as ASR_RUN_NAME
 from modal_app.common import APP_NAME, MATOUB_BATCH
 from modal_app.jugurtha import DEFAULT_RUN as JUGURTHA_RUN_NAME
+from modal_app.matoub_pro import APP_NAME as MATOUB_PRO_APP_NAME
+from modal_app.matoub_pro import POOL_HOURS as MATOUB_PRO_POOL_HOURS
+from modal_app.matoub_pro import VOICE as MATOUB_PRO_VOICE
 from modal_app.ocr_pro import APP_NAME as OCR_PRO_APP_NAME
 from modal_app.ocr_pro import DEFAULT_RUN as OCR_PRO_RUN_NAME
 from modal_app.ocr_pro import MAX_LINES as OCR_PRO_MAX_LINES
@@ -55,6 +58,8 @@ FUNCTIONS: Final = (
     "punctuation_evaluate",
     "tts_corpus",
     "matoub_train",
+    "matoub_pro_corpus",
+    "matoub_pro_train",
     "jugurtha_train",
     "simohand_prepare",
     "simohand_train",
@@ -111,6 +116,8 @@ def _modal_cli(*arguments: str, purpose: str) -> list[str]:
 
 
 FUNCTION_APP_NAME: Final[dict[str, str]] = {
+    "matoub_pro_corpus": MATOUB_PRO_APP_NAME,
+    "matoub_pro_train": MATOUB_PRO_APP_NAME,
     "ocr_pro_train": OCR_PRO_APP_NAME,
     "ocr_pro_smoke": OCR_PRO_APP_NAME,
 }
@@ -274,6 +281,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--stage", default="stage1", choices=("stage1", "stage2"), help="matoub_train: which stage"
+    )
+    parser.add_argument(
+        "--hours",
+        type=float,
+        default=MATOUB_PRO_POOL_HOURS,
+        help="matoub_pro_corpus: how much of the train split Stage 1 takes, best speakers first",
     )
     parser.add_argument(
         "--arm", default="restored", choices=("restored", "raw"), help="matoub_train: corpus arm"
@@ -477,6 +490,29 @@ def _matoub_kwargs(args: argparse.Namespace) -> dict[str, object]:
     }
 
 
+def _matoub_pro_corpus_kwargs(args: argparse.Namespace) -> dict[str, object]:
+    """`matoub_pro_corpus`'s keywords. `--limit` caps the clips per speaker and is its smoke;
+    it writes under its own root, so a capped call can never overwrite a real corpus."""
+    return {"hours": args.hours, "limit": args.limit, "force": args.force}
+
+
+def _matoub_pro_kwargs(args: argparse.Namespace) -> dict[str, object]:
+    """`matoub_pro_train`'s keywords. Pro trains one voice, so `--voice` is refused here
+    rather than ignored: a flag a function does not read is a flag that silently did
+    nothing, hours after the launch."""
+    if args.voice:
+        message = f"matoub_pro trains {MATOUB_PRO_VOICE} only; drop VOICE={args.voice}"
+        raise SystemExit(message)
+    return {
+        "stage": args.stage,
+        "epochs": args.epochs,
+        "batch": args.batch,
+        "max_len": args.max_len,
+        "limit": args.limit,
+        "first_stage_epoch": args.first_stage_epoch,
+    }
+
+
 def _simohand_prepare_kwargs(args: argparse.Namespace) -> dict[str, object]:
     return {"force": args.force}
 
@@ -570,6 +606,8 @@ KWARGS: Final[dict[str, Callable[[argparse.Namespace], dict[str, object]]]] = {
     "jugurtha_train": _jugurtha_kwargs,
     "tts_corpus": _tts_kwargs,
     "matoub_train": _matoub_kwargs,
+    "matoub_pro_corpus": _matoub_pro_corpus_kwargs,
+    "matoub_pro_train": _matoub_pro_kwargs,
     "simohand_prepare": _simohand_prepare_kwargs,
     "simohand_train": _simohand_kwargs,
     "simohand_eval": _simohand_eval_kwargs,

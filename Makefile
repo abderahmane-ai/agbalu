@@ -600,6 +600,65 @@ modal-matoub-infer:
 		$(if $(STAGE),--stage $(STAGE),) $(if $(CHECKPOINT),--checkpoint $(CHECKPOINT),) \
 		$(if $(LIMIT),--limit $(LIMIT),)
 
+MATOUB_PRO_SMOKE_LIMIT ?= 200
+MATOUB_PRO_SMOKE_EPOCHS ?= 2
+# The smoke runs attached, because that is the whole point of it: it must reach the first
+# joint step — where the waveform decoder, MPD, MSD and the SLM switch on together — and
+# report the memory, the step rate and the `slmadv` fire rate before a real run is paid for.
+# An epoch before `joint_epoch` proves nothing about one after it.
+modal-matoub-pro: modal-matoub-pro-$(or $(TASK),smoke) ## Matoub-Pro. TASK=smoke (default, attached)|corpus|prepare|stage1|stage2|pull. HOURS EPOCHS BATCH MAXLEN LIMIT FROM FORCE
+
+modal-matoub-pro-smoke:
+	$(MAKE) modal-matoub-pro-corpus-run LIMIT=$(MATOUB_PRO_SMOKE_LIMIT) FORCE=$(FORCE)
+	$(MAKE) modal-matoub-pro-prepare    LIMIT=$(MATOUB_PRO_SMOKE_LIMIT) FORCE=$(FORCE)
+	$(MAKE) modal-matoub-pro-stage-run  LIMIT=$(MATOUB_PRO_SMOKE_LIMIT) STAGE=stage1 \
+		EPOCHS=$(or $(EPOCHS),$(MATOUB_PRO_SMOKE_EPOCHS))
+	$(MAKE) modal-matoub-pro-stage-run  LIMIT=$(MATOUB_PRO_SMOKE_LIMIT) STAGE=stage2 \
+		EPOCHS=$(or $(EPOCHS),$(MATOUB_PRO_SMOKE_EPOCHS))
+
+modal-matoub-pro-corpus:
+	$(call deploy,matoub_pro)
+	$(PY) -m modal_app.launch --function matoub_pro_corpus \
+		$(if $(HOURS),--hours $(HOURS),) $(if $(LIMIT),--limit $(LIMIT),) \
+		$(if $(FORCE),--force,)
+
+modal-matoub-pro-corpus-run:
+	modal run -m modal_app.matoub_pro::matoub_pro_corpus \
+		$(if $(HOURS),--hours $(HOURS),) $(if $(LIMIT),--limit $(LIMIT),) \
+		$(if $(FORCE),--force,)
+
+modal-matoub-pro-prepare:
+	modal run -m modal_app.matoub_pro::matoub_pro_prepare \
+		$(if $(LIMIT),--limit $(LIMIT),) $(if $(FORCE),--force,)
+
+modal-matoub-pro-stage-run:
+	modal run -m modal_app.matoub_pro::matoub_pro_train --stage $(STAGE) \
+		$(if $(EPOCHS),--epochs $(EPOCHS),) $(if $(BATCH),--batch $(BATCH),) \
+		$(if $(MAXLEN),--max-len $(MAXLEN),) $(if $(LIMIT),--limit $(LIMIT),) \
+		$(if $(FROM),--first-stage-epoch $(FROM),)
+
+modal-matoub-pro-stage1:
+	$(call deploy,matoub_pro)
+	$(PY) -m modal_app.launch --function matoub_pro_train --stage stage1 \
+		$(if $(EPOCHS),--epochs $(EPOCHS),) $(if $(BATCH),--batch $(BATCH),) \
+		$(if $(MAXLEN),--max-len $(MAXLEN),) $(if $(LIMIT),--limit $(LIMIT),)
+
+modal-matoub-pro-stage2:
+	$(call deploy,matoub_pro)
+	$(PY) -m modal_app.launch --function matoub_pro_train --stage stage2 \
+		$(if $(EPOCHS),--epochs $(EPOCHS),) $(if $(BATCH),--batch $(BATCH),) \
+		$(if $(MAXLEN),--max-len $(MAXLEN),) $(if $(LIMIT),--limit $(LIMIT),) \
+		$(if $(FROM),--first-stage-epoch $(FROM),)
+
+MATOUB_PRO_EPOCH ?= epoch_2nd_00009
+modal-matoub-pro-pull:
+	@mkdir -p artifacts/matoub-pro
+	modal volume get --force agbalu-data \
+		tts_pro/matoub/run/logs/kab_male/$(MATOUB_PRO_EPOCH).pth \
+		artifacts/matoub-pro/$(MATOUB_PRO_EPOCH).pth
+	modal volume get --force agbalu-data \
+		tts_pro/corpus/corpus_pro.stats.json data/processed/tts_pro/corpus_pro.stats.json
+
 modal-simohand: ## SiMohand sentence embeddings on Modal. TASK=prepare|train|eval. RUN EPOCHS STEPS LIMIT BATCH FORCE
 	$(call deploy,simohand)
 	$(PY) -m modal_app.launch --function simohand_$(or $(TASK),train) \
