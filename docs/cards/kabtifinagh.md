@@ -141,10 +141,7 @@ because the model is defined over a case-folded alphabet.
 | Latin → Tifinagh | character table | 49,795 | 1.02% | 14.83% | — |
 | **Tifinagh → Latin** | [**Juba-27M**](https://huggingface.co/agbalu/Juba-27M), greedy | 5,000 | **94.22%** | **0.33%** | **93.51%** |
 
-```bash
-make bench TASK=tifinagh                 # the table, over the whole split
-make tifinagh TASK=evaluate LIMIT=5000   # the model, free-running, no GPU needed
-```
+
 
 **Schwa F1 here is positional.** A hypothesis with the right *number* of `e` in the wrong
 places scores 100% under a count and 0% under this metric; the scorer strips every `e`,

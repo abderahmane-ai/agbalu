@@ -110,7 +110,7 @@ mechanical and reproducible, not editorial.
 | `variants` | list of `{ipa, count}` — every attested reading with its frequency |
 | `repaired` | true where this project restored a character the source dropped (§ below) |
 
-🔴 **This is a transliteration, not a phonetic transcription, and the distinction is
+**This is a transliteration, not a phonetic transcription, and the distinction is
 load-bearing.** Measured over all 292,921 aligned tokens:
 
 - No word ever takes two readings — **ambiguity is 0.0%** — and that holds even when
@@ -131,7 +131,7 @@ evidence about Kabyle phonetics.
 
 ### Repaired characters
 
-🔴 **The upstream generator emits nothing for a character it has no rule for, silently.**
+**The upstream generator emits nothing for a character it has no rule for, silently.**
 This release repairs **199 entries**, flagged by the `repaired` field:
 
 | character | words | before | after |
@@ -143,7 +143,7 @@ This release repairs **199 entries**, flagged by the `repaired` field:
 **`ţ` is real Kabyle, not a foreign letter.** It is the Dallet-tradition notation for the
 spirantised/tense t, attested 21,058 times in this project's corpus; of 1,407 word types
 carrying it, 43% have a `tt` counterpart and 34% a `t` one, against **0.7%** for `ṭ`. It is
-repaired to the geminate on that evidence. 🟡 No audio confirms this mapping — `ţ` occurs
+repaired to the geminate on that evidence. No audio confirms this mapping — `ţ` occurs
 zero times in Common Voice Kabyle.
 
 Eight entries are **left exactly as the source had them**: `3d`, `mp3`, `androïd`, `rosé`,

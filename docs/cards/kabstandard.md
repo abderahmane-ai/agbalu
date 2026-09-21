@@ -151,9 +151,7 @@ The third row is an identity pair (`source == target`).
 | **Boulifa-48M** | **97.39%** | **2.61%** | **85.70%** |
 | leave the input untouched | 89.70% | 10.30% | — |
 
-```bash
-make standardise TASK=evaluate LIMIT=1000
-```
+
 
 **The floor is in the table because these pairs are corrupted probabilistically**, so most
 characters in most sentences arrive already correct and a system that does nothing scores
@@ -177,12 +175,8 @@ on arbitrary human typing, only on the corruption distribution defined here.
 
 ## Reproduction
 
-```bash
-make modal-boulifa TASK=prepare   # writes train/dev/test.jsonl and commits to the volume
-```
-
-The dataset is regenerated deterministically at seed 42 from `agbalu/KabTifinagh`. No GPU
-required.
+The dataset is regenerated deterministically at seed 42 from `agbalu/KabTifinagh` by
+`agbalu.standardise`. No GPU required.
 
 ## Citation
 

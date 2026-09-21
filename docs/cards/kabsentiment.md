@@ -154,9 +154,7 @@ Both select their epoch on dev by macro F1 and score test once. On a 1,500-row s
 is not a formality: choosing the epoch on test would report the best of fifteen draws as
 though it were one.
 
-```bash
-make modal-sentiment TASK=benchmark
-```
+
 
 ## Why this benchmark exists
 

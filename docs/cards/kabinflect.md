@@ -127,7 +127,7 @@ split — which is why the copy-the-lemma floor below is as low as it is.
 All Kabyle text is normalised under normaliser `1.3.0+rules1.0.0` (81 rules). The source
 text carries 0.00% homoglyph error and 0.00% legacy-font mojibake.
 
-🔴 **The emphatic `ṛ` is not represented, and this is a property of the source.** Measured
+**The emphatic `ṛ` is not represented, and this is a property of the source.** Measured
 over all 270,026 training forms, `ṛ` U+1E5B occurs **0 times**, while `ḍ` appears in 14.43%
 of forms, `ḥ` in 12.14%, `ṣ` in 3.36%, `ẓ` in 2.73% and `ṭ` in 4.37%. The upstream
 conjugation resource writes plain `r` throughout — its lemmas are `ruḥ`, `ṣber` and `ɛreḍ`,
@@ -150,9 +150,7 @@ The benchmark evaluates morphological generation (`inflection`) and parsing (`an
 |---|---|---|---|
 | inflection | copy the lemma unchanged | 4.07% | 30.73% |
 
-```bash
-make bench TASK=inflect
-```
+
 
 **The floor is not zero, and that is why it is measured rather than assumed.** Kabyle's
 imperative singular *is* the citation form for most verbs, so a copy is correct in one cell

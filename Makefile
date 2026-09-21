@@ -172,8 +172,8 @@ REPOS := $(MODEL_REPOS) $(DATASET_REPOS) org
 
 # Out of the default set on purpose: each needs a checkpoint pulled off a volume first, so
 # `make release` with no REPO would fail on whichever one this machine has not pulled.
-PULLED_REPOS := fadhma belaid boulifa matoub simohand feraoun feraoun-pro kabstandard dihya \
-	masinissa-sentiment
+PULLED_REPOS := fadhma belaid boulifa matoub simohand feraoun feraoun-pro kabstandard kabliterary \
+	dihya masinissa-sentiment
 
 release: $(addprefix release-,$(or $(REPO),$(REPOS))) ## Stage repos under artifacts/release. REPO=encoder|tokenizer|mt|juba|bench|lex|sentiment|inflect|tifinagh|punct|g2p|org, or fadhma|belaid|boulifa|matoub|simohand|feraoun|kabstandard|dihya|masinissa-sentiment once pulled
 	@echo 'staged under $(RELEASE) — review, then push each with: hf upload <repo> <dir> .'
@@ -310,6 +310,9 @@ release-kabstandard:
 	@cp docs/cards/kabstandard.md $(RELEASE)/KabStandard/README.md
 	@echo "$(RELEASE)/KabStandard: $$(ls $(RELEASE)/KabStandard | wc -l | tr -d ' ') files"
 
+release-kabliterary:
+	$(PY) -m tools.build_kabliterary --stage $(RELEASE)/KabLiterary
+
 MATOUB_EPOCH ?= epoch_2nd_00003
 MATOUB_VOICE ?= kab_male
 MATOUB_REFERENCE ?= artifacts/matoub/reference_$(MATOUB_VOICE).wav
@@ -373,14 +376,15 @@ release-masinissa-sentiment:
 # staged directory is paired with the repository it belongs in; two copies of that pairing
 # is how a directory gets published under the wrong name.
 CARDS := docs/cards
-HF_bench       := datasets agbalu/KabBench       $(RELEASE)/KabBench      $(CARDS)/kabbench.md
-HF_lex         := datasets agbalu/KabLex         $(RELEASE)/KabLex        $(CARDS)/kablex.md
-HF_sentiment   := datasets agbalu/KabSentiment   $(RELEASE)/KabSentiment  $(CARDS)/kabsentiment.md
-HF_inflect     := datasets agbalu/KabInflect     $(RELEASE)/KabInflect    $(CARDS)/kabinflect.md
-HF_tifinagh    := datasets agbalu/KabTifinagh    $(RELEASE)/KabTifinagh   $(CARDS)/kabtifinagh.md
-HF_punct       := datasets agbalu/KabPunct       $(RELEASE)/KabPunct      $(CARDS)/kabpunct.md
-HF_g2p         := datasets agbalu/KabG2P         $(RELEASE)/KabG2P        $(CARDS)/kabg2p.md
+HF_kabbench    := datasets agbalu/KabBench       $(RELEASE)/KabBench      $(CARDS)/kabbench.md
+HF_kablex      := datasets agbalu/KabLex         $(RELEASE)/KabLex        $(CARDS)/kablex.md
+HF_kabsentiment := datasets agbalu/KabSentiment  $(RELEASE)/KabSentiment  $(CARDS)/kabsentiment.md
+HF_kabinflect  := datasets agbalu/KabInflect     $(RELEASE)/KabInflect    $(CARDS)/kabinflect.md
+HF_kabtifinagh := datasets agbalu/KabTifinagh    $(RELEASE)/KabTifinagh   $(CARDS)/kabtifinagh.md
+HF_kabpunct    := datasets agbalu/KabPunct       $(RELEASE)/KabPunct      $(CARDS)/kabpunct.md
+HF_kabg2p      := datasets agbalu/KabG2P         $(RELEASE)/KabG2P        $(CARDS)/kabg2p.md
 HF_kabstandard := datasets agbalu/KabStandard    $(RELEASE)/KabStandard   $(CARDS)/kabstandard.md
+HF_kabliterary := datasets agbalu/KabLiterary    $(RELEASE)/KabLiterary   $(CARDS)/kabliterary.md
 HF_encoder     := models   agbalu/Masinissa-31M  $(RELEASE)/Masinissa-31M $(CARDS)/masinissa-31m.md
 HF_tokenizer   := models   agbalu/Mammeri-Tok    $(RELEASE)/Mammeri-Tok   $(CARDS)/mammeri-tok.md
 HF_mt          := models   agbalu/Amrouche-1.3B  $(RELEASE)/Amrouche-1.3B $(CARDS)/amrouche-1.3b.md
@@ -396,8 +400,9 @@ HF_dihya       := models   agbalu/Dihya-5M       $(RELEASE)/Dihya-5M      $(CARD
 HF_masinissa-sentiment := models agbalu/Masinissa-Sentiment \
 	$(RELEASE)/Masinissa-Sentiment $(CARDS)/masinissa-sentiment.md
 
-ALL_REPOS := bench lex sentiment inflect tifinagh punct g2p kabstandard encoder tokenizer \
-	mt juba fadhma belaid boulifa matoub feraoun feraoun-pro simohand dihya masinissa-sentiment
+ALL_REPOS := kabbench kablex kabsentiment kabinflect kabtifinagh kabpunct kabg2p \
+	kabstandard kabliterary encoder tokenizer mt juba fadhma belaid boulifa matoub \
+	feraoun feraoun-pro simohand dihya masinissa-sentiment
 
 # `hf upload` adds and overwrites; it never removes. A repository whose file set shrank keeps
 # the superseded files beside their replacements, which for Matoub means a 1.93 GB training

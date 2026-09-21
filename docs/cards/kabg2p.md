@@ -129,7 +129,7 @@ IPA string. This release repairs **199 entries**, flagged by `repaired: true`:
 | `ţ` U+0163 | 73 | `aţan` → `ææn` repaired to `ætːæn` (geminate, from corpus evidence) |
 | `é`, `ï` | 3 | left as-is (outside the writing system) |
 
-🔴 **`ţ` is attested Kabyle.** It is the Dallet-tradition spelling for the spirantised `t`,
+**`ţ` is attested Kabyle.** It is the Dallet-tradition spelling for the spirantised `t`,
 occurring 21,058 times in AƔBALU-Text v1 and in 1,407 word types. It is repaired to the
 geminate on corpus evidence. No audio confirms this mapping — `ţ` does not appear in
 Common Voice Kabyle — and the repair is disclosed rather than hidden.
