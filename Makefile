@@ -128,8 +128,9 @@ sync: ## Push code, corpus inputs, Dihya and every evaluation set to the pod (op
 smoke: ## One part of the 11.19 smoke. RUN= PART=throughput|parity|resume|evaluate (operator, hpc)
 	$(call launch,smoke) $(if $(PART),--part $(PART),)
 
-train: ## Continued pretraining, resuming RUN if it exists. RUN= MODEL STEPS (operator, hpc)
-	$(call launch,train) $(if $(MODEL),--model $(MODEL),) $(if $(STEPS),--steps $(STEPS),)
+train: ## Continued pretraining, resuming RUN if it exists. RUN= MODEL STEPS STOP (operator, hpc)
+	$(call launch,train) $(if $(MODEL),--model $(MODEL),) $(if $(STEPS),--steps $(STEPS),) \
+		$(if $(STOP),--stop $(STOP),)
 
 data: ## Corpus stages that run on the pod. TASK=documents|aligned|replay|pack (operator, hpc)
 	$(call launch,data) $(if $(TASK),--task $(TASK),)
@@ -139,6 +140,9 @@ evaluate: ## Evaluation suite on MODEL into artifacts/runs/RUN/evaluation.json. 
 
 status: ## Is RUN alive: session, last log lines, latest checkpoints (operator, hpc)
 	$(call launch,status)
+
+stop: ## Stop RUN; training checkpoints at the end of its current step first (operator, hpc)
+	$(call launch,stop)
 
 logs: ## Stream RUN's log; Ctrl-C stops only the stream (operator, hpc)
 	$(call launch,logs)

@@ -66,6 +66,17 @@ class TestParser:
     def test_train_passes_only_what_was_given(self) -> None:
         args = launch.build_parser().parse_args(["train", "--run", "r", "--steps", "9"])
         assert launch.train_arguments(args) == ["train", "--run", "r", "--total-steps", "9"]
+        args = launch.build_parser().parse_args(["train", "--run", "r", "--stop", "2"])
+        assert launch.train_arguments(args) == ["train", "--run", "r", "--stop-after", "2"]
+
+    def test_stop_sends_ctrl_c_to_the_runs_session(self) -> None:
+        assert "tmux send-keys -t agbalu-a-b C-c" in launch.stop_script("a/b")
+
+    def test_a_restart_archives_the_old_log_instead_of_appending(self) -> None:
+        script = launch.detached("r", ["train"], "r/log.txt")[-1]
+        assert "mv " in script
+        assert "> /home/jovyan/agbalu/artifacts/runs/r/log.txt 2>&1" in script
+        assert ">>" not in script
 
 
 def test_the_stamp_records_the_checkout() -> None:

@@ -121,11 +121,16 @@ def module(arguments: Sequence[str]) -> str:
 
 
 def detached(run: str, arguments: Sequence[str], log: str) -> list[str]:
-    """A tmux session running the CLI with its output in the run's log file."""
-    log_path = f"{REMOTE_ROOT}/{RUNS}/{log}"
-    job = f"{PREAMBLE} && {module(arguments)} >> {shlex.quote(log_path)} 2>&1"
+    """A tmux session running the CLI with its output in the run's log file.
+
+    A log left by an earlier start is renamed with its time first, so `status` and `logs`
+    show this start only; a resumed run's history stays beside it.
+    """
+    log_path = shlex.quote(f"{REMOTE_ROOT}/{RUNS}/{log}")
+    job = f"{PREAMBLE} && {module(arguments)} > {log_path} 2>&1"
     command = (
-        f"mkdir -p {shlex.quote(str(Path(log_path).parent))}"
+        f"mkdir -p {shlex.quote(str(Path(f'{REMOTE_ROOT}/{RUNS}/{log}').parent))}"
+        f" && (test ! -f {log_path} || mv {log_path} {log_path}.$(date +%Y%m%d-%H%M%S))"
         f" && tmux new-session -d -s {session_name(run)} {shlex.quote(job)}"
     )
     return remote(command)
@@ -155,6 +160,16 @@ def status_script(run: str) -> str:
         " || echo 'session: not running');"
         f" tail -n {LOG_LINES} {runs}/log.txt 2>/dev/null;"
         f" ls -d {runs}/step-* {runs}/*/step-* 2>/dev/null | tail -n 3"
+    )
+
+
+def stop_script(run: str) -> str:
+    """Ctrl-C into the session: the trainer checkpoints at the end of its current step and
+    exits; any other job stops at once."""
+    session = session_name(run)
+    return (
+        f"tmux send-keys -t {session} C-c 2>/dev/null && echo 'sent Ctrl-C to {session}'"
+        f" || echo 'no session {session}'"
     )
 
 
@@ -210,7 +225,8 @@ def start(run: str, arguments: Sequence[str], log: str) -> None:
 
 def train_arguments(args: argparse.Namespace) -> list[str]:
     arguments = ["train", "--run", args.run]
-    for flag, value in (("--model", args.model), ("--total-steps", args.steps)):
+    options = (("--model", args.model), ("--total-steps", args.steps), ("--stop-after", args.stop))
+    for flag, value in options:
         if value is not None:
             arguments += [flag, str(value)]
     return arguments
@@ -220,7 +236,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="launch", description=__doc__)
     parser.add_argument(
         "action",
-        choices=("setup", "sync", "status", "logs", "pull", "train", "smoke", "data", "evaluate"),
+        choices=(
+            "setup",
+            "sync",
+            "status",
+            "logs",
+            "pull",
+            "stop",
+            "train",
+            "smoke",
+            "data",
+            "evaluate",
+        ),
     )
     parser.add_argument("--target", choices=("hpc",), default="hpc")
     parser.add_argument("--run")
@@ -228,6 +255,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--task", choices=DATA_TASKS)
     parser.add_argument("--model")
     parser.add_argument("--steps", type=int)
+    parser.add_argument("--stop", type=int, help="end the train invocation at this step")
     parser.add_argument("--weights", action="store_true")
     return parser
 
@@ -247,6 +275,8 @@ def main(argv: list[str] | None = None) -> int:
                 execute(remote(f"mkdir -p {REMOTE_ROOT}"))
                 sync()
                 execute(remote(setup_script()))
+            case "stop":
+                execute(remote(stop_script(require(args.run, "--run", "stop"))))
             case "sync":
                 sync()
             case "status":

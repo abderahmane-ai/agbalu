@@ -183,8 +183,18 @@ class EventLog:
         sys.stdout.flush()
 
 
+BOOT_ID: Final = Path("/proc/sys/kernel/random/boot_id")
+
+
+def boot_id() -> str:
+    """This boot's id on Linux, empty elsewhere. A pod restart reuses process ids, so a lock
+    is matched on the boot as well as the pid."""
+    return BOOT_ID.read_text(encoding="utf-8").strip() if BOOT_ID.is_file() else ""
+
+
 class RunLock:
-    """One process per run directory. A lock left by a dead process on this host is taken."""
+    """One process per run directory. A lock left by a dead process, or written before the
+    pod last restarted, is taken."""
 
     def __init__(self, path: Path, log: EventLog) -> None:
         self.path = path
@@ -192,7 +202,7 @@ class RunLock:
 
     def __enter__(self) -> Self:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        payload = json.dumps({"pid": os.getpid(), "host": socket.gethostname()})
+        payload = json.dumps({"pid": os.getpid(), "host": socket.gethostname(), "boot": boot_id()})
         for _ in range(2):
             try:
                 descriptor = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
@@ -211,6 +221,10 @@ class RunLock:
         if host != socket.gethostname():
             message = f"{self.path} is held by pid {pid} on {host}"
             raise TrainError(message)
+        if holder.get("boot") != boot_id():
+            self.log.write("stale_lock", pid=pid, reason="written before a restart")
+            self.path.unlink()
+            return
         try:
             os.kill(pid, 0)
         except ProcessLookupError:

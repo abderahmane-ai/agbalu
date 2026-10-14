@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import json
 import math
+import sys
+import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -66,7 +68,10 @@ SAMPLES: Final = 5
 """Translations recorded verbatim per direction, because a score does not show the Kabyle."""
 
 RETENTION_SEED: Final = 20261014
-RETENTION_BATCH: Final = 8
+RETENTION_BATCH: Final = 4
+"""lm-eval holds the full-vocabulary logits of a batch twice: 5-shot MMLU reaches about 3,000
+tokens, so batch 8 needs about 24 GB on a 47 GB slice. A fixed size, never "auto": on the MIG
+slice an out-of-memory error surfaces as an NVML assert that lm-eval's search cannot catch."""
 
 
 class EvaluationError(Exception):
@@ -493,6 +498,7 @@ def retention(
     harness = HFLM(pretrained=model, tokenizer=tokenizer.backend, batch_size=batch_size)
     rows: dict[str, dict[str, object]] = {}
     for task in tasks:
+        progress("retention_task", task=task.name, shots=task.shots)
         output = simple_evaluate(
             model=harness,
             tasks=[task.name],
@@ -536,12 +542,37 @@ def run(
     device: torch.device,
     limit: int | None = None,
 ) -> dict[str, object]:
-    """Every requested part on one loaded model."""
+    """Every requested part on one loaded model, a progress line before and after each."""
     model.eval()
     scorer = Scorer.of(model, tokenizer.eos, device)
     report: dict[str, object] = {"parts": list(parts), "limit": limit}
-    if "heldout" in parts:
-        report["heldout"] = {
+    for part in PARTS:
+        if part not in parts:
+            continue
+        progress("part_start", part=part)
+        started = time.perf_counter()
+        report[part] = run_part(part, model, scorer, tokenizer, device=device, limit=limit)
+        progress("part_end", part=part, seconds=round(time.perf_counter() - started, 1))
+    return report
+
+
+def progress(event: str, **values: object) -> None:
+    """One JSON line on stderr, which the launcher's log captures as the job runs."""
+    sys.stderr.write(json.dumps({"event": event, "time": round(time.time(), 1), **values}) + "\n")
+    sys.stderr.flush()
+
+
+def run_part(
+    part: Part,
+    model: LanguageModel,
+    scorer: Scorer,
+    tokenizer: Tokenizer,
+    *,
+    device: torch.device,
+    limit: int | None,
+) -> object:
+    if part == "heldout":
+        return {
             language: held_out(
                 scorer,
                 tokenizer,
@@ -550,16 +581,14 @@ def run(
             ).as_dict()
             for language in HELDOUT_LANGUAGES
         }
-    if "mt" in parts:
-        report["mt"] = {
+    if part == "mt":
+        return {
             direction: translate(model, tokenizer, direction, device=device, limit=limit)
             for direction in MT_DIRECTIONS
         }
-    if "sib" in parts:
-        report["sib"] = topic_accuracy(scorer, tokenizer, limit=limit)
-    if "retention" in parts:
-        report["retention"] = retention(model, tokenizer, limit=limit)
-    return report
+    if part == "sib":
+        return topic_accuracy(scorer, tokenizer, limit=limit)
+    return retention(model, tokenizer, limit=limit)
 
 
 def number(report: Mapping[str, object], *path: str) -> float:

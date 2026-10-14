@@ -162,7 +162,7 @@ class TestPieces:
     def test_a_live_lock_is_refused_and_a_dead_one_taken(self, tmp_path: Path) -> None:
         log = train.EventLog(tmp_path / "log.jsonl")
         path = tmp_path / "lock"
-        holder = {"pid": os.getpid(), "host": socket.gethostname()}
+        holder = {"pid": os.getpid(), "host": socket.gethostname(), "boot": train.boot_id()}
         path.write_text(json.dumps(holder))
         with pytest.raises(train.TrainError, match="running pid"), train.RunLock(path, log):
             pass
@@ -170,6 +170,16 @@ class TestPieces:
         with train.RunLock(path, log):
             assert json.loads(path.read_text())["pid"] == os.getpid()
         assert not path.exists()
+
+    def test_a_lock_from_before_a_restart_is_taken_even_if_its_pid_is_alive(
+        self, tmp_path: Path
+    ) -> None:
+        log = train.EventLog(tmp_path / "log.jsonl")
+        path = tmp_path / "lock"
+        holder = {"pid": os.getpid(), "host": socket.gethostname(), "boot": "an earlier boot"}
+        path.write_text(json.dumps(holder))
+        with train.RunLock(path, log):
+            assert json.loads(path.read_text())["boot"] == train.boot_id()
 
     def test_a_bad_config_is_refused(self, tmp_path: Path) -> None:
         with pytest.raises(train.TrainError):
