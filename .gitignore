@@ -6,6 +6,7 @@ docs/**
 !docs/cards/
 !docs/cards/*.md
 CLAUDE.md
+AGENTS.md
 
 # Data — never committed. Provenance lives in resources/corpus_registry.yaml,
 # reproduction lives in the pipeline. Bytes stay out of git.
