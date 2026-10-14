@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
-from typing import Final
+from typing import Final, NotRequired, TypedDict
 
 from agbalu.normalise.rules import ALPHABET, HYPHEN, load_rules
 
@@ -81,7 +81,32 @@ def required_chars() -> str:
     return "".join(sorted(letters | {HYPHEN, APOSTROPHE}))
 
 
-TrainerArg = str | int | float | bool
+class TrainerKwargs(TypedDict):
+    """The `SentencePieceTrainer.train` options this project sets, one field per flag."""
+
+    input: str
+    model_prefix: str
+    vocab_size: int
+    model_type: str
+    character_coverage: float
+    required_chars: str
+    max_sentencepiece_length: int
+    byte_fallback: bool
+    split_digits: bool
+    normalization_rule_name: str
+    input_sentence_size: int
+    shuffle_input_sentence: bool
+    num_threads: int
+    pad_id: int
+    unk_id: int
+    bos_id: int
+    eos_id: int
+    pad_piece: str
+    unk_piece: str
+    bos_piece: str
+    eos_piece: str
+    user_defined_symbols: list[str]
+    seed_sentencepieces_file: NotRequired[str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,8 +147,8 @@ class TokenizerSpec:
         size = f"{thousands:g}k"
         return f"agbalu-tok-{'seeded' if self.seeded else 'base'}-{size}"
 
-    def trainer_kwargs(self, corpus: Path, prefix: Path) -> dict[str, TrainerArg | list[str]]:
-        kwargs: dict[str, TrainerArg | list[str]] = {
+    def trainer_kwargs(self, corpus: Path, prefix: Path) -> TrainerKwargs:
+        kwargs: TrainerKwargs = {
             "input": str(corpus),
             "model_prefix": str(prefix),
             "vocab_size": self.vocab_size,

@@ -155,8 +155,8 @@ class TestManifestRevision:
 class TestNeuralTagger:
     @pytest.fixture(scope="class")
     def tagger(self) -> NeuralTagger:
-        if not MODEL.is_dir():
-            pytest.skip(f"model not present under {MODEL}")
+        if not (MODEL / "model.safetensors").is_file():
+            pytest.skip(f"model weights not present under {MODEL}")
         return NeuralTagger.load(MODEL)
 
     def test_it_returns_one_label_per_input_word(self, tagger: NeuralTagger) -> None:

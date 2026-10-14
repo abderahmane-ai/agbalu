@@ -26,10 +26,10 @@ dependencies = [
     # 2.x is the floor: 1.x has no scoring signature, and a metric without its
     # signature is not comparable, which is the whole disease Phase 7 treats.
     "sacrebleu>=2.4",
-    # 0.2 is the floor: `seed_sentencepieces_file` is what makes the §11.5 seeded
-    # initialization expressible at all. Core rather than an extra — AƔBALU-Tok is a
-    # deliverable, and the wheel is a small C++ extension, not a training stack.
-    "sentencepiece>=0.2",
+    # 0.2 adds `seed_sentencepieces_file`, which the §11.5 seeded initialization needs;
+    # 0.2.2 is the first release with inline types, which the protocols here are checked
+    # against. Core rather than an extra: AƔBALU-Tok is a deliverable.
+    "sentencepiece>=0.2.2",
 ]
 
 [project.optional-dependencies]
@@ -472,17 +472,6 @@ ignore_missing_imports = true
 module = ["tools.benchmark_tokenizers", "benchmark_tokenizers"]
 disallow_any_unimported = false
 
-# `sentencepiece` ships no py.typed marker and no stubs on PyPI, so every processor and
-# trainer call is untyped at the boundary. Confined to the two modules that own it.
-[[tool.mypy.overrides]]
-module = ["sentencepiece.*"]
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-module = ["agbalu.tokenizer.train", "agbalu.tokenizer.evaluate", "tools.vocabulary_evidence"]
-disallow_untyped_calls = false
-disallow_any_unimported = false
-
 # `cut-cross-entropy` ships no py.typed marker and no stubs on PyPI, and it only installs
 # where Triton does — so it is absent on the laptop the gate runs on. Confined to the one
 # module that imports it; `loss.require_tensor` states what is expected back.
@@ -565,11 +554,9 @@ disallow_untyped_calls = false
 # an untyped call in a typed context. Confined to the modules that touch parquet directly;
 # what comes back is narrowed in the code, not silenced.
 [[tool.mypy.overrides]]
-    "tools.build_kabliterary",
 module = [
     "agbalu.extract.readers",
     "agbalu.lexicon.readers",
-    "tests.unit.test_build_kabliterary",
     "agbalu.bench.lid_sources",
     "agbalu.bench.tifinagh",
     "agbalu.bench.inflect",
@@ -578,9 +565,11 @@ module = [
     "modal_app.boulifa",
     "tools.build_kabinflect",
     "tools.build_kabtifinagh",
+    "tools.build_kabliterary",
     "tools.export_datasets",
     "tests.unit.test_lexicon_readers",
     "tests.unit.test_lid_sources",
+    "tests.unit.test_build_kabliterary",
 ]
 disallow_untyped_calls = false
 disallow_any_unimported = false
@@ -699,6 +688,11 @@ filterwarnings = [
     # harness first appeared to be broken. Third-party and unfixable from here.
     "ignore:builtin type SwigPy.* has no __module__ attribute:DeprecationWarning",
     "ignore:builtin type swigvarlink has no __module__ attribute:DeprecationWarning",
+    # modal 1.5 deprecates `App.registered_*` and `Function.get_raw_f`, the only accessors
+    # for an app's function table and a function's Python body, with no public replacement,
+    # and removes them in 1.6. `test_modal_image.py` and `test_modal_launch.py` read the
+    # wiring through them.
+    "ignore:.*`(App\\.registered_\\w+|Function\\.get_raw_f)` is deprecated:modal.exception.DeprecationError",
 ]
 
 [tool.coverage.run]

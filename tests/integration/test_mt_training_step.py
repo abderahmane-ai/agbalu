@@ -130,14 +130,11 @@ def test_the_collator_carries_a_step_that_the_base_one_cannot(tmp_path: Path) ->
 
 
 def test_the_reported_loss_does_not_scale_with_accumulation(tmp_path: Path) -> None:
-    """It scaled exactly 4x at four accumulation steps, and so did the gradient, which
-    `max_grad_norm=1.0` then clipped into normalised gradient descent."""
+    """It scaled exactly 4x at four accumulation steps before transformers 5.17, and so did
+    the gradient, which `max_grad_norm=1.0` then clipped into normalised gradient descent."""
     _, ours = _collators(AutoTokenizer.from_pretrained(SMALL_MODEL))
 
     single = _reported_loss(_build(tmp_path / "single", ours, accumulation=1))
-
-    unfixed = _build(tmp_path / "unfixed", ours, accumulation=4)
-    assert _reported_loss(unfixed) == pytest.approx(4 * single, rel=0.05)
 
     fixed = _build(tmp_path / "fixed", ours, accumulation=4)
     normalise_accumulated_loss(fixed)

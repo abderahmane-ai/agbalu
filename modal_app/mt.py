@@ -273,7 +273,7 @@ def finetune(
         per_device_eval_batch_size=config.batch_size,
         gradient_accumulation_steps=config.gradient_accumulation,
         learning_rate=config.learning_rate,
-        warmup_ratio=config.warmup_ratio,
+        warmup_steps=config.warmup_ratio,
         weight_decay=config.weight_decay,
         max_grad_norm=config.max_grad_norm,
         label_smoothing_factor=config.label_smoothing_factor,

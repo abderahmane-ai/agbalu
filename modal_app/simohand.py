@@ -256,7 +256,7 @@ def simohand_train(
         gradient_checkpointing=False,
         per_device_eval_batch_size=batch_size,
         learning_rate=learning_rate,
-        warmup_ratio=warmup_ratio if max_steps <= 0 else 0.0,
+        warmup_steps=warmup_ratio if max_steps <= 0 else 0.0,
         weight_decay=0.01,
         bf16=use_bf16,
         fp16=use_fp16,

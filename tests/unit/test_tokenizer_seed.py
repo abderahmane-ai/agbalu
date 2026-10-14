@@ -144,14 +144,14 @@ class TestBuildPool:
     def test_a_piece_the_corpus_never_shows_still_enters(self, tmp_path: Path) -> None:
         lexicon = write_lexicon(tmp_path / "l.jsonl", ["tafelwit"])
         pool = build_pool(Counter({"azul": 5}), lexicon)
-        scores = dict(pool.pieces)
-        assert scores["▁tafelwit"] == float(LEXICON_FLOOR * len("▁tafelwit"))
+        counts = dict(pool.pieces)
+        assert counts["▁tafelwit"] == LEXICON_FLOOR
 
     def test_a_lexical_piece_the_corpus_shows_keeps_its_real_count(self, tmp_path: Path) -> None:
         lexicon = write_lexicon(tmp_path / "l.jsonl", ["axxam"])
         pool = build_pool(Counter({"axxam": 9}), lexicon)
-        scores = dict(pool.pieces)
-        assert scores["xxam"] == float(9 * len("xxam"))
+        counts = dict(pool.pieces)
+        assert counts["xxam"] == 9
 
     def test_every_required_character_is_a_candidate(self, tmp_path: Path) -> None:
         lexicon = write_lexicon(tmp_path / "l.jsonl", ["azul"])
@@ -168,7 +168,7 @@ class TestBuildPool:
     def test_is_ordered_by_descending_gain(self, tmp_path: Path) -> None:
         lexicon = write_lexicon(tmp_path / "l.jsonl", ["azul"])
         pool = build_pool(Counter({"azul": 50, "aqbayli": 3}), lexicon)
-        gains = [score for _, score in pool.pieces]
+        gains = [count * len(piece) for piece, count in pool.pieces]
         assert gains == sorted(gains, reverse=True)
 
     def test_holds_no_duplicate_pieces(self, tmp_path: Path) -> None:
@@ -183,13 +183,13 @@ class TestWriteSeedFile:
         with pytest.raises(TokenizerError, match="empty seed pool"):
             write_seed_file(SeedPool((), 0, 0, 0), tmp_path / "seed.tsv")
 
-    def test_writes_piece_tab_score(self, tmp_path: Path) -> None:
+    def test_writes_piece_tab_integer_count(self, tmp_path: Path) -> None:
         dest = tmp_path / "nested" / "seed.tsv"
-        write_seed_file(SeedPool((("▁azul", 12.0), ("zul", 3.5)), 2, 0, 0), dest)
+        write_seed_file(SeedPool((("▁azul", 12), ("zul", 3)), 2, 0, 0), dest)
         rows = [line.split("\t") for line in dest.read_text(encoding="utf-8").splitlines()]
-        assert rows == [["▁azul", "12.000000"], ["zul", "3.500000"]]
+        assert rows == [["▁azul", "12"], ["zul", "3"]]
 
     def test_leaves_no_staging_file_behind(self, tmp_path: Path) -> None:
         dest = tmp_path / "seed.tsv"
-        write_seed_file(SeedPool((("▁azul", 1.0),), 1, 0, 0), dest)
+        write_seed_file(SeedPool((("▁azul", 1),), 1, 0, 0), dest)
         assert list(tmp_path.glob("*.partial")) == []

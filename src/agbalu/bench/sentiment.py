@@ -53,7 +53,7 @@ class SentimentError(Exception):
 class Tokenizer(Protocol):
     """The slice of the SentencePiece API this module drives, as in `bench.probe`."""
 
-    def encode(self, text: str, out_type: type[int]) -> list[int]: ...
+    def encode(self, text: str, /, *, out_type: type[int]) -> list[int]: ...
 
 
 class Encoder(Protocol):

@@ -15,7 +15,7 @@ from pathlib import Path
 
 import modal
 import pytest
-from modal.call_graph import InputInfo, InputStatus
+from modal.types import InputInfo, InputStatus
 from modal_app.asr import DEFAULT_RUN as ASR_RUN_NAME
 from modal_app.asr import asr_finetune, asr_pipeline
 from modal_app.common import APP_NAME

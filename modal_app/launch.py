@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Final
 
 import modal
-from modal.call_graph import InputStatus
+from modal.types import InputStatus
 
 from agbalu.model.config import DEFAULT_RUN_NAME
 from agbalu.mt.finetune import DEFAULT_RUN_NAME as MT_RUN_NAME

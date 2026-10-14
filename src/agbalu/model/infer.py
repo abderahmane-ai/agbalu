@@ -23,17 +23,13 @@ TOP_K: Final = 5
 
 
 class Tokenizer(Protocol):
-    """The slice of the SentencePiece API this module drives.
-
-    Structural rather than `spm.SentencePieceProcessor`: the package ships no stubs, so
-    naming the concrete type puts `Any` in every signature here.
-    """
+    """The slice of the SentencePiece API this module drives."""
 
     def piece_to_id(self, piece: str) -> int: ...
 
     def unk_id(self) -> int: ...
 
-    def encode(self, text: str, out_type: type[int]) -> list[int]: ...
+    def encode(self, text: str, /, *, out_type: type[int]) -> list[int]: ...
 
     def id_to_piece(self, token_id: int) -> str: ...
 

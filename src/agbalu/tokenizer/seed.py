@@ -52,7 +52,8 @@ FREE_PREFIXES: Final[tuple[str, ...]] = ("ta", "ti", "a", "i", "u")
 
 @dataclass(frozen=True, slots=True)
 class SeedPool:
-    pieces: tuple[tuple[str, float], ...]
+    pieces: tuple[tuple[str, int], ...]
+    """`(piece, corpus count)`, in descending order of gain, count times length."""
     from_corpus: int
     from_lexicon: int
     lexicon_only: int
@@ -167,7 +168,7 @@ def build_pool(
         lexicon_only += 1
 
     pieces = tuple(
-        (piece, float(count * len(piece)))
+        (piece, count)
         for piece, count in sorted(
             kept.items(), key=lambda item: (-item[1] * len(item[0]), item[0])
         )
@@ -181,10 +182,11 @@ def build_pool(
 
 
 def write_seed_file(pool: SeedPool, dest: Path) -> None:
-    """`piece<TAB>score`, the format `seed_sentencepieces_file` reads.
+    """`piece<TAB>count`, the format `seed_sentencepieces_file` reads.
 
-    Scores are SentencePiece's own seeding gain, frequency times length, so a seeded run
-    and a default run start on the same scale and only the membership differs.
+    SentencePiece 0.2.2 parses the second field as an integer frequency and multiplies it
+    by the piece's length, its own seeding gain, so a seeded run and a default run start
+    on the same scale. A non-integer field empties the whole pool.
     """
     if not pool.pieces:
         msg = "refusing to write an empty seed pool"
@@ -192,6 +194,6 @@ def write_seed_file(pool: SeedPool, dest: Path) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     staging = dest.with_suffix(dest.suffix + ".partial")
     with staging.open("w", encoding="utf-8") as out:
-        for piece, score in pool.pieces:
-            out.write(f"{piece}\t{score:.6f}\n")
+        for piece, count in pool.pieces:
+            out.write(f"{piece}\t{count}\n")
     staging.replace(dest)

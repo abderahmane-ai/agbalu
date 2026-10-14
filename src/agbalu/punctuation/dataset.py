@@ -27,7 +27,7 @@ MAX_LENGTH: Final = 128
 
 
 class Tokenizer(Protocol):
-    def encode(self, text: str, out_type: type[int]) -> list[int]: ...
+    def encode(self, text: str, /, *, out_type: type[int]) -> list[int]: ...
 
 
 @dataclass(frozen=True, slots=True)
