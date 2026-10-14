@@ -35,7 +35,6 @@ from agbalu.tts.corpus import VOICE_NAMES
 from agbalu.tts.training import DEFAULT_RUN_NAME as MATOUB_RUN_NAME
 from modal_app.asr import DEFAULT_RUN as ASR_RUN_NAME
 from modal_app.common import APP_NAME, MATOUB_BATCH
-from modal_app.jugurtha import DEFAULT_RUN as JUGURTHA_RUN_NAME
 from modal_app.matoub_pro import APP_NAME as MATOUB_PRO_APP_NAME
 from modal_app.matoub_pro import POOL_HOURS as MATOUB_PRO_POOL_HOURS
 from modal_app.matoub_pro import VOICE as MATOUB_PRO_VOICE
@@ -60,7 +59,6 @@ FUNCTIONS: Final = (
     "matoub_train",
     "matoub_pro_corpus",
     "matoub_pro_train",
-    "jugurtha_train",
     "simohand_prepare",
     "simohand_train",
     "simohand_eval",
@@ -431,15 +429,6 @@ def _synthesise_kwargs(args: argparse.Namespace) -> dict[str, object]:
     }
 
 
-def _jugurtha_kwargs(args: argparse.Namespace) -> dict[str, object]:
-    return {
-        "epochs": args.epochs or 1,
-        "steps": args.steps or 0,
-        "run": JUGURTHA_RUN_NAME if args.run_name == DEFAULT_RUN_NAME else args.run_name,
-        "force": args.force,
-    }
-
-
 def _pretrain_kwargs(args: argparse.Namespace) -> dict[str, object]:
     return {
         "preset": args.preset,
@@ -603,7 +592,6 @@ KWARGS: Final[dict[str, Callable[[argparse.Namespace], dict[str, object]]]] = {
     "punctuation_evaluate": _punctuation_kwargs,
     "synthesise": _synthesise_kwargs,
     "pretrain": _pretrain_kwargs,
-    "jugurtha_train": _jugurtha_kwargs,
     "tts_corpus": _tts_kwargs,
     "matoub_train": _matoub_kwargs,
     "matoub_pro_corpus": _matoub_pro_corpus_kwargs,

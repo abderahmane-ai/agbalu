@@ -1,8 +1,4 @@
-"""The base is one definition, and every consumer reads it (task 11.3).
-
-The corpus is counted in one tokenizer and scored on another model's held-out sets. If those
-two names drift apart the token budget stops describing the run it sizes.
-"""
+"""The checkpoints Jugurtha starts from, defined once and imported by every consumer."""
 
 from __future__ import annotations
 
@@ -10,35 +6,37 @@ from pathlib import Path
 
 import pytest
 
-from agbalu.llm.bases import BASE, TEXT_TOWER_PARAMETERS
-from agbalu.llm.cli import BASE_MODEL
+from agbalu.llm.bases import BASE, INSTRUCT, PILOT, TEXT_TOWER_PARAMETERS
 
-CONSUMERS = (Path("modal_app/llm.py"), Path("src/agbalu/llm/cli.py"))
+CONSUMERS = (
+    Path("src/agbalu/llm/cli.py"),
+    Path("src/agbalu/llm/smoke.py"),
+    Path("src/agbalu/llm/train.py"),
+)
 
 
-class TestBase:
-    def test_is_the_model_the_corpus_is_counted_in(self) -> None:
-        assert BASE_MODEL == BASE
+class TestNames:
+    def test_the_base_is_the_4b_base_checkpoint(self) -> None:
+        assert BASE == "Qwen/Qwen3.5-4B-Base"
 
-    def test_names_an_owner_and_a_repo(self) -> None:
-        owner, _, name = BASE.partition("/")
-        assert owner
-        assert name
-        assert BASE.strip() == BASE
+    def test_the_merge_target_is_the_base_without_its_suffix(self) -> None:
+        assert BASE.removesuffix("-Base") == INSTRUCT
 
-    def test_is_a_qwen3_5_checkpoint(self) -> None:
-        assert BASE.startswith("Qwen/Qwen3.5-")
+    def test_the_pilot_is_a_base_checkpoint_of_the_same_family(self) -> None:
+        assert PILOT.startswith("Qwen/Qwen3.5-")
+        assert PILOT.endswith("-Base")
 
 
 class TestTextTower:
-    def test_excludes_the_vision_tower_and_the_mtp_head(self) -> None:
-        # 2,274,069,824 total, of which 331,416,576 vision and 60,828,160 MTP.
-        assert TEXT_TOWER_PARAMETERS == 2_274_069_824 - 331_416_576 - 60_828_160
+    def test_every_checkpoint_has_a_count(self) -> None:
+        assert set(TEXT_TOWER_PARAMETERS) == {BASE, INSTRUCT, PILOT}
 
-    def test_sizes_one_epoch_of_full_continued_pretraining(self) -> None:
-        """`6 * N * D` over 230,407,971 tokens is 2.60 EFLOP, which is the run's cost."""
-        eflop = 6 * TEXT_TOWER_PARAMETERS * 230_407_971 / 1e18
-        assert eflop == pytest.approx(2.60, abs=0.01)
+    def test_the_twin_shares_the_base_count_tensor_for_tensor(self) -> None:
+        assert TEXT_TOWER_PARAMETERS[BASE] == TEXT_TOWER_PARAMETERS[INSTRUCT]
+
+    def test_the_pilot_is_about_a_fifth_of_the_base(self) -> None:
+        ratio = TEXT_TOWER_PARAMETERS[PILOT] / TEXT_TOWER_PARAMETERS[BASE]
+        assert 0.15 < ratio < 0.2
 
 
 @pytest.mark.parametrize("path", CONSUMERS)

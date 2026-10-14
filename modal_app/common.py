@@ -182,116 +182,6 @@ mt_image: Final = (
     .add_local_dir(RESOURCES, remote_path=f"/root/{RESOURCES}")
 )
 
-LLM_VOLUMES: Final[dict[str | PurePosixPath, modal.Volume | modal.CloudBucketMount]] = {
-    str(DATA_PATH): data_volume,
-    str(MODELS_PATH): models_volume,
-}
-"""The evaluation sets, FLORES+ and the results are on data; the 10.25 GB base checkpoint
-is cached on models. Nothing here writes a checkpoint, so that volume is not mounted."""
-
-LLM_PIP_PACKAGES: Final[tuple[str, ...]] = (
-    f"torch=={TORCH_VERSION}",
-    # 5.12 is the floor, not decoration: `transformers.models.qwen3_5` defines the base, and
-    # an older resolution installs a library that cannot load it. Its Gated DeltaNet fast path wants
-    # `flash-linear-attention` and `causal-conv1d`; scoring falls back to
-    # `torch_chunk_gated_delta_rule` with a warning, so they are a training-image decision —
-    # `causal-conv1d` ships an sdist only and compiles under nvcc.
-    "transformers>=5.12",
-    # Reached through `modal_app.bench`, which `modal_app.llm` imports for the results shape:
-    # `resolve_weights` there calls `snapshot_download`. Transitive through transformers
-    # anyway, named because the closure test is what makes that checkable.
-    "huggingface_hub>=0.30",
-    # `device_map` loads the 10.25 GB checkpoint straight onto the GPU, and it is
-    # `accelerate` that transformers dispatches to in order to do it.
-    "accelerate>=0.34",
-    "sacrebleu>=2.4",
-    "sentencepiece>=0.2",
-    "pyarrow>=17.0",
-    "pyyaml>=6.0",
-    "pydantic>=2.0",
-)
-"""`agbalu.bench.mt` scores the translation prompts, so the last four arrive the same way
-they do in the bench image — through `agbalu/bench/__init__.py` and the normaliser."""
-
-llm_image: Final = (
-    modal.Image.debian_slim(python_version=PYTHON_VERSION)
-    .pip_install(*LLM_PIP_PACKAGES)
-    .env(
-        {
-            "HF_HOME": str(MODELS_PATH),
-            "HF_XET_HIGH_PERFORMANCE": "1",
-            # Scoring alternates one wide logits allocation with narrow fp32 slices, which
-            # is the shape that fragments a caching allocator: the first OOM here failed
-            # with 2.45 GiB reserved but unallocated.
-            "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
-        }
-    )
-    .add_local_python_source("agbalu", "modal_app")
-    .add_local_dir(RESOURCES, remote_path=f"/root/{RESOURCES}")
-)
-"""Its own image rather than `bench_image`: the transformers floor above would invalidate
-the bench and synthesis images, which do not need it, for a rebuild neither asked for."""
-
-JUGURTHA_VOLUMES: Final[dict[str | PurePosixPath, modal.Volume | modal.CloudBucketMount]] = {
-    str(DATA_PATH): data_volume,
-    str(MODELS_PATH): models_volume,
-    str(CHECKPOINT_PATH): checkpoint_volume,
-}
-"""The corpus and the packed blocks are on data, the base is cached on models, the run
-writes to checkpoints."""
-
-JUGURTHA_PIP_PACKAGES: Final[tuple[str, ...]] = (
-    f"torch=={TORCH_VERSION}",
-    "transformers>=5.12",
-    "numpy>=2.0",
-    # `AutoTokenizer` resolves the base's tokenizer through it, and `from_pretrained`
-    # dispatches device placement through accelerate.
-    "sentencepiece>=0.2",
-    "accelerate>=0.34",
-    # 18 of the base's 24 layers are Gated DeltaNet. Without these two, transformers falls
-    # back to `torch_chunk_gated_delta_rule` and logs a warning rather than failing, so the
-    # cost of omitting them is a slow paid run and not an error.
-    "flash-linear-attention>=0.5",
-    "causal-conv1d>=1.6",
-    # The 248,320-token head makes the fp32 logit surface, not the weights, what caps the
-    # micro-batch. `agbalu.llm.loss` refuses to fall back to materialising it on CUDA.
-    "cut-cross-entropy>=25.1",
-)
-
-jugurtha_image: Final = (
-    modal.Image.from_registry("nvidia/cuda:13.0.3-devel-ubuntu24.04", add_python=PYTHON_VERSION)
-    .apt_install("git", "build-essential", "ninja-build")
-    .env(
-        {
-            "TORCH_CUDA_ARCH_LIST": "8.6",
-            "MAX_JOBS": "4",
-            "CUDA_HOME": "/usr/local/cuda",
-            "CC": "gcc",
-            "CXX": "g++",
-        }
-    )
-    .pip_install(f"torch=={TORCH_VERSION}", "wheel", "packaging", "setuptools", "ninja")
-    .pip_install(*JUGURTHA_PIP_PACKAGES, extra_options="--no-build-isolation")
-    .env(
-        {
-            "HF_HOME": str(MODELS_PATH),
-            "HF_XET_HIGH_PERFORMANCE": "1",
-            "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
-            # NCCL over PCIe between two A10s in one container. Peer-to-peer is not
-            # available on this pairing and probing for it stalls the first all-reduce.
-            "NCCL_P2P_DISABLE": "1",
-        }
-    )
-    .add_local_python_source("agbalu", "modal_app")
-    .add_local_dir(RESOURCES, remote_path=f"/root/{RESOURCES}")
-)
-"""NVIDIA CUDA 13.0 devel image provides nvcc 13.0 matching PyTorch 2.11's CUDA version.
-`torch` and build tools are installed first so `causal-conv1d` compiles with g++ against
-the active torch install with `--no-build-isolation`.
-
-8.6 is the A10's compute capability. Left unset, the extension builds for every architecture
-the toolkit knows, which is many minutes of nvcc for code no container here will run."""
-
 ASR_VOLUMES: Final[dict[str | PurePosixPath, modal.Volume | modal.CloudBucketMount]] = {
     str(DATA_PATH): data_volume,
     str(CHECKPOINT_PATH): checkpoint_volume,
@@ -504,19 +394,6 @@ TTS_DRIVER_CPU: Final = 1.0
 it asks for a core rather than Modal's default eighth of one — and no GPU, which is the
 point: waiting on `.map` from inside an A10 container bills the card to watch."""
 
-LLM_TIMEOUT: Final = 4 * 60 * 60
-"""Perplexity is minutes; the budget is the translation prompts, which decode one sentence
-at a time over up to seven directions."""
-
-JUGURTHA_TIMEOUT: Final = 23 * 60 * 60
-"""One epoch is 17.1 hours of arithmetic on two A10s at the measured rate, plus the load and
-the evaluations. Modal's ceiling is 24 hours, so an epoch is the largest unit that can be
-bought at once — which is why `epochs` defaults to 1 and the run resumes rather than
-restarting."""
-
-JUGURTHA_PACK_CPU: Final = 8.0
-"""Packing tokenises 5,254,022 documents. Modal's default request is an eighth of a core,
-and the tokenizer is the whole job."""
 
 ASR_FETCH_TIMEOUT: Final = 2 * 60 * 60
 """7.89 GiB of tar shards from the Hub, extracted on the volume."""

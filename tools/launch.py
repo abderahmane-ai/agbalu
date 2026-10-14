@@ -1,0 +1,287 @@
+"""The school HPC launcher (`~/.claude/standards/hpc.md` §6).
+
+Every remote action goes through the `hpc` SSH alias. Long work runs in a detached tmux
+session on the pod and this returns at once with the run id; `status`, `logs` and `pull`
+read it back later. Nothing here waits on a job.
+
+    python3 -m tools.launch setup|sync|status|logs|pull|train|smoke|data|evaluate [--target hpc]
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import shlex
+import subprocess
+import sys
+import tempfile
+import time
+from collections.abc import Sequence
+from pathlib import Path
+from typing import Final
+
+from agbalu.llm.provenance import STAMP_FILE, git_stamp
+from agbalu.llm.smoke import SMOKE_PARTS
+
+HOST: Final = "hpc"
+PROJECT: Final = "agbalu"
+REMOTE_ROOT: Final = f"/home/jovyan/{PROJECT}"
+ENVIRONMENT: Final = f"/home/jovyan/envs/{PROJECT}"
+PYTHON: Final = f"{ENVIRONMENT}/bin/python"
+LOCK: Final = Path("requirements/hpc.lock")
+RUNS: Final = Path("artifacts/runs")
+
+COMPILER: Final = f"{ENVIRONMENT}/bin/x86_64-conda-linux-gnu"
+PREAMBLE: Final = (
+    ". ~/hpc-env.sh"
+    f" && export CC={COMPILER}-gcc CXX={COMPILER}-g++"
+    f" HF_HOME={REMOTE_ROOT}/artifacts/hf PYTHONPATH=src"
+    f" && cd {REMOTE_ROOT}"
+)
+"""`hpc-env.sh` puts the tools on `PATH`; `CC`/`CXX` then point at the project environment's
+gcc 13, which TileLang's nvcc JIT needs, rather than the tools environment's."""
+
+EXCLUDES: Final = (
+    ".git",
+    "artifacts",
+    "data",
+    ".venv",
+    "__pycache__",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".pytest_cache",
+    ".hypothesis",
+    "*.egg-info",
+    "graphify-out",
+)
+
+DATA_FILES: Final = (
+    "data/processed/llm/heldout-kab.jsonl",
+    "data/processed/llm/heldout-eng.jsonl",
+    "data/processed/llm/heldout-fra.jsonl",
+    "data/processed/llm/kab-docs.jsonl",
+    "data/processed/llm/kab-docs.stats.json",
+    "data/processed/llm/aligned.jsonl",
+    "data/processed/llm/aligned.stats.json",
+    "data/processed/bench/flores-plus-kab_Latn-corrected.jsonl",
+    "data/raw/hf.flores-plus-kab/dev/kab_Latn.jsonl",
+    "data/raw/hf.flores-plus-kab/dev/eng_Latn.jsonl",
+    "data/raw/hf.flores-plus-kab/dev/fra_Latn.jsonl",
+    "data/raw/hf.flores-plus-kab/devtest/kab_Latn.jsonl",
+    "data/raw/hf.flores-plus-kab/devtest/eng_Latn.jsonl",
+    "data/raw/hf.flores-plus-kab/devtest/fra_Latn.jsonl",
+    "data/raw/hf.sib200-kab/kab_Latn/train-00000-of-00001.parquet",
+    "data/raw/hf.sib200-kab/kab_Latn/validation-00000-of-00001.parquet",
+    "data/raw/hf.sib200-kab/kab_Latn/test-00000-of-00001.parquet",
+    "data/processed/text/agbalu-text-v1.jsonl",
+    "data/processed/mt/train.jsonl",
+    "data/raw/hf.hplt2-cleaned-kab",
+    "data/raw/hf.fineweb2-kab",
+    "data/raw/hf.finetranslations-kab",
+    "data/raw/hf.glotcc-v1-kab",
+    "data/raw/hf.finepdfs-kab",
+    "data/raw/hf.dcad2000-kab",
+    "data/raw/hf.imsidag.kabyle-datasets-mono",
+    "data/raw/wikimedia.kabwiki",
+    "artifacts/runs/dihya",
+)
+"""What the pod reads that the code sync excludes: every evaluation set, the inputs of the
+document and aligned builds, and Dihya. The decontaminator refuses to run unless every
+evaluation set is present."""
+
+DATA_TASKS: Final = ("documents", "aligned", "replay", "pack")
+LOG_LINES: Final = 20
+
+
+class LaunchError(Exception):
+    """A remote action failed or was asked for something it cannot do."""
+
+
+def remote(command: str) -> list[str]:
+    """`ssh hpc` running `command` after the environment preamble."""
+    return ["ssh", "-o", "ConnectTimeout=15", HOST, f"{PREAMBLE} && {command}"]
+
+
+def code_sync() -> list[str]:
+    excludes = [argument for pattern in EXCLUDES for argument in ("--exclude", pattern)]
+    return ["rsync", "-az", "--delete", *excludes, "./", f"{HOST}:{REMOTE_ROOT}/"]
+
+
+def data_sync(files: Sequence[str]) -> list[str]:
+    """Paths kept relative, so each lands at the same place under the remote root."""
+    return ["rsync", "-azR", *files, f"{HOST}:{REMOTE_ROOT}/"]
+
+
+def session_name(run: str) -> str:
+    return f"{PROJECT}-{run}".replace("/", "-").replace(".", "-")
+
+
+def module(arguments: Sequence[str]) -> str:
+    return " ".join([PYTHON, "-m", "agbalu.llm.cli", *(shlex.quote(a) for a in arguments)])
+
+
+def detached(run: str, arguments: Sequence[str], log: str) -> list[str]:
+    """A tmux session running the CLI with its output in the run's log file."""
+    log_path = f"{REMOTE_ROOT}/{RUNS}/{log}"
+    job = f"{PREAMBLE} && {module(arguments)} >> {shlex.quote(log_path)} 2>&1"
+    command = (
+        f"mkdir -p {shlex.quote(str(Path(log_path).parent))}"
+        f" && tmux new-session -d -s {session_name(run)} {shlex.quote(job)}"
+    )
+    return remote(command)
+
+
+def setup_script() -> str:
+    """Build the environment from the lock if it is missing, then report what is there."""
+    probe = (
+        "import torch, transformers, shutil;"
+        "free, total = torch.cuda.mem_get_info();"
+        "print('gpu', torch.cuda.get_device_name(0), round(free / 2**30, 1), 'GiB free');"
+        "print('torch', torch.__version__, 'transformers', transformers.__version__);"
+        f"print('disk', round(shutil.disk_usage('{REMOTE_ROOT}').free / 2**30), 'GiB free')"
+    )
+    build = (
+        f"test -x {PYTHON} || (mamba create -y -p {ENVIRONMENT} -c conda-forge "
+        "python=3.12 gcc_linux-64=13 gxx_linux-64=13"
+        f" && {PYTHON} -m pip install -r {LOCK})"
+    )
+    return f"{build} && {PYTHON} -c {shlex.quote(probe)}"
+
+
+def status_script(run: str) -> str:
+    runs = f"{REMOTE_ROOT}/{RUNS}/{run}"
+    return (
+        f"(tmux has-session -t {session_name(run)} 2>/dev/null && echo 'session: running'"
+        " || echo 'session: not running');"
+        f" tail -n {LOG_LINES} {runs}/log.txt 2>/dev/null;"
+        f" ls -d {runs}/step-* {runs}/*/step-* 2>/dev/null | tail -n 3"
+    )
+
+
+def execute(command: Sequence[str]) -> None:
+    result = subprocess.run(list(command), check=False)
+    if result.returncode != 0:
+        message = f"exit {result.returncode}: {shlex.join(command)[:300]}"
+        raise LaunchError(message)
+
+
+def stamp(root: Path = Path()) -> Path:
+    """The laptop checkout's revision, for a tree synced without `.git`."""
+    payload = {**git_stamp(root), "synced": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as handle:
+        json.dump(payload, handle)
+    return Path(handle.name)
+
+
+def sync() -> None:
+    execute(code_sync())
+    present = [path for path in DATA_FILES if Path(path).exists()]
+    absent = sorted(set(DATA_FILES) - set(present))
+    if present:
+        execute(data_sync(present))
+    stamp_file = stamp()
+    try:
+        execute(["rsync", "-az", str(stamp_file), f"{HOST}:{REMOTE_ROOT}/{STAMP_FILE}"])
+    finally:
+        stamp_file.unlink()
+    print(f"synced code and {len(present)} data files; absent here: {absent or 'none'}")
+
+
+def record(run: str, arguments: Sequence[str], log: str) -> None:
+    """`artifacts/runs/<run>/hpc.session` on the laptop: what was started and where it logs."""
+    path = RUNS / run / "hpc.session"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "run": run,
+        "session": session_name(run),
+        "command": module(arguments),
+        "log": f"{REMOTE_ROOT}/{RUNS}/{log}",
+        "started": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+    }
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def start(run: str, arguments: Sequence[str], log: str) -> None:
+    sync()
+    execute(detached(run, arguments, log))
+    record(run, arguments, log)
+    print(f"started {session_name(run)}; run id {run}; log {REMOTE_ROOT}/{RUNS}/{log}")
+
+
+def train_arguments(args: argparse.Namespace) -> list[str]:
+    arguments = ["train", "--run", args.run]
+    for flag, value in (("--model", args.model), ("--total-steps", args.steps)):
+        if value is not None:
+            arguments += [flag, str(value)]
+    return arguments
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="launch", description=__doc__)
+    parser.add_argument(
+        "action",
+        choices=("setup", "sync", "status", "logs", "pull", "train", "smoke", "data", "evaluate"),
+    )
+    parser.add_argument("--target", choices=("hpc",), default="hpc")
+    parser.add_argument("--run")
+    parser.add_argument("--part", choices=SMOKE_PARTS)
+    parser.add_argument("--task", choices=DATA_TASKS)
+    parser.add_argument("--model")
+    parser.add_argument("--steps", type=int)
+    parser.add_argument("--weights", action="store_true")
+    return parser
+
+
+def require(value: str | None, flag: str, action: str) -> str:
+    if not value:
+        message = f"{action} needs {flag}"
+        raise LaunchError(message)
+    return value
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    try:
+        match args.action:
+            case "setup":
+                execute(remote(f"mkdir -p {REMOTE_ROOT}"))
+                sync()
+                execute(remote(setup_script()))
+            case "sync":
+                sync()
+            case "status":
+                execute(remote(status_script(require(args.run, "--run", "status"))))
+            case "logs":
+                run = require(args.run, "--run", "logs")
+                execute(["ssh", "-t", HOST, f"tail -f {REMOTE_ROOT}/{RUNS}/{run}/log.txt"])
+            case "pull":
+                run = require(args.run, "--run", "pull")
+                skip = [] if args.weights else ["--exclude", "step-*", "--exclude", "best"]
+                local = RUNS / run
+                local.mkdir(parents=True, exist_ok=True)
+                execute(["rsync", "-az", *skip, f"{HOST}:{REMOTE_ROOT}/{RUNS}/{run}/", f"{local}/"])
+            case "train":
+                run = require(args.run, "--run", "train")
+                start(run, train_arguments(args), f"{run}/log.txt")
+            case "smoke":
+                run = require(args.run, "--run", "smoke")
+                part = require(args.part, "--part", "smoke")
+                arguments = ["smoke", "--part", part, "--run", run]
+                start(f"{run}/{part}", arguments, f"{run}/{part}/log.txt")
+            case "data":
+                task = require(args.task, "--task", "data")
+                start(f"data-{task}", [task], f"data-{task}/log.txt")
+            case _:
+                run = require(args.run, "--run", "evaluate")
+                arguments = ["evaluate", "--out", f"artifacts/runs/{run}/evaluation.json"]
+                if args.model:
+                    arguments += ["--model", args.model]
+                start(run, arguments, f"{run}/log.txt")
+    except LaunchError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

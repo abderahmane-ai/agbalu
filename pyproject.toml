@@ -58,6 +58,15 @@ models = [
     # imports it, and an undeclared import is one whose tests cannot run.
     "editdistance>=0.8",
 ]
+# Phase 11's corpus builders: wikitext stripping for kabwiki, near-duplicate hashing, a
+# safe XML parser for the dump, and parquet for the web sources. The training stack on the
+# HPC is pinned whole in requirements/hpc.lock.
+llm = [
+    "mwparserfromhell>=0.7",
+    "datasketch>=1.6",
+    "defusedxml>=0.7",
+    "pyarrow>=17",
+]
 # Local decoding with a released Fadhma directory. Separate from `models`: the benchmark
 # inference stack has no reason to grow an audio decoder, and `soundfile` and `librosa` were
 # previously declared nowhere at all — they existed only inside the Modal ASR image, so
@@ -80,6 +89,7 @@ dev = [
     "ruff>=0.6",
     "types-PyYAML>=6.0",
     "types-requests>=2.32",
+    "types-defusedxml>=0.7",
     # The character map a face declares, which is the ground truth `fonts_pro`'s rendered
     # probe stands in for. Test-only: the renderer itself needs Pillow and nothing more.
     "fonttools>=4.50",
@@ -248,16 +258,44 @@ ignore = [
 #          injected, not to a config object, and bundling them would hide the one decision
 #          this function exists to keep in one place — what is padding and what is scored.
 "src/agbalu/llm/baseline.py" = ["PLC0415", "PLR0913"]
-# PLC0415: `make_identity`, `expand` and `plan_for` import torch at call time, so the
-#          identity recipe and the architecture gate stay importable — and readable — on an
-#          install with no training stack. The module is what says which tensors a copied
-#          block must zero, which is worth being able to consult without one.
-"src/agbalu/llm/expand.py" = ["PLC0415"]
 # PLC0415: here the deferred import *is* the feature. `available()` exists to probe for an
 #          optional package, which cannot be done at module scope without making it
 #          mandatory — and the module must stay importable without a training stack, because
 #          it is what states the loss's definition: the causal shift and gemma-4's softcap.
-"src/agbalu/llm/loss.py" = ["PLC0415"]
+# PLR0913: the two loss functions take the three tensors and three keyword-only options
+#          (softcap, ignore index, reduction), each part of the definition a test varies.
+"src/agbalu/llm/loss.py" = ["PLC0415", "PLR0913"]
+# PLC0415: the Phase 11 corpus and training modules import torch, transformers, pyarrow,
+#          datasketch, mwparserfromhell, defusedxml, fla, torchao and lm-eval at call time.
+#          The first group is the `llm` extra, the last three exist only on the HPC, and
+#          the modules must import on the laptop the gate runs on.
+"src/agbalu/llm/decontaminate.py" = ["PLC0415"]
+"src/agbalu/llm/kernels.py" = ["PLC0415"]
+"src/agbalu/llm/train.py" = ["PLC0415"]
+"src/agbalu/llm/smoke.py" = ["PLC0415"]
+# PLR0913: `Builder` takes the scorer, the index, the counter, both sinks and the batch;
+#          each is injected so the build runs in a test without a model or a disk.
+"src/agbalu/llm/documents.py" = ["PLC0415", "PLR0913"]
+# PLR0913: `Backbone.__call__` restates the keyword arguments transformers' varlen path
+#          reads; a bundle would not be what the model accepts.
+"src/agbalu/llm/forward.py" = ["PLC0415", "PLR0913"]
+# PLR0913: `summary` takes the encoded stream, its order, the write report and the three
+#          per-kind lists it reconciles; each is a separate input to the conservation check.
+"src/agbalu/llm/pack.py" = ["PLC0415", "PLR0913"]
+# PLR0913: `sample` takes the source, its budget and the four collaborators a test fakes.
+# S311:    `random.Random(seed)` decides which rows are kept and the shard order. Seeded so
+#          the sample reproduces; a cryptographic generator would make it unrepeatable.
+"src/agbalu/llm/replay.py" = ["PLC0415", "PLR0913", "S311"]
+# PLR0913: `greedy` takes the model, the tokenizer, the prompts, their budgets, the device
+#          and the batch size; the budgets are per prompt and cannot live on a config.
+# S311:    `random.Random(seed)` draws the SIB-200 demonstrations, seeded so they reproduce.
+"src/agbalu/llm/evaluate.py" = ["PLC0415", "PLR0913", "S311"]
+# S603, S607: `git rev-parse` and `git status` with fixed arguments; nothing reaches the
+#             command line from input.
+"src/agbalu/llm/provenance.py" = ["S603", "S607"]
+# S603, S607: `ssh`, `rsync` and `tmux` with arguments this module builds and quotes; the
+#             only user values are run ids and model paths, passed through `shlex.quote`.
+"tools/launch.py" = ["S603", "S607"]
 # PLR0913: `select` takes the pool, the two exclusion sets, the size and the three
 #          constants that define the set's shape — length floor, speaker cap and seed.
 #          Each is a separate decision a reviewer has to be able to see and a test has to
@@ -303,17 +341,16 @@ ignore = [
 #       names are fixed by that class rather than chosen here. A constant ending in
 #       `_TOKEN` is an ASR vocabulary entry in this package, never a credential.
 "src/agbalu/speech/vocabulary.py" = ["S105"]
-# PLR0913: `build` takes both inputs, the destination, the epoch count, the held-out rate
-#          and the counting batch. The rate is the corpus's other half — `holdout` takes the
-#          same one — and the batch is what a test varies to prove it changes nothing.
-"src/agbalu/llm/mixture.py" = ["PLR0913"]
+# PLC0415: `translation_records` imports pyarrow at call time, the `llm` extra.
+"src/agbalu/llm/mixture.py" = ["PLC0415"]
 # PLC0415: `require_tensor` imports torch at call time for one `isinstance`, so prompt
 #          assembly, shot sampling and hypothesis extraction stay importable — and unit
 #          testable — on an install with no training stack.
 "src/agbalu/llm/prompting.py" = ["PLC0415"]
 # PLC0415: `HubEncoder` and `SentencePieceEncoder` import `transformers` and
-#          `sentencepiece` at construction, so `--help` and argument errors work on an
-#          install without the `models` extra. Only the encoder actually asked for is built.
+#          `sentencepiece` at construction, and the GPU commands import torch, the trainer
+#          and the smoke when run, so `--help`, argument errors and the corpus commands work
+#          on an install without a training stack.
 "src/agbalu/llm/cli.py" = ["PLC0415", "T20"]
 # PLC0415: same reason — `generate` imports torch at call time so `audit`, `contamination`
 #          and `score` keep working on an install without the `models` extra.
@@ -570,9 +607,23 @@ module = [
     "tests.unit.test_lexicon_readers",
     "tests.unit.test_lid_sources",
     "tests.unit.test_build_kabliterary",
+    "agbalu.llm.decontaminate",
+    "agbalu.llm.documents",
+    "agbalu.llm.evaluate",
+    "agbalu.llm.mixture",
+    "agbalu.llm.replay",
+    "tests.unit.test_llm_documents",
+    "tests.unit.test_llm_evaluate",
+    "tests.unit.test_llm_mixture",
 ]
 disallow_untyped_calls = false
 disallow_any_unimported = false
+
+# `datasketch` ships no py.typed marker and no stubs. Reached only by `documents.Builder`,
+# which uses `MinHash.update` and `MinHashLSH.query`/`insert` and states what it keeps.
+[[tool.mypy.overrides]]
+module = ["datasketch.*"]
+ignore_missing_imports = true
 
 # The vendored StyleTTS2 tree. `matoub_infer` and the voicepack loader published beside
 # `Matoub-82M` both run from inside a `git clone` of the recipe, whose modules sit at the
@@ -594,17 +645,13 @@ ignore_missing_imports = true
 module = ["tools.character_census", "character_census"]
 disallow_untyped_calls = false
 
-# `torch.distributed.checkpoint` and `torch.multiprocessing` ship a `py.typed` marker but
-# re-export `save`, `load`, `get_state_dict`, `set_state_dict` and `spawn` through runtime
-# `__getattr__`, so mypy sees the modules as having no such attributes and the calls as
-# untyped. `get_state_dict` additionally declares its return as the concrete dict shape the
-# distributed checkpointer wants, which no faithful caller can construct by hand. Confined
-# to the one module that trains under FSDP; what it actually promises — that a resumed run
-# continues rather than restarting — is checked by test.
+# `fla`, `torchao` and `lm_eval` are installed only on the HPC (requirements/hpc.lock), so
+# the laptop the gate runs on cannot resolve them. Each is reached from one call site that
+# states the type it hands on: `kernels.packed_causal_conv1d` a tensor, `train.build_optimizer`
+# an `Optimizer`, `evaluate.read_metric` a float checked at runtime.
 [[tool.mypy.overrides]]
-module = ["modal_app.jugurtha"]
-disallow_untyped_calls = false
-disable_error_code = ["attr-defined", "arg-type", "no-any-return"]
+module = ["fla.*", "torchao.*", "lm_eval.*"]
+ignore_missing_imports = true
 
 # The `transformers` boundary. Its `py.typed` marker promises more than the annotations
 # deliver: `PreTrainedConfig.__init_subclass__`, `PreTrainedModel.post_init` and
@@ -648,6 +695,7 @@ disable_error_code = ["arg-type"]
 # shape. Confined to the tests that drive a real `generate`.
 [[tool.mypy.overrides]]
 module = [
+    "tests.unit.tiny_lm",
     "tests.unit.test_hub_belaid",
     "tests.unit.test_hub_feraoun",
     "tests.unit.test_hub_juba",

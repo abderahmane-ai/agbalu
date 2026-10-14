@@ -15,6 +15,7 @@ import pytest
 
 from agbalu.llm import holdout, mixture
 from agbalu.llm.corpus import LANGUAGE_TAG, CorpusError, Source
+from agbalu.llm.decontaminate import Decontaminator
 
 KAB = "Aɣbalu n tmaziɣt d ayen ɣef nettmeslay deg umezruy-nneɣ."
 ENG = "The source of Tamazight is what we speak about in our history."
@@ -66,6 +67,14 @@ def fra_pairs(path: Path, rows: int) -> Source:
                 json.dumps({"kab": f"{KAB} {i}", "fra": f"{FRA} {i}"}, ensure_ascii=False) + "\n"
             )
     return Source(name="fra", path=path, kind="aligned", fields=("kab", "fra"), code="fra_Latn")
+
+
+def build_corpus(sources: Sequence[Source], corpus: Path, rate: int) -> None:
+    """The aligned corpus, with an index that matches nothing the fixtures write."""
+    index = Decontaminator.build(["one two three four five six seven eight nine ten a b c"])
+    with corpus.open("w", encoding="utf-8") as sink:
+        writer = mixture.AlignedWriter(index, WordCounter(), sink, rate=rate)
+        mixture.build(sources, None, writer)
 
 
 def texts_of(path: Path) -> list[str]:
@@ -153,6 +162,29 @@ class TestBuild:
         holdout.build([source], tmp_path / "out", rate=1)
         assert texts_of(tmp_path / "out" / "heldout-kab.jsonl") == [KAB]
 
+    def test_the_cap_is_a_sample_of_the_whole_file_not_its_head(self, tmp_path: Path) -> None:
+        """The first build took the cap in file order and put 56% of the Kabyle set in one
+        source. The capped set must reach into the back half of the file."""
+        result = holdout.build([mono(tmp_path / "m.jsonl", 400)], tmp_path / "out", rate=1, cap=40)
+        assert result.documents("kab_Latn") == 40
+        indices = [
+            int(t.rsplit(" ", 1)[1]) for t in texts_of(tmp_path / "out" / "heldout-kab.jsonl")
+        ]
+        assert max(indices) >= 200
+
+    def test_the_sample_does_not_depend_on_file_order(self, tmp_path: Path) -> None:
+        forward = tmp_path / "f.jsonl"
+        backward = tmp_path / "b.jsonl"
+        rows = [json.dumps({"text": f"{KAB} {i}"}, ensure_ascii=False) for i in range(100)]
+        forward.write_text("\n".join(rows) + "\n", encoding="utf-8")
+        backward.write_text("\n".join(reversed(rows)) + "\n", encoding="utf-8")
+        chosen = []
+        for path in (forward, backward):
+            source = Source(name="m", path=path, kind="kabyle", fields=("text",))
+            holdout.build([source], tmp_path / path.stem, rate=1, cap=10)
+            chosen.append(set(texts_of(tmp_path / path.stem / "heldout-kab.jsonl")))
+        assert chosen[0] == chosen[1]
+
     def test_a_zero_cap_is_refused(self, tmp_path: Path) -> None:
         with pytest.raises(CorpusError, match="cap must be positive"):
             holdout.build([mono(tmp_path / "m.jsonl", 2)], tmp_path / "out", rate=1, cap=0)
@@ -216,8 +248,9 @@ class TestDisjointness:
             fra_pairs(tmp_path / "f.jsonl", 60),
         ]
         corpus = tmp_path / "cpt.jsonl"
-        mixture.build(sources, WordCounter(), corpus, epochs=1, rate=rate)
-        result = holdout.build(sources, tmp_path / "out", rate=rate, cap=1000)
+        aligned = [source for source in sources if source.kind == "aligned"]
+        build_corpus(aligned, corpus, rate)
+        result = holdout.build(aligned, tmp_path / "out", rate=rate, cap=1000)
 
         trained = self.sides_written(corpus)
         assert trained, "the corpus must not be empty, or the test proves nothing"
@@ -231,7 +264,7 @@ class TestDisjointness:
         Kabyle sentence must not come back through the other direction's row."""
         sources = [mt(tmp_path / "mt.jsonl", 40)]
         corpus = tmp_path / "cpt.jsonl"
-        mixture.build(sources, WordCounter(), corpus, epochs=1, rate=3)
+        build_corpus(sources, corpus, 3)
         trained = self.sides_written(corpus)
         held = [f"{KAB} {i}" for i in range(40) if f"{KAB} {i}" not in trained]
         assert held
@@ -271,7 +304,7 @@ class TestDisjointness:
             direction_field="direction",
         )
         corpus = tmp_path / "cpt.jsonl"
-        mixture.build([source], WordCounter(), corpus, epochs=1, rate=rate)
+        build_corpus([source], corpus, rate)
         result = holdout.build([source], tmp_path / "out", rate=rate, cap=1000)
 
         evaluated = set(holdout.read(result.paths[0]))

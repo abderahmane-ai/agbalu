@@ -1,34 +1,34 @@
-"""The base Jugurtha adapts, and the A10G arithmetic that chose its size (task 11.3).
+"""The checkpoints Jugurtha is built from.
 
-`Qwen/Qwen3.5-2B`, Apache-2.0 and ungated: 2,274,069,824 parameters of which the text tower
-is 1,881,825,088. `AutoModelForCausalLM` loads that tower alone and leaves the 331.4M vision
-tower and the 60.8M multi-token-prediction head on disk.
+`Qwen/Qwen3.5-4B-Base`, Apache-2.0 and ungated. Continued pretraining starts from the base
+rather than the post-trained model, and instruction following is recovered afterwards by
+adding the CPT delta to `INSTRUCT`, which shares the architecture tensor for tensor.
+AfriqueLLM (ACL 2026, arXiv 2601.06395) adapted this exact base and reports it the strongest
+4B result after CPT.
 
-Sizes are ruled out by the clock, not by memory. Full continued pretraining costs about
-`6 * N` FLOPs per token; against one epoch of the CPT corpus and the 21.1 TFLOP/s measured
-on an A10, a two-GPU container gives:
-
-| model | text tower | h/epoch on A10:2 |
-|---|---|---|
-| `Qwen/Qwen3.5-0.8B` | 752,393,024 | 6.8 |
-| **`Qwen/Qwen3.5-2B`** | **1,881,825,088** | **17.1** |
-| `Qwen/Qwen3.5-4B` | 4,205,751,296 | 38.3 |
-| `Qwen/Qwen3.5-9B` | 8,953,803,264 | 81.5 |
-
-Qwen 3.6 and 3.8 ship nothing below 27B and there is no 3.7, so 3.5 is the whole frontier at
-this size. The post-trained checkpoint rather than `-Base`: no Kabyle instruction data exists
-anywhere, so inherited instruction-following is worth more than the perplexity a base
-checkpoint starts with.
+Parameter counts are read from the published safetensors headers on 2026-10-14. The text
+tower excludes the vision tower and the multi-token-prediction head, which
+`AutoModelForCausalLM` leaves on disk.
 """
 
 from __future__ import annotations
 
 from typing import Final
 
-BASE: Final = "Qwen/Qwen3.5-2B"
-"""The one model. Read by the corpus counter, the fertility table and the baseline scorer,
-so the tokens are counted in the vocabulary the run is scored in."""
+BASE: Final = "Qwen/Qwen3.5-4B-Base"
+"""Read by the corpus counter, the packer, the trainer and the evaluator, so tokens are
+counted in the vocabulary the run is trained and scored in."""
 
-TEXT_TOWER_PARAMETERS: Final = 1_881_825_088
-"""Read from the checkpoint's safetensors header, excluding the vision tower and the MTP
-head. This is `N` in the `6 * N * D` that sizes a run."""
+INSTRUCT: Final = "Qwen/Qwen3.5-4B"
+"""The post-trained twin of `BASE`, the target the CPT delta is merged into."""
+
+PILOT: Final = "Qwen/Qwen3.5-0.8B-Base"
+"""Same architecture and tokenizer at a fifth of the size. The optimizer parity control
+runs on it, where an fp32 AdamW reference fits beside the 8-bit arm."""
+
+TEXT_TOWER_PARAMETERS: Final[dict[str, int]] = {
+    BASE: 4_205_751_296,
+    INSTRUCT: 4_205_751_296,
+    PILOT: 752_393_024,
+}
+"""`N` in the `6 * N * D` that sizes a run and in the model-FLOP utilisation it reports."""

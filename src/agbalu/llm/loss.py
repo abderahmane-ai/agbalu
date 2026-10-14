@@ -1,9 +1,8 @@
-"""Cross-entropy over a large vocabulary, without materialising the logits (task 11.6).
+"""Cross-entropy over a large vocabulary, without materialising the logits (task 11.18).
 
-The base's vocabulary is 248,320, so one token's fp32 logit row is 0.95 MiB and a
-micro-batch of 4 × 1024 costs 3.9 GB to upcast — twice, because the causal shift forces a
-contiguous copy. That transient, not the weights, is what caps the micro-batch, and the
-micro-batch is what holds the A10 at 16.9% of its peak.
+The base's vocabulary is 248,320, so one token's fp32 logit row is 0.95 MiB and a packed
+row of 16,384 tokens would cost 15.5 GiB to upcast — twice, because the causal shift forces
+a contiguous copy. That transient, not the weights, is what caps the micro-batch.
 
 Cut Cross-Entropy (`arXiv 2411.09009`, ICLR 2025) computes the loss from the hidden states
 and the classifier matrix directly, evaluating the log-sum-exp in flash memory: measured
@@ -22,7 +21,8 @@ Two properties are not negotiable, and `tests/` pins both:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Final
+import importlib.util
+from typing import TYPE_CHECKING, Final, Literal
 
 if TYPE_CHECKING:
     import torch
@@ -35,18 +35,14 @@ class LossError(Exception):
     """The loss cannot be computed as configured."""
 
 
-def available() -> bool:
-    """Whether the fused kernel can be imported.
+Reduction = Literal["mean", "sum"]
+"""`sum` is what scoring needs: total nats over a set, divided by its characters."""
 
-    Ampere or newer plus Triton 3.0, so it is present in the container and absent on the
-    laptop. `tests/unit/test_modal_image.py` records it as a runtime dependency, because an
-    AST closure over our own code cannot see that the import is optional.
-    """
-    try:
-        import cut_cross_entropy  # noqa: F401
-    except ImportError:
-        return False
-    return True
+
+def available() -> bool:
+    """Whether the fused kernel can be imported: Ampere or newer plus Triton 3.0, so present
+    on the HPC and absent on the laptop."""
+    return importlib.util.find_spec("cut_cross_entropy") is not None
 
 
 def reference_loss(
@@ -56,6 +52,7 @@ def reference_loss(
     *,
     softcap: float | None = None,
     ignore_index: int = IGNORE_INDEX,
+    reduction: Reduction = "mean",
 ) -> torch.Tensor:
     """The definition, materialising the logits. The fused path is checked against this.
 
@@ -88,7 +85,7 @@ def reference_loss(
         logits.flatten(0, -2),
         targets[..., 1:].flatten(),
         ignore_index=ignore_index,
-        reduction="mean",
+        reduction=reduction,
     )
 
 
@@ -99,8 +96,9 @@ def sequence_loss(
     *,
     softcap: float | None = None,
     ignore_index: int = IGNORE_INDEX,
+    reduction: Reduction = "mean",
 ) -> torch.Tensor:
-    """Mean next-token cross-entropy, fused when the kernel is available.
+    """Next-token cross-entropy, fused when the kernel is available.
 
     On CUDA the fused kernel is required rather than preferred: falling back would rebuild
     the multi-gigabyte fp32 surface this module exists to avoid, and would do it invisibly.
@@ -116,7 +114,12 @@ def sequence_loss(
             )
             raise LossError(message)
         return reference_loss(
-            hidden, classifier, targets, softcap=softcap, ignore_index=ignore_index
+            hidden,
+            classifier,
+            targets,
+            softcap=softcap,
+            ignore_index=ignore_index,
+            reduction=reduction,
         )
 
     from cut_cross_entropy import linear_cross_entropy
@@ -128,7 +131,7 @@ def sequence_loss(
             targets,
             ignore_index=ignore_index,
             softcap=softcap,
-            reduction="mean",
+            reduction=reduction,
             shift=True,
         )
     )

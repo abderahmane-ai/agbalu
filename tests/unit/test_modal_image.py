@@ -25,8 +25,6 @@ from modal_app.common import (
     BENCH_PIP_PACKAGES,
     EMBED_PIP_PACKAGES,
     IMPORT_NAME,
-    JUGURTHA_PIP_PACKAGES,
-    LLM_PIP_PACKAGES,
     MATOUB_PIP_PACKAGES,
     MT_PIP_PACKAGES,
     OCR_PIP_PACKAGES,
@@ -48,8 +46,6 @@ IMAGES: Final[tuple[tuple[str, str, tuple[str, ...]], ...]] = (
     ("translate", "modal_app.translate", BENCH_PIP_PACKAGES),
     ("infer", "modal_app.infer", PIP_PACKAGES),
     ("synth", "modal_app.synth", BENCH_PIP_PACKAGES),
-    ("llm", "modal_app.llm", LLM_PIP_PACKAGES),
-    ("jugurtha", "modal_app.jugurtha", JUGURTHA_PIP_PACKAGES),
     ("asr", "modal_app.asr", ASR_PIP_PACKAGES),
     ("tts", "modal_app.tts", TTS_PIP_PACKAGES),
     ("matoub", "modal_app.matoub", (*TTS_PIP_PACKAGES, *MATOUB_PIP_PACKAGES)),
@@ -88,21 +84,6 @@ RUNTIME_ONLY: Final[dict[str, frozenset[str]]] = {
     # through, and it shares `BENCH_PIP_PACKAGES` with `translate`, which asks for it by name
     # because `resolve_weights` calls `snapshot_download` itself.
     "synth": frozenset({"sentencepiece", "huggingface_hub", "numpy"}),
-    "llm": frozenset({"sentencepiece", "accelerate"}),
-    # `flash-linear-attention` and `causal-conv1d` are imported by transformers'
-    # `modeling_qwen3_5`, not by our own code, so no AST closure can see them.
-    # `cut-cross-entropy` backs `agbalu.llm.loss`, which `_step` does not call yet: the
-    # trainer still passes `labels=` and takes transformers' own loss, so no AST closure
-    # from this entrypoint reaches it. Wiring it is what lets `MICRO_BATCH` go back above 2.
-    "jugurtha": frozenset(
-        {
-            "sentencepiece",
-            "accelerate",
-            "flash-linear-attention",
-            "causal-conv1d",
-            "cut_cross_entropy",
-        }
-    ),
     # `accelerate` is what `from_pretrained` dispatches to for device placement, and
     # `huggingface_hub` arrives with transformers rather than being asked for.
     # Shares the base training image. Boulifa is character-level over its own table, so it
@@ -363,8 +344,6 @@ def test_the_deploy_module_registers_every_function_without_a_name_collision() -
     `test_a_dedicated_app_owns_the_functions_the_launcher_addresses_to_it` covers those."""
     deploy = importlib.import_module("modal_app.deploy")
     assert set(deploy.app.registered_functions) == {
-        "jugurtha_pack",
-        "jugurtha_train",
         "pretrain",
         "pretrain_smoke",
         "finetune",
@@ -375,7 +354,6 @@ def test_the_deploy_module_registers_every_function_without_a_name_collision() -
         "mt_predict",
         "fetch_translations",
         "synthesise",
-        "baseline",
         "asr_fetch",
         "asr_finetune",
         "asr_pipeline",
@@ -413,12 +391,9 @@ def test_the_deploy_module_registers_every_function_without_a_name_collision() -
         "upload_corpus",
         "upload_mt",
         "upload_bench",
-        "upload_llm",
         "score_mt",
         "fill_mask",
-        "run_baseline",
         "run_asr",
-        "pack",
     } <= entrypoints
 
 

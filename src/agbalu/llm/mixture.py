@@ -1,55 +1,40 @@
-"""The continued-pretraining corpus: Kabyle beside its own translations (task 11.4).
-
-Two findings decide the shape of this file.
+"""Kabyle beside its own translations, each pair once (task 11.17).
 
 Parallel text is worth more per token than monolingual text: at a fixed 5M-token budget,
 multi-way parallel data scored 22.48 on low-resource MMMLU against 19.64 for unaligned
-monolingual and 18.27 untrained (arXiv 2505.14045). And more of the *other* language
-improves the target language rather than merely protecting it — 1:1 English:Arabic beat
-1:9 on Arabic loss (arXiv 2407.12869). Our parallel corpus is 1:1 by construction, so one
-dataset carries the Kabyle signal, the replay, and the alignment supervision at once.
+monolingual (arXiv 2505.14045). Each pair becomes one tagged document, Kabyle first on even
+rows, so neither direction is the only one taught.
 
-The mixture is balanced **by tokens, not by rows**. A monolingual row averages ~33 base
-tokens and an aligned pair ~55, so an equal number of rows would be a 1:1.8 token mixture
-while claiming to be 1:1.
-
-Direction alternates by row so the model sees Kabyle first half the time. A fixed order
-teaches translation in one direction, which is not what continued pretraining is for.
-
-Held-out records are skipped, by the same predicate that selects them in `holdout`.
+`mt-train` holds every pair twice, one row per direction, and the earlier corpus wrote both:
+the aligned tokens were half duplicates. A pair is keyed on its two sides, so the mirror
+row is recognised and dropped. Held-out records leave by `corpus.withheld`, and anything
+overlapping an evaluation set by the shared decontaminator.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
+from collections import Counter as Tally
 from collections.abc import Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol, TextIO
+from typing import Final, TextIO
 
-from agbalu.llm.corpus import (
-    HOLDOUT_RATE,
-    LANGUAGE_TAG,
-    Kind,
-    Record,
-    Source,
-    records,
-    withheld,
-)
+from agbalu.llm.corpus import LANGUAGE_TAG, Record, Source, TokenCounter, records, withheld
+from agbalu.llm.decontaminate import Decontaminator
+from agbalu.normalise import Normaliser
 
-KABYLE_CODE = LANGUAGE_TAG["kab"]
-SEPARATOR = "\n"
+KABYLE_CODE: Final = LANGUAGE_TAG["kab"]
+SEPARATOR: Final = "\n"
 """One newline between the two sides. The pair is one document, not two."""
+
+TRANSLATIONS: Final = Path("data/raw/hf.finetranslations-kab/data/kab_Latn")
+"""FineWeb-2's Kabyle documents with a full English translation beside each one."""
 
 
 class MixtureError(Exception):
-    """The mixture cannot be counted or written."""
-
-
-class Counter(Protocol):
-    """Token counting, injected so the mixture is testable without a tokenizer."""
-
-    def count(self, texts: Sequence[str]) -> list[int]: ...
+    """The aligned corpus cannot be built or does not account for its input."""
 
 
 def aligned_document(kabyle: str, other: str, code: str, *, kabyle_first: bool) -> str:
@@ -59,141 +44,126 @@ def aligned_document(kabyle: str, other: str, code: str, *, kabyle_first: bool) 
     return f"{head[0]}: {head[1]}{SEPARATOR}{tail[0]}: {tail[1]}"
 
 
-def document(record: Record) -> str:
-    """The training document one record contributes."""
-    if not record.aligned:
-        return record.kabyle
-    return aligned_document(
-        record.kabyle, record.other, record.code, kabyle_first=record.index % 2 == 0
-    )
+def pair_key(record: Record) -> bytes:
+    """The same pair from either direction's row gives the same key."""
+    payload = f"{record.kabyle}\x00{record.code}\x00{record.other}".encode()
+    return hashlib.blake2b(payload, digest_size=16).digest()
 
 
-def documents(source: Source, *, rate: int = HOLDOUT_RATE) -> Iterator[tuple[str, bool]]:
-    """Every document of one source, each with whether it is held out of training."""
-    for record in records(source):
-        yield document(record), withheld(record, rate=rate)
+def translation_records(directory: Path = TRANSLATIONS) -> Iterator[Record]:
+    """FineTranslations rows as aligned records, Kabyle original beside its English."""
+    import pyarrow.parquet as pq
+
+    files = sorted(directory.glob("*.parquet"))
+    if not files:
+        message = f"no FineTranslations parquet under {directory}"
+        raise MixtureError(message)
+    index = 0
+    for path in files:
+        table = pq.read_table(path, columns=["og_full_text", "translated_text"])
+        for kabyle, english in zip(
+            table["og_full_text"].to_pylist(), table["translated_text"].to_pylist(), strict=True
+        ):
+            if isinstance(kabyle, str) and isinstance(english, str) and kabyle and english:
+                yield Record(kabyle=kabyle, index=index, other=english, code=LANGUAGE_TAG["eng"])
+            index += 1
 
 
-@dataclass(frozen=True, slots=True)
-class Tally:
-    """What one source contributed, and what was withheld from it."""
-
+@dataclass(slots=True)
+class SourceTally:
     name: str
-    kind: Kind
-    documents: int
-    tokens: int
-    held_out: int
+    read: int = 0
+    kept: int = 0
+    tokens: int = 0
+    rejected: Tally[str] = field(default_factory=Tally)
 
     def as_dict(self) -> dict[str, object]:
         return {
-            "name": self.name,
-            "kind": self.kind,
-            "documents": self.documents,
+            "source": self.name,
+            "read": self.read,
+            "kept": self.kept,
             "tokens": self.tokens,
-            "held_out": self.held_out,
+            "rejected": dict(sorted(self.rejected.items())),
         }
 
 
-@dataclass(frozen=True, slots=True)
-class Mixture:
-    """A built corpus and the ratio it actually achieved."""
+@dataclass(slots=True)
+class AlignedWriter:
+    """The filters for one aligned record, writing survivors in token-counted batches."""
 
-    tallies: tuple[Tally, ...]
-    epochs: int
-    rate: int = HOLDOUT_RATE
+    decontaminator: Decontaminator
+    counter: TokenCounter
+    sink: TextIO
+    rate: int
+    batch: int = 2000
+    normaliser: Normaliser = field(default_factory=Normaliser)
+    seen: set[bytes] = field(default_factory=set)
+    pending: list[tuple[str, SourceTally]] = field(default_factory=list)
 
-    def tokens(self, kind: Kind) -> int:
-        return sum(t.tokens for t in self.tallies if t.kind == kind)
+    def offer(self, record: Record, tally: SourceTally) -> None:
+        tally.read += 1
+        if withheld(record, rate=self.rate):
+            tally.rejected["held_out"] += 1
+            return
+        kabyle = self.normaliser.normalise(record.kabyle).strip()
+        other = record.other.strip()
+        if not kabyle or not other:
+            tally.rejected["empty"] += 1
+            return
+        key = pair_key(Record(kabyle=kabyle, index=record.index, other=other, code=record.code))
+        if key in self.seen:
+            tally.rejected["duplicate_pair"] += 1
+            return
+        self.seen.add(key)
+        if self.decontaminator.matches(kabyle) or self.decontaminator.matches(other):
+            tally.rejected["contaminated"] += 1
+            return
+        text = aligned_document(kabyle, other, record.code, kabyle_first=record.index % 2 == 0)
+        self.pending.append((text, tally))
+        if len(self.pending) >= self.batch:
+            self.flush()
 
-    @property
-    def total_tokens(self) -> int:
-        return sum(t.tokens for t in self.tallies)
-
-    @property
-    def held_out(self) -> int:
-        return sum(t.held_out for t in self.tallies)
-
-    @property
-    def aligned_share(self) -> float:
-        return 0.0 if not self.total_tokens else self.tokens("aligned") / self.total_tokens
-
-    def as_dict(self) -> dict[str, object]:
-        return {
-            "sources": [t.as_dict() for t in self.tallies],
-            "tokens_per_epoch": self.total_tokens,
-            "epochs": self.epochs,
-            "tokens_total": self.total_tokens * self.epochs,
-            "kabyle_tokens": self.tokens("kabyle"),
-            "aligned_tokens": self.tokens("aligned"),
-            "aligned_share": round(self.aligned_share, 4),
-            "held_out_documents": self.held_out,
-            "held_out_rate": self.rate,
-        }
+    def flush(self) -> None:
+        if not self.pending:
+            return
+        batch, self.pending = self.pending, []
+        counts = self.counter.count([text for text, _ in batch])
+        if len(counts) != len(batch):
+            message = f"{len(counts)} token counts for {len(batch)} documents"
+            raise MixtureError(message)
+        for (text, tally), tokens in zip(batch, counts, strict=True):
+            tally.kept += 1
+            tally.tokens += tokens
+            self.sink.write(json.dumps({"text": text, "source": tally.name}, ensure_ascii=False))
+            self.sink.write("\n")
 
 
 def build(
-    sources: Sequence[Source],
-    counter: Counter,
-    out: Path,
-    *,
-    epochs: int,
-    rate: int = HOLDOUT_RATE,
-    batch: int = 2000,
-) -> Mixture:
-    """Write every document that is not held out to `out`, counting tokens by kind.
+    sources: Sequence[Source], translations: Iterator[Record] | None, writer: AlignedWriter
+) -> list[SourceTally]:
+    """Every aligned source, then the document-level translations when given."""
+    tallies: list[SourceTally] = []
+    for source in sources:
+        if source.kind != "aligned":
+            message = f"{source.name} is {source.kind}; this corpus holds aligned pairs only"
+            raise MixtureError(message)
+        tally = SourceTally(source.name)
+        tallies.append(tally)
+        for record in records(source):
+            writer.offer(record, tally)
+    if translations is not None:
+        tally = SourceTally("finetranslations-kab")
+        tallies.append(tally)
+        for record in translations:
+            writer.offer(record, tally)
+    writer.flush()
 
-    Documents are written in source order and shuffled by `modal_app.jugurtha.order` under
-    `recipe.SHUFFLE_SEED`, not here: shuffling 5.2M rows in memory would cost more than the
-    training step it feeds. Naming the shuffler is the point — while this said only "by the
-    loader", no loader did it, and a run trained on one source at a time.
-    """
-    if epochs < 1:
-        message = f"epochs must be positive, got {epochs}"
-        raise MixtureError(message)
-    if batch < 1:
-        message = f"batch must be positive, got {batch}"
-        raise MixtureError(message)
-
-    out.parent.mkdir(parents=True, exist_ok=True)
-    tallies: list[Tally] = []
-    with out.open("w", encoding="utf-8") as sink:
-        for source in sources:
-            count = 0
-            tokens = 0
-            excluded = 0
-            pending: list[str] = []
-            for text, held in documents(source, rate=rate):
-                if held:
-                    excluded += 1
-                    continue
-                pending.append(text)
-                if len(pending) >= batch:
-                    written, counted = _flush(source, pending, counter, sink)
-                    count += written
-                    tokens += counted
-                    pending.clear()
-            written, counted = _flush(source, pending, counter, sink)
-            tallies.append(
-                Tally(source.name, source.kind, count + written, tokens + counted, excluded)
+    for tally in tallies:
+        rejected = sum(tally.rejected.values())
+        if tally.read != tally.kept + rejected:
+            message = (
+                f"{tally.name}: read {tally.read}, kept {tally.kept}, rejected {rejected}; "
+                f"{tally.read - tally.kept - rejected} unaccounted"
             )
-
-    return Mixture(tallies=tuple(tallies), epochs=epochs, rate=rate)
-
-
-def _flush(
-    source: Source, pending: Sequence[str], counter: Counter, sink: TextIO
-) -> tuple[int, int]:
-    """Count and write one batch: the documents written and the tokens they hold."""
-    if not pending:
-        return 0, 0
-    counts = counter.count(pending)
-    if len(counts) != len(pending):
-        message = f"{source.name}: {len(counts)} counts for {len(pending)} documents"
-        raise MixtureError(message)
-    for text in pending:
-        # `kind` is what the replay ratio is measured over: the file is written source by
-        # source, so a reader cannot recover it from position, and inferring it from the
-        # language tags an aligned document happens to carry would make the format load
-        # bearing in two places.
-        sink.write(json.dumps({"text": text, "kind": source.kind}, ensure_ascii=False) + "\n")
-    return len(pending), sum(counts)
+            raise MixtureError(message)
+    return tallies
