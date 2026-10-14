@@ -565,9 +565,11 @@ disallow_untyped_calls = false
 # an untyped call in a typed context. Confined to the modules that touch parquet directly;
 # what comes back is narrowed in the code, not silenced.
 [[tool.mypy.overrides]]
+    "tools.build_kabliterary",
 module = [
     "agbalu.extract.readers",
     "agbalu.lexicon.readers",
+    "tests.unit.test_build_kabliterary",
     "agbalu.bench.lid_sources",
     "agbalu.bench.tifinagh",
     "agbalu.bench.inflect",
