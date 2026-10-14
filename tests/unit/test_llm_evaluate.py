@@ -38,6 +38,7 @@ def alone(scorer: evaluate.Scorer, ids: list[int]) -> float:
             cu_seq_lens_k=bounds,
             max_length_q=tokens.shape[1],
             max_length_k=tokens.shape[1],
+            use_cache=False,
         ).last_hidden_state[0]
         logits = (hidden[:-1] @ scorer.classifier.T).float()
         return float(torch.nn.functional.cross_entropy(logits, tokens[0, 1:], reduction="sum"))

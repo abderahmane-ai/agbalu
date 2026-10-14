@@ -34,6 +34,7 @@ class Backbone(Protocol):
         cu_seq_lens_k: torch.Tensor,
         max_length_q: int,
         max_length_k: int,
+        use_cache: bool,
     ) -> HiddenOutput: ...
 
 
@@ -110,7 +111,12 @@ def to_device(row: PackedRow, device: torch.device, *, pinned: bool = False) -> 
 
 
 def hidden_states(backbone: Backbone, row: DeviceRow) -> torch.Tensor:
-    """`[1, tokens, hidden]` for one packed row, every document attending only to itself."""
+    """`[1, tokens, hidden]` for one packed row, every document attending only to itself.
+
+    No cache: an eval-mode Qwen3.5 otherwise keeps a recurrent state per packed document in
+    every Gated DeltaNet layer, about 2 MB each, which ran a full held-out row out of the
+    47 GB slice on 2026-10-14.
+    """
     return backbone(
         input_ids=row.input_ids,
         position_ids=row.position_ids,
@@ -118,4 +124,5 @@ def hidden_states(backbone: Backbone, row: DeviceRow) -> torch.Tensor:
         cu_seq_lens_k=row.cu_seqlens,
         max_length_q=row.max_length,
         max_length_k=row.max_length,
+        use_cache=False,
     ).last_hidden_state

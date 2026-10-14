@@ -40,3 +40,4 @@ def test_hidden_states_passes_the_same_boundaries_for_queries_and_keys() -> None
     assert hidden.shape == (1, 5, 8)
     assert recorder.seen["cu_seq_lens_q"] is recorder.seen["cu_seq_lens_k"]
     assert recorder.seen["max_length_q"] == recorder.seen["max_length_k"] == 3
+    assert recorder.seen["use_cache"] is False
