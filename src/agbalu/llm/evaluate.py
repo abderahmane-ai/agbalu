@@ -17,8 +17,6 @@ from __future__ import annotations
 
 import json
 import math
-import sys
-import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,6 +31,7 @@ from agbalu.llm.forward import Backbone, LanguageModel, hidden_states, to_device
 from agbalu.llm.holdout import read as read_heldout
 from agbalu.llm.loss import logit_softcap, sequence_loss
 from agbalu.llm.packing import PackedRow, concatenate, pack_documents, plan_rows
+from agbalu.llm.progress import Heartbeat, Tracker, progress, stage
 from agbalu.llm.prompting import (
     SHOT_SEED,
     SHOTS,
@@ -182,6 +181,7 @@ def held_out(
         raise EvaluationError(message)
     rows = pack_documents(encoded, scorer.eos, capacity)
     nll, tokens = summed_nll(scorer, rows)
+    progress("heldout_scored", language=language, documents=len(texts), rows=len(rows))
     return Scored(
         name=f"heldout-{language}",
         language=language,
@@ -211,7 +211,9 @@ def continuation_logprobs(
             message = f"choice {index}: {len(document)} tokens, continuation {choice.continuation}"
             raise EvaluationError(message)
     scores = [0.0] * len(choices)
-    for group in plan_rows([len(document) for document in documents], capacity):
+    groups = plan_rows([len(document) for document in documents], capacity)
+    tracker = Tracker("score continuations", len(choices))
+    for group in groups:
         row = to_device(concatenate([documents[i] for i in group]), scorer.device)
         predictors: list[int] = []
         targets: list[int] = []
@@ -236,6 +238,7 @@ def continuation_logprobs(
             sums.index_add_(0, torch.tensor(owners, device=scorer.device), chosen[:, 0].double())
         for slot, value in enumerate(sums.tolist()):
             scores[group[slot]] = float(value)
+        tracker.advance(len(group))
     return scores
 
 
@@ -301,6 +304,7 @@ def greedy(
     *,
     device: torch.device,
     batch_size: int = GENERATION_BATCH,
+    label: str = "generate",
 ) -> list[str]:
     """Greedy continuations in input order, `eos`-prefixed like a training document.
 
@@ -315,6 +319,7 @@ def greedy(
         raise EvaluationError(message)
     encoded = [[tokenizer.eos, *ids] for ids in tokenizer.encode_batch(prompts)]
     outputs = [""] * len(prompts)
+    tracker = Tracker(label, len(prompts))
     for batch in length_ordered_batches([len(ids) for ids in encoded], batch_size):
         width = max(len(encoded[i]) for i in batch)
         input_ids = torch.full((len(batch), width), tokenizer.eos, dtype=torch.long)
@@ -338,6 +343,7 @@ def greedy(
             )
         for slot, index in enumerate(batch):
             outputs[index] = tokenizer.decode(generated[slot, width:].tolist())
+        tracker.advance(len(batch))
     return outputs
 
 
@@ -359,7 +365,10 @@ def translate(
     prompts = [translation_prompt(examples, *tags, text) for text in sources]
     budgets = [new_tokens([len(ids)]) for ids in tokenizer.encode_batch(sources)]
     hypotheses = [
-        first_line(text) for text in greedy(model, tokenizer, prompts, budgets, device=device)
+        first_line(text)
+        for text in greedy(
+            model, tokenizer, prompts, budgets, device=device, label=f"mt {direction}"
+        )
     ]
     result = score(hypotheses, references, checked, "devtest")
     return {
@@ -546,20 +555,15 @@ def run(
     model.eval()
     scorer = Scorer.of(model, tokenizer.eos, device)
     report: dict[str, object] = {"parts": list(parts), "limit": limit}
-    for part in PARTS:
-        if part not in parts:
-            continue
-        progress("part_start", part=part)
-        started = time.perf_counter()
-        report[part] = run_part(part, model, scorer, tokenizer, device=device, limit=limit)
-        progress("part_end", part=part, seconds=round(time.perf_counter() - started, 1))
+    current: dict[str, object] = {}
+    with Heartbeat("evaluate", status=lambda: dict(current)):
+        for part in PARTS:
+            if part not in parts:
+                continue
+            current["part"] = part
+            with stage(f"evaluate {part}"):
+                report[part] = run_part(part, model, scorer, tokenizer, device=device, limit=limit)
     return report
-
-
-def progress(event: str, **values: object) -> None:
-    """One JSON line on stderr, which the launcher's log captures as the job runs."""
-    sys.stderr.write(json.dumps({"event": event, "time": round(time.time(), 1), **values}) + "\n")
-    sys.stderr.flush()
 
 
 def run_part(

@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Final, Literal, Protocol, TextIO
 
 from agbalu.llm.corpus import TokenCounter, is_held_out
 from agbalu.llm.decontaminate import Decontaminator, words
+from agbalu.llm.progress import Tracker, stage
 from agbalu.normalise import Normaliser
 from agbalu.registry import Registry
 
@@ -437,19 +438,25 @@ def build(
     for source in ordered(sources, registry):
         entry = registry.by_id(source.source_id)
         stats = builder.source_stats(source.source_id, entry.licence, entry.redistribution)
-        for document in read_source(source, raw_root):
-            text = clean(document.text, builder.normaliser)
-            builder.offer(text, document.key, stats, is_document=True)
-        builder.flush()
+        with stage("documents", source=source.source_id):
+            tracker = Tracker(f"documents {source.source_id}", None)
+            for document in read_source(source, raw_root):
+                text = clean(document.text, builder.normaliser)
+                builder.offer(text, document.key, stats, is_document=True)
+                tracker.advance(kept=stats.kept)
+            builder.flush()
 
-    for row in sentences:
-        stats = builder.source_stats(row.source_id, row.licence, row.redistribution)
-        if row.source_id in superseded:
-            stats.read += 1
-            builder.reject(stats, f"sentences:{row.line}", "superseded")
-            continue
-        builder.offer(row.text, f"sentences:{row.line}", stats, is_document=False)
-    builder.flush()
+    with stage("sentence rows"):
+        tracker = Tracker("sentence rows", None)
+        for row in sentences:
+            stats = builder.source_stats(row.source_id, row.licence, row.redistribution)
+            tracker.advance(source=row.source_id)
+            if row.source_id in superseded:
+                stats.read += 1
+                builder.reject(stats, f"sentences:{row.line}", "superseded")
+                continue
+            builder.offer(row.text, f"sentences:{row.line}", stats, is_document=False)
+        builder.flush()
 
     for stats in builder.stats.values():
         rejected = sum(stats.rejected.values())

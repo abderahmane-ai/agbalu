@@ -23,6 +23,7 @@ from typing import Final, Literal, Protocol, TextIO
 
 from agbalu.llm.corpus import TokenCounter
 from agbalu.llm.decontaminate import Decontaminator
+from agbalu.llm.progress import Tracker, stage
 
 Format = Literal["parquet", "jsonl"]
 
@@ -232,11 +233,14 @@ def sample(
             sink.write(json.dumps(row, ensure_ascii=False) + "\n")
         pending.clear()
 
+    tracker = Tracker(f"replay {source.name} tokens", budget)
     for shard in shards:
         if tally.tokens >= budget:
             break
         tally.shards.append(shard)
-        for value in _rows(fetcher.fetch(shard), source.format, source.field):
+        with stage("fetch shard", source=source.name, shard=shard):
+            path = fetcher.fetch(shard)
+        for value in _rows(path, source.format, source.field):
             tally.read += 1
             if draw.random() >= source.keep:
                 tally.skipped += 1
@@ -249,7 +253,9 @@ def sample(
                 continue
             pending.append(value)
             if len(pending) >= COUNT_BATCH:
+                before = tally.tokens
                 flush()
+                tracker.advance(tally.tokens - before, rows_read=tally.read)
                 if tally.tokens >= budget:
                     break
         if pending:

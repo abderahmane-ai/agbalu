@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Final
 import numpy as np
 import numpy.typing as npt
 
+from agbalu.llm.progress import Tracker
 from agbalu.llm.recipe import ALIGNED_PASSES, KABYLE_PASSES, SEQUENCE_LENGTH, SHUFFLE_SEED
 
 if TYPE_CHECKING:
@@ -206,6 +207,7 @@ def write_blocks(
     flat = target.reshape(-1)
     position = 0
     capacity = blocks * length
+    tracker = Tracker("write blocks tokens", capacity)
     for start in range(0, len(order), WRITE_CHUNK):
         piece = gather(
             encoded.tokens, encoded.offsets, encoded.lengths, order[start : start + WRITE_CHUNK]
@@ -213,6 +215,7 @@ def write_blocks(
         take = min(len(piece), capacity - position)
         flat[position : position + take] = piece[:take]
         position += take
+        tracker.advance(take)
         if position == capacity:
             break
     target.flush()
@@ -230,11 +233,13 @@ def encode_all(
     """Every text `eos`-prefixed, in input order, tokenised across `workers` processes."""
     tokens: list[npt.NDArray[np.uint32]] = []
     lengths: list[npt.NDArray[np.int64]] = []
+    tracker = Tracker("encode documents", len(texts))
     with ProcessPoolExecutor(max_workers=workers, initializer=_load, initargs=(repo,)) as pool:
         for flat, sizes in pool.map(_encode, chunks(texts, ENCODE_CHUNK)):
             prefixed, prefixed_sizes = prefix_eos(flat, sizes, eos)
             tokens.append(prefixed)
             lengths.append(prefixed_sizes)
+            tracker.advance(len(sizes))
     joined = np.concatenate(lengths) if lengths else np.empty(0, dtype=np.int64)
     if len(joined) != len(texts):
         message = f"{len(joined)} encodings for {len(texts)} texts"

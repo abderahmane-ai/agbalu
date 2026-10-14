@@ -23,6 +23,7 @@ from typing import Final, TextIO
 
 from agbalu.llm.corpus import LANGUAGE_TAG, Record, Source, TokenCounter, records, withheld
 from agbalu.llm.decontaminate import Decontaminator
+from agbalu.llm.progress import Tracker, stage
 from agbalu.normalise import Normaliser
 
 KABYLE_CODE: Final = LANGUAGE_TAG["kab"]
@@ -149,13 +150,19 @@ def build(
             raise MixtureError(message)
         tally = SourceTally(source.name)
         tallies.append(tally)
-        for record in records(source):
-            writer.offer(record, tally)
+        with stage("aligned", source=source.name):
+            tracker = Tracker(f"aligned {source.name}", None)
+            for record in records(source):
+                writer.offer(record, tally)
+                tracker.advance(kept=tally.kept)
     if translations is not None:
         tally = SourceTally("finetranslations-kab")
         tallies.append(tally)
-        for record in translations:
-            writer.offer(record, tally)
+        with stage("aligned", source=tally.name):
+            tracker = Tracker(f"aligned {tally.name}", None)
+            for record in translations:
+                writer.offer(record, tally)
+                tracker.advance(kept=tally.kept)
     writer.flush()
 
     for tally in tallies:

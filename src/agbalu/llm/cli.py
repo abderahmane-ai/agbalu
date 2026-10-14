@@ -30,6 +30,7 @@ from agbalu.llm.evaluate import PARTS, EvaluationError, HubTokenizer, exit_crite
 from agbalu.llm.fertility import Encoder, FertilityError, report, sample
 from agbalu.llm.mixture import MixtureError
 from agbalu.llm.pack import PackError
+from agbalu.llm.progress import Heartbeat, stage
 from agbalu.llm.provenance import ProvenanceError, code_stamp
 from agbalu.llm.recipe import replay_budget
 from agbalu.llm.replay import ReplayError
@@ -561,10 +562,18 @@ ERRORS: Final = (
 )
 
 
+OWN_HEARTBEAT: Final = frozenset({"train", "smoke", "evaluate"})
+"""Commands whose trainer or evaluator beats with its own status; the rest get a plain one."""
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        return COMMANDS[args.command](args)
+        with stage(args.command):
+            if args.command in OWN_HEARTBEAT:
+                return COMMANDS[args.command](args)
+            with Heartbeat(args.command):
+                return COMMANDS[args.command](args)
     except ERRORS as error:
         print(f"error: {error}", file=sys.stderr)
         return 1

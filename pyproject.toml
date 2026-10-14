@@ -273,6 +273,7 @@ ignore = [
 "src/agbalu/llm/kernels.py" = ["PLC0415"]
 "src/agbalu/llm/train.py" = ["PLC0415"]
 "src/agbalu/llm/smoke.py" = ["PLC0415"]
+"src/agbalu/llm/progress.py" = ["PLC0415"]
 # PLR0913: `Builder` takes the scorer, the index, the counter, both sinks and the batch;
 #          each is injected so the build runs in a test without a model or a disk.
 "src/agbalu/llm/documents.py" = ["PLC0415", "PLR0913"]

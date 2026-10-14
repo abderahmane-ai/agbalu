@@ -39,6 +39,7 @@ from agbalu.llm.forward import LanguageModel, hidden_states, to_device
 from agbalu.llm.holdout import read as read_heldout
 from agbalu.llm.loss import logit_softcap, sequence_loss
 from agbalu.llm.packing import BLOCK_AXES, PackedRow, pack_row
+from agbalu.llm.progress import Heartbeat, Tracker, progress, stage
 from agbalu.llm.provenance import code_stamp, config_hash, file_digest
 from agbalu.llm.recipe import (
     BETAS,
@@ -73,6 +74,8 @@ MATRIX_AXES: Final = 2
 """Parameters with at least this many axes take weight decay."""
 
 PREFETCH: Final = 4
+ETA_WINDOW: Final = 20
+"""Recent steps the time-left projection is taken over."""
 
 PROBES: Final = (
     "Tamurt n Leqbayel",
@@ -367,6 +370,17 @@ def save_checkpoint(
     keep: int,
 ) -> Path:
     """Weights, optimizer, generators and state, all or nothing; the oldest beyond `keep` go."""
+    with stage("save checkpoint", step=state.step):
+        return write_checkpoint(directory, model, optimizer, state, keep)
+
+
+def write_checkpoint(
+    directory: Path,
+    model: LanguageModel,
+    optimizer: torch.optim.Optimizer,
+    state: RunState,
+    keep: int,
+) -> Path:
     final = directory / f"{CHECKPOINT_PREFIX}{state.step:07d}"
     partial = directory / f".{final.name}.partial"
     if partial.exists():
@@ -397,6 +411,7 @@ def restore(path: Path, optimizer: torch.optim.Optimizer) -> RunState:
 
 
 def save_best(directory: Path, model: LanguageModel, state: RunState) -> None:
+    progress("save_best", step=state.step, kab_bpc=state.best_bpc)
     partial = directory / ".best.partial"
     if partial.exists():
         shutil.rmtree(partial)
@@ -477,6 +492,8 @@ class Session:
     step_seconds: list[float] = field(default_factory=list)
     wait_seconds: list[float] = field(default_factory=list)
     tokens_this_run: int = 0
+    micro: int = 0
+    phase: str = "starting"
 
     @property
     def autocast(self) -> bool:
@@ -518,6 +535,11 @@ def summary(session: Session, ended: str) -> dict[str, object]:
 
 def evaluate_now(session: Session) -> None:
     """Held-out bits per character, the best checkpoint under the drift guard, the probe."""
+    with stage("in-training evaluation", step=session.state.step):
+        evaluate_model(session)
+
+
+def evaluate_model(session: Session) -> None:
     config, state, model = session.config, session.state, session.model
     model.eval()
     scorer = Scorer.of(model, session.tokenizer.eos, session.device)
@@ -543,7 +565,9 @@ def step(session: Session, batch: list[PackedRow]) -> tuple[float, float, bool]:
     softcap = logit_softcap(model.config)
     step_targets = sum(row.targets for row in batch)
     total_loss = torch.zeros((), dtype=torch.float32, device=device)
-    for packed in batch:
+    tracker = Tracker(f"step {session.state.step + 1} micro-batches", len(batch))
+    for micro, packed in enumerate(batch, start=1):
+        session.micro = micro
         row = to_device(packed, device, pinned=device.type == "cuda")
         with torch.autocast(device.type, dtype=torch.bfloat16, enabled=session.autocast):
             hidden = hidden_states(model.model, row)
@@ -553,6 +577,7 @@ def step(session: Session, batch: list[PackedRow]) -> tuple[float, float, bool]:
         loss = sequence_loss(hidden, classifier, row.labels, softcap=softcap, reduction="sum")
         torch.autograd.backward(loss / step_targets)
         total_loss += loss.detach().float() / step_targets
+        tracker.advance()
     params = [p for _, p in model.named_parameters() if p.requires_grad]
     norm = torch.nn.utils.clip_grad_norm_(params, GRADIENT_CLIP)
     finite = bool(torch.isfinite(norm).item())
@@ -571,12 +596,46 @@ def step(session: Session, batch: list[PackedRow]) -> tuple[float, float, bool]:
 
 def loop(session: Session) -> dict[str, object]:
     config, state = session.config, session.state
+
+    def status() -> dict[str, object]:
+        return {
+            "phase": session.phase,
+            "step": state.step + 1,
+            "micro": session.micro,
+            "micros_per_step": config.micros_per_step,
+        }
+
+    with Heartbeat("train", status=status):
+        ended = steps(session)
+    session.phase = "checkpointing"
+    path = save_checkpoint(config.directory, session.model, session.optimizer, state, config.keep)
+    session.log.write("checkpoint", step=state.step, path=str(path))
+    result = summary(session, ended)
+    write_json(config.directory / "summary.json", result)
+    session.log.write("end", **result)
+    return result
+
+
+def eta_hours(session: Session) -> float | None:
+    """Steps left times the median of the last `ETA_WINDOW` step times; a projection."""
+    recent = session.step_seconds[-ETA_WINDOW:]
+    if not recent:
+        return None
+    left = session.total - session.state.step
+    return round(left * statistics.median(recent) / 3600, 2)
+
+
+def steps(session: Session) -> str:
+    """Steps until the schedule ends, `stop_after` is reached, or a signal arrives."""
+    config, state = session.config, session.state
     if config.eval_every and state.step == 0:
+        session.phase = "evaluating"
         evaluate_now(session)
     session.model.train()
     micro_batches = stream(config, session.tokenizer.eos, state.step, session.total)
     ended = "schedule"
     while state.step < session.total:
+        session.phase = "training"
         if config.stop_after is not None and state.step >= config.stop_after:
             ended = "stop_after"
             break
@@ -584,11 +643,13 @@ def loop(session: Session) -> dict[str, object]:
             ended = f"signal {session.stop.signal}"
             break
         started = time.perf_counter()
+        session.phase = "loading data"
         batch: list[PackedRow] = []
         for _ in range(config.micros_per_step):
             waited = time.perf_counter()
             batch.append(next(micro_batches))
             session.wait_seconds.append(time.perf_counter() - waited)
+        session.phase = "training"
         lr = learning_rate(state.step, session.total, peak=config.peak_lr)
         loss, norm, taken = step(session, batch)
         elapsed = time.perf_counter() - started
@@ -611,6 +672,8 @@ def loop(session: Session) -> dict[str, object]:
             tokens_per_s=round(processed / elapsed, 1),
             mfu=round(6 * session.parameters * processed / elapsed / PEAK_FLOPS, 4),
             memory=peak_memory(session.device),
+            total_steps=session.total,
+            eta_h=eta_hours(session),
         )
         if not taken:
             state.skipped += 1
@@ -623,19 +686,15 @@ def loop(session: Session) -> dict[str, object]:
         if config.eval_every and (
             state.step % config.eval_every == 0 or state.step == session.total
         ):
+            session.phase = "evaluating"
             evaluate_now(session)
         if state.step % config.checkpoint_every == 0 and state.step < session.total:
+            session.phase = "checkpointing"
             path = save_checkpoint(
                 config.directory, session.model, session.optimizer, state, config.keep
             )
             session.log.write("checkpoint", step=state.step, path=str(path))
-
-    path = save_checkpoint(config.directory, session.model, session.optimizer, state, config.keep)
-    session.log.write("checkpoint", step=state.step, path=str(path))
-    result = summary(session, ended)
-    write_json(config.directory / "summary.json", result)
-    session.log.write("end", **result)
-    return result
+    return ended
 
 
 def train(
@@ -659,15 +718,20 @@ def train(
 
         found = checkpoints(config.directory)
         latest = found[-1] if found else None
-        model = load(latest if latest is not None else config.model, weight_dtype(config.optimizer))
+        source = latest if latest is not None else config.model
+        with stage("load model", source=str(source)):
+            model = load(source, weight_dtype(config.optimizer))
         parameters = count_parameters(model, config.model)
         model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
         optimizer = build_optimizer(model, config)
         if latest is not None:
-            state = restore(latest, optimizer)
+            with stage("restore optimizer and generators", checkpoint=str(latest)):
+                state = restore(latest, optimizer)
         else:
             torch.manual_seed(TORCH_SEED)
             state = RunState()
+        with stage("digest blocks", path=str(config.blocks)):
+            digest = file_digest(config.blocks)
         log.write(
             "start",
             resumed_from=str(latest) if latest else None,
@@ -677,7 +741,7 @@ def train(
             config=config.identity(),
             config_hash=config_hash(config.identity()),
             code=code_stamp(),
-            blocks_sha256=file_digest(config.blocks),
+            blocks_sha256=digest,
         )
         session = Session(
             config,
