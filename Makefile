@@ -138,14 +138,14 @@ data: ## Corpus stages that run on the pod. TASK=documents|aligned|replay|pack (
 evaluate: ## Evaluation suite on MODEL into artifacts/runs/RUN/evaluation.json. RUN= MODEL (operator, hpc)
 	$(call launch,evaluate) $(if $(MODEL),--model $(MODEL),)
 
-status: ## Is RUN alive: session, last log lines, latest checkpoints (operator, hpc)
-	$(call launch,status)
+status: ## Is RUN alive: session, recent events read plainly, checkpoints. RAW=1 for the raw log (operator, hpc)
+	$(call launch,status) $(if $(RAW),--raw,)
 
 stop: ## Stop RUN; training checkpoints at the end of its current step first (operator, hpc)
 	$(call launch,stop)
 
-logs: ## Stream RUN's log; Ctrl-C stops only the stream (operator, hpc)
-	$(call launch,logs)
+logs: ## Follow RUN's log read plainly; Ctrl-C stops only the stream. RAW=1 for the raw log (operator, hpc)
+	$(call launch,logs) $(if $(RAW),--raw,)
 
 pull: ## Fetch RUN's directory into artifacts/runs; weights only with WEIGHTS=1 (operator, hpc)
 	$(call launch,pull) $(if $(WEIGHTS),--weights,)

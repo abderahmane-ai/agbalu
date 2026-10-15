@@ -547,7 +547,9 @@ def evaluate_model(session: Session) -> None:
     if not state.reference:
         state.reference = scores
     eligible = guard_passes(scores, state.reference)
-    session.log.write("eval", step=state.step, bpc=scores, eligible=eligible)
+    session.log.write(
+        "eval", step=state.step, bpc=scores, reference=state.reference, eligible=eligible
+    )
     if eligible and (state.best_bpc is None or scores["kab"] < state.best_bpc):
         state.best_bpc, state.best_step = scores["kab"], state.step
         save_best(config.directory, model, state)

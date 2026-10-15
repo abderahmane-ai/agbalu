@@ -69,6 +69,27 @@ class TestParser:
         args = launch.build_parser().parse_args(["train", "--run", "r", "--stop", "2"])
         assert launch.train_arguments(args) == ["train", "--run", "r", "--stop-after", "2"]
 
+    def test_status_output_is_rendered_between_its_markers(self) -> None:
+        step = (
+            '{"event": "step", "time": 1.0, "step": 3, "loss": 2.5, "lr": 1e-05,'
+            ' "grad_norm": 1.0, "tokens": 1572864, "tokens_per_s": 4900.0, "mfu": 0.49,'
+            ' "memory": 34000000000, "total_steps": 1527, "eta_h": 45.0}'
+        )
+        output = (
+            f"session: running\n{launch.LOG_MARKER}\n{step}\n"
+            f"{launch.CHECKPOINT_MARKER}\n/x/runs/r/step-0000002\n/x/runs/r/step-0000003\n"
+        )
+        lines = launch.readable_status(output)
+        assert lines[0] == "session: running"
+        assert lines[1].startswith("step 3/1,527")
+        assert lines[-1] == "checkpoints: step-0000002, step-0000003"
+
+    def test_status_script_marks_its_sections(self) -> None:
+        script = launch.status_script("r", 600)
+        assert launch.LOG_MARKER in script
+        assert launch.CHECKPOINT_MARKER in script
+        assert "tail -n 600" in script
+
     def test_stop_sends_ctrl_c_to_the_runs_session(self) -> None:
         assert "tmux send-keys -t agbalu-a-b C-c" in launch.stop_script("a/b")
 

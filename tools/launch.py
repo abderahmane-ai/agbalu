@@ -22,6 +22,7 @@ from typing import Final
 
 from agbalu.llm.provenance import STAMP_FILE, git_stamp
 from agbalu.llm.smoke import SMOKE_PARTS
+from tools.run_log import Printer, View, summary
 
 HOST: Final = "hpc"
 PROJECT: Final = "agbalu"
@@ -91,6 +92,13 @@ evaluation set is present."""
 
 DATA_TASKS: Final = ("documents", "aligned", "replay", "pack")
 LOG_LINES: Final = 20
+STATUS_BACKLOG: Final = 600
+"""Raw log lines `status` reads: about four training steps with their progress lines."""
+
+STATUS_EVENTS: Final = 12
+STREAM_BACKLOG: Final = 400
+LOG_MARKER: Final = "@@log@@"
+CHECKPOINT_MARKER: Final = "@@checkpoints@@"
 
 
 class LaunchError(Exception):
@@ -153,14 +161,74 @@ def setup_script() -> str:
     return f"{build} && {PYTHON} -c {shlex.quote(probe)}"
 
 
-def status_script(run: str) -> str:
+def status_script(run: str, lines: int) -> str:
+    """Session state, the log's tail and the newest checkpoints, between section markers."""
     runs = f"{REMOTE_ROOT}/{RUNS}/{run}"
     return (
         f"(tmux has-session -t {session_name(run)} 2>/dev/null && echo 'session: running'"
         " || echo 'session: not running');"
-        f" tail -n {LOG_LINES} {runs}/log.txt 2>/dev/null;"
-        f" ls -d {runs}/step-* {runs}/*/step-* 2>/dev/null | tail -n 3"
+        f" echo {LOG_MARKER}; tail -n {lines} {runs}/log.txt 2>/dev/null;"
+        f" echo {CHECKPOINT_MARKER}; ls -d {runs}/step-* {runs}/*/step-* 2>/dev/null | tail -n 3"
     )
+
+
+def readable_status(output: str) -> list[str]:
+    """The status script's output with its log section rendered for a person."""
+    head, _, rest = output.partition(LOG_MARKER)
+    log, _, saved = rest.partition(CHECKPOINT_MARKER)
+    lines = [head.strip(), *summary(log.splitlines(), STATUS_EVENTS)]
+    found = [line.strip() for line in saved.splitlines() if line.strip()]
+    lines.append("checkpoints: " + (", ".join(Path(p).name for p in found) if found else "none"))
+    return lines
+
+
+def show_status(run: str, *, raw: bool) -> None:
+    if raw:
+        execute(remote(status_script(run, LOG_LINES)))
+        return
+    result = subprocess.run(
+        remote(status_script(run, STATUS_BACKLOG)),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if result.returncode != 0:
+        message = f"status failed with exit {result.returncode}: {result.stderr.strip()[:300]}"
+        raise LaunchError(message)
+    print("\n".join(readable_status(result.stdout)))
+
+
+def write_now(text: str) -> None:
+    sys.stdout.write(text)
+    sys.stdout.flush()
+
+
+def stream_log(run: str, *, raw: bool) -> None:
+    """Follow the log until Ctrl-C, which ends the stream on this machine and nothing else."""
+    path = f"{REMOTE_ROOT}/{RUNS}/{run}/log.txt"
+    if raw:
+        execute(["ssh", "-t", HOST, f"tail -f {path}"])
+        return
+    view = View()
+    printer = Printer(write_now, terminal=sys.stdout.isatty())
+    process = subprocess.Popen(
+        ["ssh", "-o", "ConnectTimeout=15", HOST, f"tail -n {STREAM_BACKLOG} -F {path}"],
+        stdout=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    try:
+        if process.stdout is not None:
+            for line in process.stdout:
+                printer.show(view.render(line))
+    except KeyboardInterrupt:
+        write_now("\n")
+    finally:
+        process.terminate()
+        process.wait()
 
 
 def stop_script(run: str) -> str:
@@ -257,6 +325,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--steps", type=int)
     parser.add_argument("--stop", type=int, help="end the train invocation at this step")
     parser.add_argument("--weights", action="store_true")
+    parser.add_argument("--raw", action="store_true", help="status and logs as the raw log")
     return parser
 
 
@@ -280,10 +349,9 @@ def main(argv: list[str] | None = None) -> int:
             case "sync":
                 sync()
             case "status":
-                execute(remote(status_script(require(args.run, "--run", "status"))))
+                show_status(require(args.run, "--run", "status"), raw=args.raw)
             case "logs":
-                run = require(args.run, "--run", "logs")
-                execute(["ssh", "-t", HOST, f"tail -f {REMOTE_ROOT}/{RUNS}/{run}/log.txt"])
+                stream_log(require(args.run, "--run", "logs"), raw=args.raw)
             case "pull":
                 run = require(args.run, "--run", "pull")
                 skip = [] if args.weights else ["--exclude", "step-*", "--exclude", "best"]
