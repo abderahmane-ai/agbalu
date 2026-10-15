@@ -99,6 +99,7 @@ STATUS_EVENTS: Final = 12
 STREAM_BACKLOG: Final = 400
 LOG_MARKER: Final = "@@log@@"
 CHECKPOINT_MARKER: Final = "@@checkpoints@@"
+BASELINE_MARKER: Final = "@@baseline@@"
 
 
 class LaunchError(Exception):
@@ -161,12 +162,19 @@ def setup_script() -> str:
     return f"{build} && {PYTHON} -c {shlex.quote(probe)}"
 
 
+def baseline_command(run: str) -> str:
+    """The run's first evaluation from its event file, which a log tail may not reach."""
+    events = f"{REMOTE_ROOT}/{RUNS}/{run}/log.jsonl"
+    return f'grep -m 1 \'"event": "eval"\' {events} 2>/dev/null || true'
+
+
 def status_script(run: str, lines: int) -> str:
     """Session state, the log's tail and the newest checkpoints, between section markers."""
     runs = f"{REMOTE_ROOT}/{RUNS}/{run}"
     return (
         f"(tmux has-session -t {session_name(run)} 2>/dev/null && echo 'session: running'"
         " || echo 'session: not running');"
+        f" echo {BASELINE_MARKER}; {baseline_command(run)};"
         f" echo {LOG_MARKER}; tail -n {lines} {runs}/log.txt 2>/dev/null;"
         f" echo {CHECKPOINT_MARKER}; ls -d {runs}/step-* {runs}/*/step-* 2>/dev/null | tail -n 3"
     )
@@ -174,9 +182,10 @@ def status_script(run: str, lines: int) -> str:
 
 def readable_status(output: str) -> list[str]:
     """The status script's output with its log section rendered for a person."""
-    head, _, rest = output.partition(LOG_MARKER)
+    head, _, rest = output.partition(BASELINE_MARKER)
+    baseline, _, rest = rest.partition(LOG_MARKER)
     log, _, saved = rest.partition(CHECKPOINT_MARKER)
-    lines = [head.strip(), *summary(log.splitlines(), STATUS_EVENTS)]
+    lines = [head.strip(), *summary(log.splitlines(), STATUS_EVENTS, baseline.strip())]
     found = [line.strip() for line in saved.splitlines() if line.strip()]
     lines.append("checkpoints: " + (", ".join(Path(p).name for p in found) if found else "none"))
     return lines
@@ -212,6 +221,15 @@ def stream_log(run: str, *, raw: bool) -> None:
         execute(["ssh", "-t", HOST, f"tail -f {path}"])
         return
     view = View()
+    baseline = subprocess.run(
+        ["ssh", "-o", "ConnectTimeout=15", HOST, baseline_command(run)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    view.seed(baseline.stdout)
     printer = Printer(write_now, terminal=sys.stdout.isatty())
     process = subprocess.Popen(
         ["ssh", "-o", "ConnectTimeout=15", HOST, f"tail -n {STREAM_BACKLOG} -F {path}"],

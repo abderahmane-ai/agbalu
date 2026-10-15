@@ -68,7 +68,23 @@ class View:
         self.losses: deque[float] = deque(maxlen=LOSS_WINDOW)
         self.total: int | None = None
         self.reference: dict[str, float] | None = None
+        self.reference_step: int | None = None
         self.progress = ""
+
+    def seed(self, line: str) -> None:
+        """Take the baseline from the run's first evaluation, which a log tail may not reach."""
+        stripped = line.strip()
+        if not stripped.startswith("{"):
+            return
+        try:
+            event = json.loads(stripped)
+        except json.JSONDecodeError:
+            return
+        scores = event.get("bpc") if isinstance(event, dict) else None
+        step = event.get("step") if isinstance(event, dict) else None
+        if isinstance(scores, dict) and isinstance(step, int):
+            self.reference = {str(k): float(v) for k, v in scores.items()}
+            self.reference_step = step
 
     def render(self, line: str) -> Rendered | None:
         stripped = line.rstrip("\n").split("\r")[-1].strip()
@@ -172,16 +188,24 @@ class View:
         scores = event.get("bpc")
         if not isinstance(scores, dict):
             return Rendered(f"eval at step {event.get('step')}: {scores}", live=False)
+        step = event.get("step")
         given = event.get("reference")
         if isinstance(given, dict) and given:
             self.reference = {str(k): float(v) for k, v in given.items()}
+            self.reference_step = 0
         elif self.reference is None:
             self.reference = {str(k): float(v) for k, v in scores.items()}
+            self.reference_step = step if isinstance(step, int) else None
+        compare = self.reference_step != step
         parts = []
         for language in ("kab", "eng", "fra"):
             value = float(scores[language])
             start = self.reference.get(language)
-            delta = f" ({change(value, start)} vs step 0 {start:.3f})" if start else ""
+            delta = (
+                f" ({change(value, start)} vs step {self.reference_step} {start:.3f})"
+                if start and compare
+                else ""
+            )
             parts.append(f"{language} {value:.3f}{delta}")
         guard = "drift guard ok" if event.get("eligible") else "DRIFT GUARD FAILED"
         return Rendered(
@@ -255,9 +279,10 @@ class Printer:
         self.showing_live = False
 
 
-def summary(lines: list[str], keep: int) -> list[str]:
+def summary(lines: list[str], keep: int, baseline: str = "") -> list[str]:
     """The last `keep` permanent lines of a log, then where the run stands right now."""
     view = View()
+    view.seed(baseline)
     permanent: list[str] = []
     live = ""
     for line in lines:

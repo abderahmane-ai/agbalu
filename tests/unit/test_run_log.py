@@ -112,6 +112,31 @@ class TestEvaluation:
         assert "DRIFT GUARD FAILED" in rendered.text
 
 
+class TestBaseline:
+    def test_a_seeded_step_0_baseline_is_used_when_the_tail_misses_it(self) -> None:
+        view = View()
+        view.seed(event("eval", step=0, bpc={"kab": 4.258, "eng": 1.32, "fra": 1.658}))
+        rendered = view.render(
+            event("eval", step=50, bpc={"kab": 1.911, "eng": 1.026, "fra": 1.27}, eligible=True)
+        )
+        assert rendered is not None
+        assert "kab 1.911 (-55.1% vs step 0 4.258)" in rendered.text
+
+    def test_an_unseeded_view_never_calls_its_first_eval_step_0(self) -> None:
+        rendered = View().render(
+            event("eval", step=50, bpc={"kab": 1.911, "eng": 1.026, "fra": 1.27}, eligible=True)
+        )
+        assert rendered is not None
+        assert "vs step" not in rendered.text
+        assert "kab 1.911 |" in rendered.text
+
+    def test_a_bad_seed_is_ignored(self) -> None:
+        view = View()
+        view.seed("")
+        view.seed("{not json")
+        assert view.reference is None
+
+
 class TestPassThrough:
     def test_library_chatter_is_dropped(self) -> None:
         view = View()

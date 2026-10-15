@@ -76,7 +76,7 @@ class TestParser:
             ' "memory": 34000000000, "total_steps": 1527, "eta_h": 45.0}'
         )
         output = (
-            f"session: running\n{launch.LOG_MARKER}\n{step}\n"
+            f"session: running\n{launch.BASELINE_MARKER}\n\n{launch.LOG_MARKER}\n{step}\n"
             f"{launch.CHECKPOINT_MARKER}\n/x/runs/r/step-0000002\n/x/runs/r/step-0000003\n"
         )
         lines = launch.readable_status(output)
