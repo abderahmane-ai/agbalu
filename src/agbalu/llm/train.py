@@ -1,10 +1,15 @@
-"""Continued pretraining on one GPU (task 11.18).
+"""Continued pretraining and supervised fine-tuning on one GPU (tasks 11.18 and 11.23).
 
-The trainer reads `pack`'s blocks in file order: the shuffle happened there, so a step is a
-fixed slice of the file and a resumed run reads exactly the blocks an uninterrupted one
-would. Each forward takes `micro_blocks` blocks as one variable-length row, and the loss of
-a step is the summed loss of its rows divided by the step's scored tokens, so every target
+For CPT the trainer reads `pack`'s blocks in file order: the shuffle happened there, so a
+step is a fixed slice of the file and a resumed run reads exactly the blocks an uninterrupted
+one would. Each forward takes `micro_blocks` blocks as one variable-length row, and the loss
+of a step is the summed loss of its rows divided by the step's scored tokens, so every target
 token weighs the same however the documents fell into rows.
+
+For SFT the rows come from `agbalu.llm.sft_rows`, already packed and masked, in an order
+seeded per epoch; the step is the same function, scoring only the supervised tokens. The best
+checkpoint is the one with the lowest loss on the SFT validation rows, and held-out bits per
+character are logged beside it as a drift diagnostic.
 
 A run directory holds `config.json`, `log.jsonl`, up to `keep` checkpoints (`step-NNNNNNN/`:
 weights, `optimizer.pt`, `rng.pt`, `state.json`, written to a hidden partial directory and
@@ -34,7 +39,14 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 
 from agbalu.llm.bases import TEXT_TOWER_PARAMETERS
-from agbalu.llm.evaluate import HELDOUT_LANGUAGES, Scorer, Tokenizer, greedy, held_out
+from agbalu.llm.evaluate import (
+    HELDOUT_LANGUAGES,
+    Scorer,
+    Tokenizer,
+    greedy,
+    held_out,
+    summed_nll,
+)
 from agbalu.llm.forward import LanguageModel, hidden_states, to_device
 from agbalu.llm.holdout import read as read_heldout
 from agbalu.llm.loss import logit_softcap, sequence_loss
@@ -47,11 +59,18 @@ from agbalu.llm.recipe import (
     GRADIENT_CLIP,
     MICRO_BLOCKS,
     PEAK_LR,
+    SFT_EPOCHS,
+    SFT_SEED,
+    SFT_WARMUP_FRACTION,
+    SFT_WEIGHT_DECAY,
+    WARMUP_FRACTION,
     WEIGHT_DECAY,
     learning_rate,
 )
+from agbalu.llm.sft_rows import Rows
 
 Optimizer = Literal["adamw8bit", "adamw"]
+Objective = Literal["cpt", "sft"]
 
 RUNS_ROOT: Final = Path("artifacts/runs")
 HELDOUT_DIR: Final = Path("data/processed/llm")
@@ -117,8 +136,18 @@ class RunConfig:
     workers: int = 8
     runs_root: Path = RUNS_ROOT
     heldout_dir: Path = HELDOUT_DIR
+    objective: Objective = "cpt"
+    validation: Path | None = None
+    """SFT validation rows, the loss the best checkpoint is chosen on; SFT only."""
+
+    expected_parameters: int | None = None
+    """The text-tower count a model loaded from disk must have; a published repository is
+    held to `TEXT_TOWER_PARAMETERS` instead."""
 
     def __post_init__(self) -> None:
+        if self.objective == "sft" and self.validation is None:
+            message = f"{self.run}: an SFT run needs validation rows"
+            raise TrainError(message)
         if self.micro_blocks < 1 or self.blocks_per_step % self.micro_blocks:
             message = f"{self.blocks_per_step} blocks a step do not split into {self.micro_blocks}"
             raise TrainError(message)
@@ -138,12 +167,29 @@ class RunConfig:
         return self.runs_root / self.run
 
     def identity(self) -> dict[str, object]:
-        """What a resumed run must share with the run it continues."""
+        """What a resumed run must share with the run it continues.
+
+        A CPT run's identity omits the fields added for SFT, which did not exist when
+        `jugurtha-4b-v1` stored its config: adding them must not refuse its resume.
+        """
         values = asdict(self)
         for transient in ("stop_after", "workers", "runs_root", "heldout_dir"):
             values.pop(transient)
         values["blocks"] = str(self.blocks)
+        if self.objective == "cpt":
+            for added in ("objective", "validation", "expected_parameters"):
+                values.pop(added)
+        else:
+            values["validation"] = str(self.validation)
         return values
+
+    @property
+    def warmup_fraction(self) -> float:
+        return WARMUP_FRACTION if self.objective == "cpt" else SFT_WARMUP_FRACTION
+
+    @property
+    def weight_decay(self) -> float:
+        return WEIGHT_DECAY if self.objective == "cpt" else SFT_WEIGHT_DECAY
 
 
 @dataclass(slots=True)
@@ -157,6 +203,8 @@ class RunState:
 
     best_bpc: float | None = None
     best_step: int | None = None
+    best_validation: float | None = None
+    """SFT: the lowest validation loss so far, nats per supervised token."""
 
     @classmethod
     def read(cls, path: Path) -> RunState:
@@ -316,7 +364,24 @@ def stream(config: RunConfig, eos: int, first_step: int, total: int) -> Iterator
     yield from loader
 
 
-def parameter_groups(model: LanguageModel) -> list[dict[str, object]]:
+def sft_order(rows: int, epochs: int = SFT_EPOCHS, seed: int = SFT_SEED) -> list[int]:
+    """Row indices for the whole schedule, each epoch its own seeded permutation."""
+    order: list[int] = []
+    for epoch in range(epochs):
+        order.extend(int(i) for i in np.random.default_rng(seed + epoch).permutation(rows))
+    return order
+
+
+def sft_stream(
+    rows: Rows, micros_per_step: int, first_step: int, total: int
+) -> Iterator[PackedRow]:
+    """The rows from `first_step` to the end of the schedule; a resume reads the same rows."""
+    order = sft_order(len(rows))
+    for index in order[first_step * micros_per_step : total * micros_per_step]:
+        yield rows.packed(index)
+
+
+def parameter_groups(model: LanguageModel, weight_decay: float) -> list[dict[str, object]]:
     """Weight decay on matrices only; norms, biases and the delta-rule scalars are exempt."""
     decay: list[torch.nn.Parameter] = []
     exempt: list[torch.nn.Parameter] = []
@@ -324,13 +389,13 @@ def parameter_groups(model: LanguageModel) -> list[dict[str, object]]:
         if parameter.requires_grad:
             (decay if parameter.ndim >= MATRIX_AXES else exempt).append(parameter)
     return [
-        {"params": decay, "weight_decay": WEIGHT_DECAY},
+        {"params": decay, "weight_decay": weight_decay},
         {"params": exempt, "weight_decay": 0.0},
     ]
 
 
 def build_optimizer(model: LanguageModel, config: RunConfig) -> torch.optim.Optimizer:
-    groups = parameter_groups(model)
+    groups = parameter_groups(model, config.weight_decay)
     if config.optimizer == "adamw8bit":
         from torchao.optim import AdamW8bit
 
@@ -411,12 +476,17 @@ def restore(path: Path, optimizer: torch.optim.Optimizer) -> RunState:
 
 
 def save_best(directory: Path, model: LanguageModel, state: RunState) -> None:
-    progress("save_best", step=state.step, kab_bpc=state.best_bpc)
+    chosen_on = (
+        {"kab_bpc": state.best_bpc}
+        if state.best_validation is None
+        else {"validation_loss": state.best_validation}
+    )
+    progress("save_best", step=state.step, **chosen_on)
     partial = directory / ".best.partial"
     if partial.exists():
         shutil.rmtree(partial)
     model.save_pretrained(partial)
-    write_json(partial / "best.json", {"step": state.step, "kab_bpc": state.best_bpc})
+    write_json(partial / "best.json", {"step": state.step, **chosen_on})
     final = directory / "best"
     if final.exists():
         shutil.rmtree(final)
@@ -458,14 +528,24 @@ def check_identity(config: RunConfig, log: EventLog) -> None:
     log.write("config_matches", hash=config_hash(identity))
 
 
-def count_parameters(model: LanguageModel, repo: str) -> int:
-    """Trainable parameters, held to the published count where the repository has one."""
+def count_parameters(model: LanguageModel, config: RunConfig) -> int:
+    """Trainable parameters, held to the published count where the repository has one, or
+    to `expected_parameters` for a model on disk."""
     total = sum(p.numel() for _, p in model.named_parameters() if p.requires_grad)
-    expected = TEXT_TOWER_PARAMETERS.get(repo)
+    expected = TEXT_TOWER_PARAMETERS.get(config.model, config.expected_parameters)
     if expected is not None and total != expected:
-        message = f"{repo}: {total:,} trainable parameters, the text tower has {expected:,}"
+        message = f"{config.model}: {total:,} trainable parameters, the text tower has {expected:,}"
         raise TrainError(message)
     return total
+
+
+def validation_loss(scorer: Scorer, rows: Rows) -> float:
+    """Nats per supervised token over every validation row."""
+    nats, targets = summed_nll(scorer, [rows.packed(index) for index in range(len(rows))])
+    if targets < 1:
+        message = "the validation rows supervise no token"
+        raise TrainError(message)
+    return nats / targets
 
 
 def peak_memory(device: torch.device) -> int | None:
@@ -485,11 +565,13 @@ class Session:
     tokenizer: Tokenizer
     device: torch.device
     total: int
-    block_length: int
     parameters: int
     log: EventLog
     stop: StopRequest | None
+    rows: Rows | None = None
+    validation: Rows | None = None
     step_seconds: list[float] = field(default_factory=list)
+    step_tokens: list[int] = field(default_factory=list)
     wait_seconds: list[float] = field(default_factory=list)
     tokens_this_run: int = 0
     micro: int = 0
@@ -504,9 +586,11 @@ class Session:
 def summary(session: Session, ended: str) -> dict[str, object]:
     """Throughput of this invocation, the first step excluded as warm-up when there are more."""
     config, state = session.config, session.state
-    steady = session.step_seconds[1:] or session.step_seconds
-    tokens_per_step = config.blocks_per_step * session.block_length
-    tokens_per_second = tokens_per_step / statistics.fmean(steady) if steady else None
+    first = 1 if len(session.step_seconds) > 1 else 0
+    steady = session.step_seconds[first:]
+    tokens_per_second = (
+        math.fsum(session.step_tokens[first:]) / math.fsum(steady) if steady else None
+    )
     return {
         "run": config.run,
         "ended": ended,
@@ -517,6 +601,7 @@ def summary(session: Session, ended: str) -> dict[str, object]:
         "skipped": state.skipped,
         "best_step": state.best_step,
         "best_kab_bpc": state.best_bpc,
+        "best_validation_loss": state.best_validation,
         "step_seconds_median": statistics.median(steady) if steady else None,
         "tokens_per_second": tokens_per_second,
         "mfu": (
@@ -546,19 +631,49 @@ def evaluate_model(session: Session) -> None:
     scores = heldout_bpc(scorer, session.tokenizer, config.heldout_limit, config.heldout_dir)
     if not state.reference:
         state.reference = scores
-    eligible = guard_passes(scores, state.reference)
-    session.log.write(
-        "eval", step=state.step, bpc=scores, reference=state.reference, eligible=eligible
-    )
-    if eligible and (state.best_bpc is None or scores["kab"] < state.best_bpc):
-        state.best_bpc, state.best_step = scores["kab"], state.step
-        save_best(config.directory, model, state)
-        session.log.write("best", step=state.step, kab_bpc=scores["kab"])
+    if session.validation is not None:
+        choose_on_validation(session, scorer, scores)
+    else:
+        eligible = guard_passes(scores, state.reference)
+        session.log.write(
+            "eval", step=state.step, bpc=scores, reference=state.reference, eligible=eligible
+        )
+        if eligible and (state.best_bpc is None or scores["kab"] < state.best_bpc):
+            state.best_bpc, state.best_step = scores["kab"], state.step
+            save_best(config.directory, model, state)
+            session.log.write("best", step=state.step, kab_bpc=scores["kab"])
     if config.probe:
         budgets = [PROBE_TOKENS] * len(PROBES)
         texts = greedy(model, session.tokenizer, PROBES, budgets, device=session.device)
         session.log.write("probe", step=state.step, texts=dict(zip(PROBES, texts, strict=True)))
     model.train()
+
+
+def scheduled_rate(session: Session) -> float:
+    config = session.config
+    return learning_rate(
+        session.state.step,
+        session.total,
+        peak=config.peak_lr,
+        warmup_fraction=config.warmup_fraction,
+    )
+
+
+def choose_on_validation(session: Session, scorer: Scorer, bpc: dict[str, float]) -> None:
+    """SFT: the lowest validation loss is the best checkpoint; bits per character are logged
+    beside it as a drift diagnostic and choose nothing."""
+    state, validation = session.state, session.validation
+    if validation is None:
+        message = "no validation rows to choose the best checkpoint on"
+        raise TrainError(message)
+    loss = validation_loss(scorer, validation)
+    session.log.write(
+        "eval", step=state.step, validation_loss=loss, bpc=bpc, reference=state.reference
+    )
+    if state.best_validation is None or loss < state.best_validation:
+        state.best_validation, state.best_step = loss, state.step
+        save_best(session.config.directory, session.model, state)
+        session.log.write("best", step=state.step, validation_loss=loss)
 
 
 def step(session: Session, batch: list[PackedRow]) -> tuple[float, float, bool]:
@@ -584,7 +699,7 @@ def step(session: Session, batch: list[PackedRow]) -> tuple[float, float, bool]:
     norm = torch.nn.utils.clip_grad_norm_(params, GRADIENT_CLIP)
     finite = bool(torch.isfinite(norm).item())
     if finite:
-        lr = learning_rate(session.state.step, session.total, peak=session.config.peak_lr)
+        lr = scheduled_rate(session)
         for group in session.optimizer.param_groups:
             current = group["lr"]
             if isinstance(current, torch.Tensor):
@@ -634,7 +749,11 @@ def steps(session: Session) -> str:
         session.phase = "evaluating"
         evaluate_now(session)
     session.model.train()
-    micro_batches = stream(config, session.tokenizer.eos, state.step, session.total)
+    micro_batches = (
+        stream(config, session.tokenizer.eos, state.step, session.total)
+        if session.rows is None
+        else sft_stream(session.rows, config.micros_per_step, state.step, session.total)
+    )
     ended = "schedule"
     while state.step < session.total:
         session.phase = "training"
@@ -652,7 +771,7 @@ def steps(session: Session) -> str:
             batch.append(next(micro_batches))
             session.wait_seconds.append(time.perf_counter() - waited)
         session.phase = "training"
-        lr = learning_rate(state.step, session.total, peak=config.peak_lr)
+        lr = scheduled_rate(session)
         loss, norm, taken = step(session, batch)
         elapsed = time.perf_counter() - started
         processed = sum(int(row.input_ids.size) for row in batch)
@@ -661,6 +780,7 @@ def steps(session: Session) -> str:
         state.targets += sum(row.targets for row in batch)
         session.tokens_this_run += processed
         session.step_seconds.append(elapsed)
+        session.step_tokens.append(processed)
         session.log.write(
             "step",
             step=state.step,
@@ -711,8 +831,14 @@ def train(
     log = EventLog(config.directory / "log.jsonl")
     with RunLock(config.directory / "lock", log):
         check_identity(config, log)
-        blocks, block_length = block_shape(config.blocks)
-        available = blocks // config.blocks_per_step
+        rows = validation = None
+        if config.objective == "cpt":
+            blocks, _ = block_shape(config.blocks)
+            available = blocks // config.blocks_per_step
+        else:
+            rows = Rows.read(config.blocks)
+            validation = Rows.read(config.validation) if config.validation else None
+            available = len(sft_order(len(rows))) // config.micros_per_step
         total = config.total_steps if config.total_steps is not None else available
         if not 1 <= total <= available:
             message = f"{total} steps requested, {config.blocks} holds {available}"
@@ -723,7 +849,7 @@ def train(
         source = latest if latest is not None else config.model
         with stage("load model", source=str(source)):
             model = load(source, weight_dtype(config.optimizer))
-        parameters = count_parameters(model, config.model)
+        parameters = count_parameters(model, config)
         model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
         optimizer = build_optimizer(model, config)
         if latest is not None:
@@ -753,10 +879,11 @@ def train(
             tokenizer,
             device,
             total,
-            block_length,
             parameters,
             log,
             stop,
+            rows,
+            validation,
         )
         return loop(session)
 

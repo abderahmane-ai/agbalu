@@ -44,6 +44,30 @@ as often: the signal they add is the alignment, not the Kabyle."""
 REPLAY_SHARE: Final = 1 / 3
 """Replay's share of the token stream, read once."""
 
+SFT_PEAK_LR: Final = 5e-6
+SFT_WARMUP_FRACTION: Final = 0.03
+SFT_WEIGHT_DECAY: Final = 0.01
+SFT_ROW_TOKENS: Final = 8192
+SFT_ROWS_PER_STEP: Final = 4
+"""32,768 tokens an update (`docs/llm_post_training_design.md` §5)."""
+
+SFT_REPLAY_SHARE: Final = 0.10
+"""Raw-text replay's share of the *supervised* tokens. Replay is mixed into the same rows as
+the conversations and every supervised token weighs the same, so the loss is 90% conversation
+and 10% replay in expectation in every update, including updates no replay row would reach
+if replay were packed apart."""
+
+SFT_SEED: Final = 20261016
+"""Seeds the row packing and the per-epoch row order."""
+
+SFT_EPOCHS: Final = 1
+"""About 153 updates over the ~5M-token set (`docs/llm_post_training_design.md` §5)."""
+
+DPO_PEAK_LR: Final = 5e-7
+DPO_BETA: Final = 0.1
+DPO_PAIRS_PER_STEP: Final = 16
+DPO_MAX_TOKENS: Final = 4096
+
 
 class RecipeError(Exception):
     """A schedule cannot be built."""
@@ -58,7 +82,9 @@ def replay_budget(kabyle_tokens: int, aligned_tokens: int) -> int:
     return round(target * REPLAY_SHARE / (1 - REPLAY_SHARE))
 
 
-def learning_rate(step: int, total: int, *, peak: float = PEAK_LR) -> float:
+def learning_rate(
+    step: int, total: int, *, peak: float = PEAK_LR, warmup_fraction: float = WARMUP_FRACTION
+) -> float:
     """Linear warmup then cosine decay to `FINAL_LR_FRACTION` of peak.
 
     `step` is zero-based and step 0 is not zero: a first step at lr 0 wastes an optimizer
@@ -70,7 +96,7 @@ def learning_rate(step: int, total: int, *, peak: float = PEAK_LR) -> float:
     if not 0 <= step < total:
         message = f"step {step} is outside a run of {total}"
         raise RecipeError(message)
-    warmup = max(1, int(total * WARMUP_FRACTION))
+    warmup = max(1, int(total * warmup_fraction))
     if step < warmup:
         return peak * (step + 1) / warmup
     progress = (step - warmup) / max(1, total - warmup)

@@ -4,7 +4,7 @@ Every remote action goes through the `hpc` SSH alias. Long work runs in a detach
 session on the pod and this returns at once with the run id; `status`, `logs` and `pull`
 read it back later. Nothing here waits on a job.
 
-    python3 -m tools.launch setup|sync|status|logs|pull|train|smoke|data|evaluate [--target hpc]
+    python3 -m tools.launch setup|sync|status|logs|pull|train|smoke|data|evaluate|merge
 """
 
 from __future__ import annotations
@@ -29,6 +29,8 @@ PROJECT: Final = "agbalu"
 REMOTE_ROOT: Final = f"/home/jovyan/{PROJECT}"
 ENVIRONMENT: Final = f"/home/jovyan/envs/{PROJECT}"
 PYTHON: Final = f"{ENVIRONMENT}/bin/python"
+VLLM_PYTHON: Final = "/home/jovyan/envs/vllm/bin/python"
+"""vLLM 0.30.0 pins torch 2.13, so it lives beside the training environment, not in it."""
 LOCK: Final = Path("requirements/hpc.lock")
 RUNS: Final = Path("artifacts/runs")
 
@@ -85,12 +87,16 @@ DATA_FILES: Final = (
     "data/raw/hf.imsidag.kabyle-datasets-mono",
     "data/raw/wikimedia.kabwiki",
     "artifacts/runs/dihya",
+    "data/processed/llm/sft/sft-v1.jsonl",
+    "data/interim/llm/sft/candidates.jsonl",
 )
 """What the pod reads that the code sync excludes: every evaluation set, the inputs of the
 document and aligned builds, and Dihya. The decontaminator refuses to run unless every
 evaluation set is present."""
 
-DATA_TASKS: Final = ("documents", "aligned", "replay", "pack")
+DATA_TASKS: Final = ("documents", "aligned", "replay", "pack", "sft", "fluency")
+WEIGHT_EXCLUDES: Final = ("--exclude", "step-*", "--exclude", "best", "--exclude", "model")
+"""What `pull` leaves on the pod unless `--weights`: checkpoints, the best model and a merge."""
 LOG_LINES: Final = 20
 STATUS_BACKLOG: Final = 600
 """Raw log lines `status` reads: about four training steps with their progress lines."""
@@ -129,14 +135,22 @@ def module(arguments: Sequence[str]) -> str:
     return " ".join([PYTHON, "-m", "agbalu.llm.cli", *(shlex.quote(a) for a in arguments)])
 
 
-def detached(run: str, arguments: Sequence[str], log: str) -> list[str]:
-    """A tmux session running the CLI with its output in the run's log file.
+def chat_module(arguments: Sequence[str]) -> str:
+    """The chat-mode evaluator in the vLLM environment, which shares nothing with training's."""
+    quoted = (shlex.quote(a) for a in arguments)
+    return " ".join([VLLM_PYTHON, "-m", "agbalu.llm.chat_eval", *quoted])
+
+
+def detached(run: str, arguments: Sequence[str], log: str, then: Sequence[str] = ()) -> list[str]:
+    """A tmux session running the CLI, then each command of `then` while all succeed, with
+    their output in the run's log file.
 
     A log left by an earlier start is renamed with its time first, so `status` and `logs`
     show this start only; a resumed run's history stays beside it.
     """
     log_path = shlex.quote(f"{REMOTE_ROOT}/{RUNS}/{log}")
-    job = f"{PREAMBLE} && {module(arguments)} > {log_path} 2>&1"
+    chain = " && ".join([module(arguments), *then])
+    job = f"{PREAMBLE} && {{ {chain}; }} > {log_path} 2>&1"
     command = (
         f"mkdir -p {shlex.quote(str(Path(f'{REMOTE_ROOT}/{RUNS}/{log}').parent))}"
         f" && (test ! -f {log_path} || mv {log_path} {log_path}.$(date +%Y%m%d-%H%M%S))"
@@ -288,34 +302,48 @@ def sync() -> None:
     print(f"synced code and {len(present)} data files; absent here: {absent or 'none'}")
 
 
-def record(run: str, arguments: Sequence[str], log: str) -> None:
+def record(run: str, arguments: Sequence[str], log: str, then: Sequence[str] = ()) -> None:
     """`artifacts/runs/<run>/hpc.session` on the laptop: what was started and where it logs."""
     path = RUNS / run / "hpc.session"
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "run": run,
         "session": session_name(run),
-        "command": module(arguments),
+        "command": " && ".join([module(arguments), *then]),
         "log": f"{REMOTE_ROOT}/{RUNS}/{log}",
         "started": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
     }
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
-def start(run: str, arguments: Sequence[str], log: str) -> None:
+def start(run: str, arguments: Sequence[str], log: str, then: Sequence[str] = ()) -> None:
     sync()
-    execute(detached(run, arguments, log))
-    record(run, arguments, log)
+    execute(detached(run, arguments, log, then))
+    record(run, arguments, log, then)
     print(f"started {session_name(run)}; run id {run}; log {REMOTE_ROOT}/{RUNS}/{log}")
 
 
 def train_arguments(args: argparse.Namespace) -> list[str]:
     arguments = ["train", "--run", args.run]
-    options = (("--model", args.model), ("--total-steps", args.steps), ("--stop-after", args.stop))
+    options = (
+        ("--model", args.model),
+        ("--total-steps", args.steps),
+        ("--stop-after", args.stop),
+        ("--objective", args.objective),
+    )
     for flag, value in options:
         if value is not None:
             arguments += [flag, str(value)]
     return arguments
+
+
+def merge_arguments(args: argparse.Namespace) -> list[str]:
+    """`--model` names the CPT checkpoint the delta is taken from."""
+    if args.alpha is None:
+        message = "merge needs --alpha"
+        raise LaunchError(message)
+    cpt = require(args.model, "--model", "merge")
+    return ["merge", "--run", args.run, "--alpha", str(args.alpha), "--cpt", cpt]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -333,6 +361,7 @@ def build_parser() -> argparse.ArgumentParser:
             "smoke",
             "data",
             "evaluate",
+            "merge",
         ),
     )
     parser.add_argument("--target", choices=("hpc",), default="hpc")
@@ -342,6 +371,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model")
     parser.add_argument("--steps", type=int)
     parser.add_argument("--stop", type=int, help="end the train invocation at this step")
+    parser.add_argument("--alpha", type=float, help="merge coefficient")
+    parser.add_argument("--objective", choices=("cpt", "sft"), help="train only; CLI default cpt")
+    parser.add_argument(
+        "--suite",
+        choices=("exit", "select", "release"),
+        default="exit",
+        help="exit: completion suite only; select and release add the chat suite",
+    )
     parser.add_argument("--weights", action="store_true")
     parser.add_argument("--raw", action="store_true", help="status and logs as the raw log")
     return parser
@@ -372,31 +409,69 @@ def main(argv: list[str] | None = None) -> int:
                 stream_log(require(args.run, "--run", "logs"), raw=args.raw)
             case "pull":
                 run = require(args.run, "--run", "pull")
-                skip = [] if args.weights else ["--exclude", "step-*", "--exclude", "best"]
+                skip = [] if args.weights else [*WEIGHT_EXCLUDES]
                 local = RUNS / run
                 local.mkdir(parents=True, exist_ok=True)
                 execute(["rsync", "-az", *skip, f"{HOST}:{REMOTE_ROOT}/{RUNS}/{run}/", f"{local}/"])
-            case "train":
-                run = require(args.run, "--run", "train")
-                start(run, train_arguments(args), f"{run}/log.txt")
-            case "smoke":
-                run = require(args.run, "--run", "smoke")
-                part = require(args.part, "--part", "smoke")
-                arguments = ["smoke", "--part", part, "--run", run]
-                start(f"{run}/{part}", arguments, f"{run}/{part}/log.txt")
-            case "data":
-                task = require(args.task, "--task", "data")
-                start(f"data-{task}", [task], f"data-{task}/log.txt")
             case _:
-                run = require(args.run, "--run", "evaluate")
-                arguments = ["evaluate", "--out", f"artifacts/runs/{run}/evaluation.json"]
-                if args.model:
-                    arguments += ["--model", args.model]
-                start(run, arguments, f"{run}/log.txt")
+                start(*job(args))
     except LaunchError as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
     return 0
+
+
+Job = tuple[str, list[str], str, list[str]]
+"""Run id, CLI arguments, log file, and the commands chained after the CLI."""
+
+
+def job(args: argparse.Namespace) -> Job:
+    """What an action that starts a detached job runs."""
+    match args.action:
+        case "train":
+            run = require(args.run, "--run", "train")
+            return run, train_arguments(args), f"{run}/log.txt", []
+        case "smoke":
+            run = require(args.run, "--run", "smoke")
+            part = require(args.part, "--part", "smoke")
+            arguments = ["smoke", "--part", part, "--run", run]
+            return f"{run}/{part}", arguments, f"{run}/{part}/log.txt", []
+        case "data":
+            task = require(args.task, "--task", "data")
+            return f"data-{task}", [task], f"data-{task}/log.txt", []
+        case "merge":
+            run = require(args.run, "--run", "merge")
+            return run, merge_arguments(args), f"{run}/log.txt", []
+        case _:
+            return evaluation_job(args)
+
+
+def evaluation_job(args: argparse.Namespace) -> Job:
+    """The completion-mode suite, then for `select` and `release` the chat-mode suite in each
+    thinking mode, each mode its own process because one vLLM engine is one process."""
+    run = require(args.run, "--run", "evaluate")
+    arguments = ["evaluate", "--out", f"{RUNS}/{run}/evaluation.json"]
+    if args.model:
+        arguments += ["--model", args.model]
+    if args.suite == "exit":
+        return run, arguments, f"{run}/log.txt", []
+    model = require(args.model, "--model", f"evaluate --suite {args.suite}")
+    chained = [
+        chat_module(
+            [
+                "--model",
+                model,
+                "--suite",
+                args.suite,
+                "--mode",
+                mode,
+                "--out",
+                f"{RUNS}/{run}/chat-{mode}.json",
+            ]
+        )
+        for mode in ("no_think", "think")
+    ]
+    return run, arguments, f"{run}/log.txt", chained
 
 
 if __name__ == "__main__":

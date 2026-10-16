@@ -29,6 +29,14 @@ def test_the_launcher_data_tasks_are_subcommands() -> None:
         assert cli.build_parser().parse_args([task]).command == task
 
 
+def test_the_launcher_merge_arguments_parse() -> None:
+    argv = ["merge", "--run", "m", "--alpha", "0.25", "--cpt", "c"]
+    args = cli.build_parser().parse_args(argv)
+    assert (args.alpha, args.cpt, args.verify) == (0.25, Path("c"), True)
+    assert args.base is None
+    assert args.instruct is None
+
+
 def test_aligned_training_never_reads_the_mined_pairs() -> None:
     assert cli.PARALLEL_KAB_FRA not in cli.ALIGNED_SOURCES
     assert cli.PARALLEL_KAB_FRA in cli.HOLDOUT_SOURCES

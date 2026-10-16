@@ -14,23 +14,20 @@ Every record read is either written out or written to the rejects file with its 
 from __future__ import annotations
 
 import bz2
-import hashlib
 import json
 import re
 from collections import Counter as Tally
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Final, Literal, Protocol, TextIO
+from typing import Final, Literal, Protocol, TextIO
 
 from agbalu.llm.corpus import TokenCounter, is_held_out
-from agbalu.llm.decontaminate import Decontaminator, words
+from agbalu.llm.decontaminate import Decontaminator
+from agbalu.llm.dedupe import NearDuplicates, exact_key
 from agbalu.llm.progress import Tracker, stage
 from agbalu.normalise import Normaliser
 from agbalu.registry import Registry
-
-if TYPE_CHECKING:
-    from datasketch import MinHashLSH
 
 Format = Literal["parquet", "jsonl", "wikitext"]
 
@@ -47,11 +44,6 @@ LID_WINDOW_CHARS: Final = 256
 LID_WINDOWS: Final = 4
 """Windows spread evenly over a document. One window judges only the opening, which on a
 web page is the most likely place for a menu in another language."""
-
-NEAR_DUPLICATE_THRESHOLD: Final = 0.8
-MINHASH_PERMUTATIONS: Final = 128
-SHINGLE_WORDS: Final = 5
-MINHASH_SEED: Final = 20260814
 
 REDISTRIBUTION_RANK: Final[dict[str, int]] = {
     "permissive": 0,
@@ -141,10 +133,6 @@ def verdict(rows: Sequence[dict[str, float]]) -> str:
         raise DocumentError(message)
     labels = rows[0].keys()
     return max(labels, key=lambda label: sum(row[label] for row in rows) / len(rows))
-
-
-def exact_key(text: str) -> bytes:
-    return hashlib.blake2b(" ".join(words(text)).encode("utf-8"), digest_size=16).digest()
 
 
 def wiki_plaintext(wikitext: str, title: str) -> str:
@@ -306,8 +294,6 @@ class Builder:
         *,
         batch: int = 256,
     ) -> None:
-        from datasketch import MinHashLSH
-
         self.scorer = scorer
         self.decontaminator = decontaminator
         self.counter = counter
@@ -316,9 +302,7 @@ class Builder:
         self.batch = batch
         self.normaliser = Normaliser()
         self.seen: set[bytes] = set()
-        self.lsh: MinHashLSH = MinHashLSH(
-            threshold=NEAR_DUPLICATE_THRESHOLD, num_perm=MINHASH_PERMUTATIONS
-        )
+        self.near = NearDuplicates()
         self.pending: list[Candidate] = []
         self.stats: dict[str, SourceStats] = {}
 
@@ -353,20 +337,7 @@ class Builder:
             self.flush()
 
     def _near_duplicate(self, candidate: Candidate) -> bool:
-        from datasketch import MinHash
-
-        tokens = words(candidate.text)
-        shingles = {
-            " ".join(tokens[i : i + SHINGLE_WORDS])
-            for i in range(max(1, len(tokens) - SHINGLE_WORDS + 1))
-        }
-        signature = MinHash(num_perm=MINHASH_PERMUTATIONS, seed=MINHASH_SEED)
-        for shingle in shingles:
-            signature.update(shingle.encode("utf-8"))
-        if self.lsh.query(signature):
-            return True
-        self.lsh.insert(f"{candidate.stats.source_id}:{candidate.key}", signature)
-        return False
+        return self.near.seen(f"{candidate.stats.source_id}:{candidate.key}", candidate.text)
 
     def flush(self) -> None:
         if not self.pending:

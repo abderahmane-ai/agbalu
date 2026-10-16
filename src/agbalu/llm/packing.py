@@ -62,8 +62,17 @@ def segment_starts(
     return np.union1d(edges, separators)
 
 
-def row(tokens: npt.NDArray[np.int64], starts: npt.NDArray[np.int64]) -> PackedRow:
-    """One row from its tokens and the sorted offsets where its segments begin."""
+def row(
+    tokens: npt.NDArray[np.int64],
+    starts: npt.NDArray[np.int64],
+    supervised: npt.NDArray[np.bool_] | None = None,
+) -> PackedRow:
+    """One row from its tokens and the sorted offsets where its segments begin.
+
+    `supervised` marks the tokens the loss scores, for SFT, where a prompt is read and not
+    learned; without it every token is scored, as in continued pretraining. A segment's
+    first token is never scored either way.
+    """
     if len(starts) == 0 or starts[0] != 0:
         message = "the first segment must start at offset 0"
         raise PackingError(message)
@@ -74,6 +83,11 @@ def row(tokens: npt.NDArray[np.int64], starts: npt.NDArray[np.int64]) -> PackedR
         raise PackingError(message)
     positions = np.arange(len(tokens), dtype=np.int64) - np.repeat(starts, lengths)
     labels = tokens.copy()
+    if supervised is not None:
+        if supervised.shape != tokens.shape:
+            message = f"mask of shape {supervised.shape} for {tokens.shape} tokens"
+            raise PackingError(message)
+        labels[~supervised] = IGNORE_INDEX
     labels[starts] = IGNORE_INDEX
     return PackedRow(
         input_ids=tokens[None, :],

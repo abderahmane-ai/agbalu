@@ -1,7 +1,7 @@
 """Phase 11: Jugurtha's corpus, training and evaluation.
 
 python3 -m agbalu.llm.cli documents|aligned|replay|pack|train|smoke|evaluate|criterion
-python3 -m agbalu.llm.cli fertility|holdout
+python3 -m agbalu.llm.cli fertility|holdout|merge|select
 """
 
 from __future__ import annotations
@@ -15,9 +15,20 @@ from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, TextIO
 
-from agbalu.llm import documents, holdout, mixture, pack, replay
-from agbalu.llm.bases import BASE
-from agbalu.llm.corpus import HOLDOUT_RATE, CorpusError, Source
+from agbalu.llm import (
+    documents,
+    holdout,
+    mixture,
+    pack,
+    replay,
+    sft_build,
+    sft_data,
+    sft_files,
+    teacher,
+)
+from agbalu.llm.bases import BASE, INSTRUCT, REVISIONS, TEXT_TOWER_PARAMETERS
+from agbalu.llm.chat import ChatError
+from agbalu.llm.corpus import HOLDOUT_RATE, CorpusError, Source, is_held_out
 from agbalu.llm.decontaminate import (
     DecontaminationError,
     Decontaminator,
@@ -26,15 +37,24 @@ from agbalu.llm.decontaminate import (
     heldout_sentences,
 )
 from agbalu.llm.documents import DocumentError
-from agbalu.llm.evaluate import PARTS, EvaluationError, HubTokenizer, exit_criterion
+from agbalu.llm.evaluate import PARTS, EvaluationError, HubTokenizer, Scorer, exit_criterion
 from agbalu.llm.fertility import Encoder, FertilityError, report, sample
+from agbalu.llm.merge import ALPHAS, MergeError
 from agbalu.llm.mixture import MixtureError
 from agbalu.llm.pack import PackError
 from agbalu.llm.progress import Heartbeat, stage
 from agbalu.llm.provenance import ProvenanceError, code_stamp
-from agbalu.llm.recipe import replay_budget
+from agbalu.llm.recipe import SFT_PEAK_LR, SFT_ROWS_PER_STEP, replay_budget
 from agbalu.llm.replay import ReplayError
+from agbalu.llm.seeds import CONVERSATIONS_PER_CARD, Card, SeedError
+from agbalu.llm.selection import SelectionError
+from agbalu.llm.sft_build import BuildError
+from agbalu.llm.sft_data import DataError
+from agbalu.llm.sft_files import FilesError
+from agbalu.llm.sft_rows import RowsError
+from agbalu.llm.signals import SignalError
 from agbalu.llm.smoke import SMOKE_PARTS
+from agbalu.llm.teacher import TeacherError
 
 if TYPE_CHECKING:
     import torch
@@ -49,6 +69,16 @@ FERTILITY_OUT: Final = Path("data/processed/llm/fertility.json")
 SAMPLE: Final = 3000
 
 LLM_DIR: Final = Path("data/processed/llm")
+RUNS: Final = Path("artifacts/runs")
+MERGE_RUNS: Final = tuple(RUNS / f"merge-a{round(alpha * 100):03d}" for alpha in ALPHAS)
+"""Where `make merge RUN=merge-a050 ALPHA=0.5` and its evaluation write, per coefficient."""
+
+SFT_DIR: Final = LLM_DIR / "sft"
+SFT_CONVERSATIONS: Final = SFT_DIR / "sft-v1.jsonl"
+SFT_ROWS: Final = SFT_DIR / "sft-rows.npz"
+SFT_VALIDATION: Final = SFT_DIR / "sft-validation.npz"
+SFT_EVERY: Final = 25
+"""Checkpoint and validation cadence in updates (`docs/llm_post_training_design.md` §5)."""
 DOCUMENTS_OUT: Final = LLM_DIR / "kab-docs.jsonl"
 ALIGNED_OUT: Final = LLM_DIR / "aligned.jsonl"
 REPLAY_OUT: Final = LLM_DIR / "replay.jsonl"
@@ -368,6 +398,43 @@ def command_pack(args: argparse.Namespace) -> int:
     return 0
 
 
+TOKENIZER_FILES: Final = ("tokenizer.json", "tokenizer_config.json", "chat_template.jinja")
+
+
+def file_tokens(stats: Path) -> int:
+    """The token count a corpus build recorded, which sets a replay draw's rate."""
+    tokens = json.loads(stats.read_text(encoding="utf-8")).get("tokens")
+    if not isinstance(tokens, int) or tokens < 1:
+        message = f"{stats}: no positive token count"
+        raise BuildError(message)
+    return tokens
+
+
+def command_sft(args: argparse.Namespace) -> int:
+    from huggingface_hub import snapshot_download
+    from transformers import AutoTokenizer
+
+    template = snapshot_download(
+        INSTRUCT, revision=REVISIONS[INSTRUCT], allow_patterns=list(TOKENIZER_FILES)
+    )
+    replay_sources = {
+        "kabyle": (args.kabyle, file_tokens(stats_path(args.kabyle))),
+        "aligned": (args.aligned, file_tokens(stats_path(args.aligned))),
+        "replay": (args.replay, file_tokens(stats_path(args.replay))),
+    }
+    stats = sft_build.build(
+        sft_build.read_conversations(args.conversations),
+        AutoTokenizer.from_pretrained(template),
+        HubTokenizer(BASE),
+        replay_sources,
+        sft_build.Outputs(args.out, args.validation),
+    )
+    write_stats(stats_path(args.out), {"conversations_file": str(args.conversations), **stats})
+    print(json.dumps(stats, indent=2))
+    print(f"-> {args.out}, {args.validation}")
+    return 0
+
+
 def loader(device: torch.device) -> Callable[[str | Path, torch.dtype], LanguageModel]:
     from agbalu.llm import kernels
 
@@ -397,6 +464,20 @@ def command_train(args: argparse.Namespace) -> int:
         total_steps=args.total_steps,
         stop_after=args.stop_after,
     )
+    if args.objective == "sft":
+        config = replace(
+            config,
+            objective="sft",
+            blocks=args.blocks if args.blocks != BLOCKS_OUT else SFT_ROWS,
+            validation=args.validation,
+            peak_lr=SFT_PEAK_LR,
+            blocks_per_step=SFT_ROWS_PER_STEP,
+            micro_blocks=1,
+            checkpoint_every=SFT_EVERY,
+            eval_every=SFT_EVERY,
+            probe=False,
+            expected_parameters=TEXT_TOWER_PARAMETERS[INSTRUCT],
+        )
     if args.checkpoint_every is not None:
         config = replace(config, checkpoint_every=args.checkpoint_every)
     if args.eval_every is not None:
@@ -444,6 +525,353 @@ def command_evaluate(args: argparse.Namespace) -> int:
     write_stats(args.out, {"model": args.model, **result})
     print(json.dumps(result, indent=2, ensure_ascii=False))
     print(f"-> {args.out}")
+    return 0
+
+
+SNAPSHOT_FILES: Final = ("*.safetensors", "*.json", "*.jinja", "merges.txt", "vocab.json")
+"""What a merge reads from a published checkpoint: weights, configs, tokenizer, template."""
+
+
+def snapshot(repo: str) -> Path:
+    """`repo` at its pinned revision in the local Hugging Face cache."""
+    from huggingface_hub import snapshot_download
+
+    path = snapshot_download(repo, revision=REVISIONS[repo], allow_patterns=list(SNAPSHOT_FILES))
+    return Path(path)
+
+
+def command_merge(args: argparse.Namespace) -> int:
+    from agbalu.llm import merge
+
+    sources = {
+        "base": f"{BASE}@{REVISIONS[BASE]}",
+        "instruct": f"{INSTRUCT}@{REVISIONS[INSTRUCT]}",
+        "cpt": str(args.cpt),
+    }
+    inputs = merge.Inputs(
+        base=args.base or snapshot(BASE),
+        cpt=args.cpt,
+        instruct=args.instruct or snapshot(INSTRUCT),
+        sources=sources,
+    )
+    out = RUNS / args.run / "model"
+    report = merge.merge(inputs, args.alpha, out)
+    write_stats(RUNS / args.run / merge.REPORT_FILE, report)
+    print(json.dumps(report["tensors"]), json.dumps(report["change"]))
+    if args.verify:
+        with stage("verify the merge loads"):
+            loaded = merge.verify(out)
+        write_stats(RUNS / args.run / "verify.json", loaded)
+        print(json.dumps(loaded, indent=2))
+    print(f"-> {out}")
+    return 0
+
+
+def command_select(args: argparse.Namespace) -> int:
+    from agbalu.llm.selection import read_candidate, select_alpha
+
+    verdict = select_alpha([read_candidate(run) for run in args.runs])
+    write_stats(args.out, verdict)
+    print(json.dumps(verdict, indent=2))
+    print(f"-> {args.out}")
+    return 0 if verdict["selected_alpha"] is not None else 2
+
+
+WIKI: Final = "wikimedia.kabwiki"
+
+
+def command_seeds(args: argparse.Namespace) -> int:
+    from agbalu.llm import seeds
+    from agbalu.registry.loader import load_registry
+
+    del args
+    registry = load_registry(REGISTRY)
+    index, control = decontaminator()
+    wiki = next(s for s in documents.DOCUMENT_SOURCES if s.source_id == WIKI)
+    articles = ((d.key, d.text) for d in documents.read_source(wiki))
+    passages = (
+        p
+        for p in seeds.wiki_passages(articles, registry.by_id(WIKI).licence)
+        if not index.matches(p.text)
+    )
+    rows = sft_files.read_jsonl(MT_TRAIN.path)
+    pairs = (
+        p
+        for p in seeds.pair_passages(rows, lambda source: registry.by_id(source).licence)
+        if not is_held_out(p.text)
+        and not index.matches(p.text)
+        and not index.matches(p.other or "")
+    )
+    cards = seeds.attach(seeds.allocate(), passages, pairs)
+    seeds.write(cards, sft_files.SEEDS)
+    stats = seeds.summary(cards)
+    write_stats(
+        stats_path(sft_files.SEEDS), {"decontamination": index_stats(index, control), **stats}
+    )
+    print(json.dumps(stats, indent=2))
+    return 0
+
+
+def command_prompts(args: argparse.Namespace) -> int:
+    from agbalu.llm import seeds
+
+    prompts = teacher.load_prompts()
+    candidates = sft_files.read_candidates()
+    kind = "critic" if args.critic else "batch"
+    replied = {path.stem for path in teacher.REPLY_DIR.glob(f"{kind}-*.txt")}
+    waiting = {
+        asked
+        for name, ids, _ in sft_files.manifests(teacher.BATCH_DIR, kind)
+        if name not in replied
+        for asked in ids
+    }
+    first = sft_files.next_number(teacher.BATCH_DIR, kind)
+    if args.critic:
+        judged = sft_files.read_verdicts()
+        todo = [c for c in candidates if c.id not in judged and c.id not in waiting]
+        size = args.batches * teacher.CANDIDATES_PER_CRITIC
+        written = teacher.write_critic_batches(todo[:size], prompts, teacher.BATCH_DIR, first)
+    else:
+        cards = seeds.read(sft_files.SEEDS)
+        pool = seeds.pilot(cards) if args.pilot else cards
+        todo_cards = teacher.wanting(pool, teacher.coverage(candidates), waiting)
+        size = args.batches * teacher.CARDS_PER_BATCH
+        written = teacher.write_batches(todo_cards[:size], prompts, teacher.BATCH_DIR, first)
+    for path in written:
+        print(f"paste {path}\n  save the reply as {teacher.REPLY_DIR / path.name}")
+    print(f"{len(written)} batches; first line of each reply file: {REPLY_HEADER}")
+    return 0
+
+
+REPLY_HEADER: Final = "# model: <name as the interface shows it> | date: YYYY-MM-DD"
+
+
+def command_ingest(args: argparse.Namespace) -> int:
+    from agbalu.llm import seeds
+
+    del args
+    cards = {card.id: card for card in seeds.read(sft_files.SEEDS)}
+    candidates: list[teacher.Candidate] = []
+    rejects: list[dict[str, object]] = []
+    batches: list[dict[str, object]] = []
+    for name, ids, version in sft_files.manifests(teacher.BATCH_DIR, "batch"):
+        path = teacher.REPLY_DIR / f"{name}.txt"
+        if not path.is_file():
+            batches.append({"batch": name, "waiting": True})
+            continue
+        asked = {card_id: cards[card_id] for card_id in ids}
+        found, dropped, tally = teacher.parse_reply(teacher.read_reply(path), name, asked, version)
+        candidates.extend(found)
+        rejects.extend(dropped)
+        batches.append(
+            {
+                "batch": name,
+                "requested": tally.requested,
+                "returned": tally.returned,
+                "missing": tally.missing,
+                "rejected": dict(tally.rejected),
+                "ignored": tally.ignored,
+            }
+        )
+    verdicts: dict[str, teacher.Verdict] = {}
+    critic_rejects: dict[str, int] = {}
+    for name, ids, _ in sft_files.manifests(teacher.BATCH_DIR, "critic"):
+        path = teacher.REPLY_DIR / f"{name}.txt"
+        if path.is_file():
+            found_verdicts, rejected = teacher.parse_critic(
+                teacher.read_reply(path).lines, set(ids)
+            )
+            verdicts.update(found_verdicts)
+            for reason, count in rejected.items():
+                critic_rejects[reason] = critic_rejects.get(reason, 0) + count
+    sft_files.write_jsonl(sft_files.CANDIDATES, sft_files.candidate_rows(candidates))
+    sft_files.write_jsonl(sft_files.INTERIM / "rejects.jsonl", rejects)
+    sft_files.write_jsonl(sft_files.VERDICTS, sft_files.verdict_rows(verdicts.values()))
+    covered = teacher.coverage(candidates)
+    stats = {
+        "candidates": len(candidates),
+        "rejected": len(rejects),
+        "verdicts": len(verdicts),
+        "critic_rejected": critic_rejects,
+        "cards_complete": sum(n >= CONVERSATIONS_PER_CARD for n in covered.values()),
+        "batches": batches,
+    }
+    write_stats(stats_path(sft_files.CANDIDATES), stats)
+    print(json.dumps({k: v for k, v in stats.items() if k != "batches"}, indent=2))
+    return 0
+
+
+def command_signals(args: argparse.Namespace) -> int:
+    from agbalu.bench.lid_systems import build
+    from agbalu.lid.infer import Identifier
+    from agbalu.llm import signals
+    from agbalu.standardise.infer import Standardiser
+
+    del args
+    done = sft_files.read_signals(sft_files.LANGUAGE_SIGNALS)
+    todo = [c for c in sft_files.read_candidates() if c.id not in done]
+    found = signals.language_signals(
+        todo,
+        build("glotlid"),
+        Identifier.load(DIHYA_RUN, device=identifier_device()),
+        Standardiser.load(),
+    )
+    rows = sft_files.signal_rows({**done, **found})
+    count = sft_files.write_jsonl(sft_files.LANGUAGE_SIGNALS, rows)
+    print(f"{len(found)} new, {count} in all -> {sft_files.LANGUAGE_SIGNALS}")
+    return 0
+
+
+def command_fluency(args: argparse.Namespace) -> int:
+    import torch
+
+    from agbalu.llm import signals
+
+    device = cuda()
+    model = loader(device)(args.model, torch.bfloat16)
+    model.eval()
+    tokenizer = HubTokenizer(BASE)
+    scorer = Scorer.of(model, tokenizer.eos, device)
+    heldout = holdout.read(LLM_DIR / "heldout-kab.jsonl")
+    floor = signals.percentile(
+        signals.bits_per_character(scorer, tokenizer, heldout), signals.FLUENCY_FLOOR
+    )
+    candidates = sft_files.read_candidates()
+    texts = [signals.kabyle_text(c) for c in candidates]
+    values = signals.bits_per_character(scorer, tokenizer, texts)
+    rows = (
+        {"candidate": c.id, "fluency_bpc": round(v, 4)}
+        for c, v in zip(candidates, values, strict=True)
+    )
+    sft_files.write_jsonl(sft_files.FLUENCY_SIGNALS, rows)
+    stats = {
+        "model": args.model,
+        "threshold_bpc": floor,
+        "heldout": len(heldout),
+        "candidates": len(candidates),
+    }
+    write_stats(stats_path(sft_files.FLUENCY_SIGNALS), stats)
+    print(json.dumps(stats, indent=2))
+    return 0
+
+
+def sft_inputs() -> tuple[
+    list[teacher.Candidate], dict[str, Card], sft_data.Evidence, sft_data.Text
+]:
+    """Everything the review sheet and the accepted set are decided on."""
+    from agbalu.llm import seeds, signals
+    from agbalu.normalise import Normaliser
+
+    fluency_stats = stats_path(sft_files.FLUENCY_SIGNALS)
+    if not fluency_stats.is_file():
+        message = f"{fluency_stats} not found; run `make data TASK=fluency` on the pod first"
+        raise sft_data.DataError(message)
+    threshold = json.loads(fluency_stats.read_text(encoding="utf-8")).get("threshold_bpc")
+    if not isinstance(threshold, float):
+        message = f"{fluency_stats}: no threshold_bpc"
+        raise sft_data.DataError(message)
+    evidence = sft_data.Evidence(
+        sft_files.read_verdicts(),
+        signals.merged(
+            sft_files.read_signals(sft_files.LANGUAGE_SIGNALS),
+            sft_files.read_signals(sft_files.FLUENCY_SIGNALS),
+        ),
+        sft_data.read_reviews(sft_files.REVIEWS),
+        sft_data.Thresholds(threshold),
+    )
+    index, _ = decontaminator()
+    normaliser = Normaliser()
+    checks = sft_data.Text(index.matches, normaliser.normalise)
+    cards = {card.id: card for card in seeds.read(sft_files.SEEDS)}
+    return sft_files.read_candidates(), cards, evidence, checks
+
+
+def command_review(args: argparse.Namespace) -> int:
+    del args
+    candidates, cards, evidence, checks = sft_inputs()
+    screened = sft_data.screen(candidates, cards, evidence, checks)
+    names = [n for n in sft_data.review_sample(screened.clean, cards) if n not in evidence.reviews]
+    sheet = sft_data.review_sheet(names, screened.normalised, cards)
+    sft_files.write_jsonl(sft_files.REVIEW_SHEET, sheet)
+    print(f"{len(sheet)} to review: {sft_files.REVIEW_SHEET}")
+    print(f"write each verdict as a line of {sft_files.REVIEWS}:")
+    print('  {"candidate": "<id>", "verdict": "accept" | "reject", "note": "<why>"}')
+    return 0
+
+
+def command_accept(args: argparse.Namespace) -> int:
+    from agbalu.normalise import Normaliser
+
+    del args
+    candidates, cards, evidence, checks = sft_inputs()
+    accepted, ledger = sft_data.assemble(candidates, cards, evidence, checks)
+    version = Normaliser().version
+    rows = [sft_data.accepted_row(c, cards[c.card], version) for c in accepted]
+    sft_files.write_jsonl(SFT_CONVERSATIONS, rows)
+    sft_files.write_jsonl(
+        sft_files.LEDGER,
+        (
+            {"candidate": name, "status": status, "reasons": ledger.reasons[name]}
+            for name, status in sorted(ledger.status.items())
+        ),
+    )
+    by_task: dict[str, int] = {}
+    for row in rows:
+        by_task[str(row["task"])] = by_task.get(str(row["task"]), 0) + 1
+    stats = {
+        "candidates": len(candidates),
+        "status": ledger.counts(),
+        "accepted_by_task": dict(sorted(by_task.items())),
+        "think_share": round(sum(bool(r["think"]) for r in rows) / len(rows), 4),
+        "normaliser": version,
+    }
+    write_stats(stats_path(SFT_CONVERSATIONS), stats)
+    print(json.dumps(stats, indent=2))
+    print(f"-> {SFT_CONVERSATIONS}")
+    return 0
+
+
+def command_flores(args: argparse.Namespace) -> int:
+    """§4.2's teacher check: write the 200-sentence prompts, or score their pasted replies."""
+    from agbalu.bench.mt import as_direction, score
+    from agbalu.llm.evaluate import flores_side
+
+    english = flores_side("eng", "devtest")[: teacher.FLORES_PILOT]
+    names = [f"flores-{n:04d}" for n in range(1, teacher.FLORES_PILOT // teacher.FLORES_BATCH + 1)]
+    if not args.score:
+        prompts = teacher.load_prompts()
+        sft_files.PILOT.mkdir(parents=True, exist_ok=True)
+        for offset, name in enumerate(names):
+            start = offset * teacher.FLORES_BATCH
+            chunk = english[start : start + teacher.FLORES_BATCH]
+            text = teacher.translation_prompt(chunk, start + 1, prompts)
+            (sft_files.PILOT / f"{name}.txt").write_text(text, encoding="utf-8")
+            saved = teacher.REPLY_DIR / f"{name}.txt"
+            print(f"paste {sft_files.PILOT / name}.txt\n  save the reply as {saved}")
+        return 0
+    found: dict[int, str] = {}
+    rejected: dict[str, int] = {}
+    models: set[str] = set()
+    for name in names:
+        reply = teacher.read_reply(teacher.REPLY_DIR / f"{name}.txt")
+        models.add(f"{reply.model} {reply.date}")
+        lines, dropped = teacher.parse_translations(reply.lines, range(1, teacher.FLORES_PILOT + 1))
+        found.update(lines)
+        for reason, count in dropped.items():
+            rejected[reason] = rejected.get(reason, 0) + count
+    hypotheses = [found.get(i, "") for i in range(1, teacher.FLORES_PILOT + 1)]
+    references = flores_side("kab", "devtest")[: teacher.FLORES_PILOT]
+    result = score(hypotheses, references, as_direction("eng-kab"), "devtest")
+    report = {
+        "teacher": sorted(models),
+        "sentences": teacher.FLORES_PILOT,
+        "missing": teacher.FLORES_PILOT - len(found),
+        "rejected": rejected,
+        "chrf++": result.raw.get("chrf++").score,
+        "signature": result.raw.get("chrf++").signature,
+    }
+    write_stats(sft_files.PILOT / "flores.json", report)
+    print(json.dumps(report, indent=2))
     return 0
 
 
@@ -497,6 +925,14 @@ def add_corpus_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser]
     packer.add_argument("--workers", type=int, default=PACK_WORKERS)
     packer.add_argument("--out", type=Path, default=BLOCKS_OUT)
 
+    sft = sub.add_parser("sft", help="SFT rows from accepted conversations and replay")
+    sft.add_argument("--conversations", type=Path, default=SFT_CONVERSATIONS)
+    sft.add_argument("--kabyle", type=Path, default=DOCUMENTS_OUT)
+    sft.add_argument("--aligned", type=Path, default=ALIGNED_OUT)
+    sft.add_argument("--replay", type=Path, default=REPLAY_OUT)
+    sft.add_argument("--out", type=Path, default=SFT_ROWS)
+    sft.add_argument("--validation", type=Path, default=SFT_VALIDATION)
+
 
 def add_model_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     trainer = sub.add_parser("train", help="continued pretraining, resuming the run if it exists")
@@ -505,6 +941,8 @@ def add_model_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser])
     trainer.add_argument("--tokenizer", default=BASE)
     trainer.add_argument("--blocks", type=Path, default=BLOCKS_OUT)
     trainer.add_argument("--optimizer", choices=("adamw8bit", "adamw"), default="adamw8bit")
+    trainer.add_argument("--objective", choices=("cpt", "sft"), default="cpt")
+    trainer.add_argument("--validation", type=Path, default=SFT_VALIDATION)
     trainer.add_argument("--total-steps", type=int)
     trainer.add_argument("--stop-after", type=int)
     trainer.add_argument("--checkpoint-every", type=int)
@@ -527,6 +965,32 @@ def add_model_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser])
     criterion.add_argument("--candidate", type=Path, required=True)
     criterion.add_argument("--base", type=Path, required=True)
 
+    merger = sub.add_parser("merge", help="instruct + alpha * (cpt - base), task 11.21")
+    merger.add_argument("--run", required=True)
+    merger.add_argument("--alpha", type=float, required=True)
+    merger.add_argument("--cpt", type=Path, required=True)
+    merger.add_argument("--base", type=Path, help="default: the pinned base from the HF cache")
+    merger.add_argument("--instruct", type=Path, help="default: the pinned instruct model")
+    merger.add_argument("--no-verify", dest="verify", action="store_false")
+
+    sub.add_parser("seeds", help="the 1,200 seed cards with their passages and pairs")
+    prompter = sub.add_parser("prompts", help="the next Gemini batches to paste")
+    prompter.add_argument("--batches", type=int, default=10)
+    prompter.add_argument("--pilot", action="store_true", help="only the 120 pilot cards")
+    prompter.add_argument("--critic", action="store_true", help="critic batches instead")
+    sub.add_parser("ingest", help="parse every pasted reply into candidates and verdicts")
+    sub.add_parser("signals", help="GlotLID, Dihya and Boulifa on every candidate")
+    fluent = sub.add_parser("fluency", help="CPT-model bits per character per candidate (GPU)")
+    fluent.add_argument("--model", default=str(RUNS / "jugurtha-4b-v1" / "best"))
+    sub.add_parser("review", help="the review sheet for the operator")
+    sub.add_parser("accept", help="the accepted SFT set, sft-v1.jsonl")
+    checker = sub.add_parser("flores", help="the teacher's 200-sentence FLORES+ check")
+    checker.add_argument("--score", action="store_true", help="score the pasted replies")
+
+    chooser = sub.add_parser("select", help="the merge coefficient by the fixed rule")
+    chooser.add_argument("--runs", type=Path, nargs="+", default=list(MERGE_RUNS))
+    chooser.add_argument("--out", type=Path, default=RUNS / "merge-selection.json")
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="agbalu-llm", description=__doc__)
@@ -543,19 +1007,40 @@ COMMANDS: Final[dict[str, Callable[[argparse.Namespace], int]]] = {
     "aligned": command_aligned,
     "replay": command_replay,
     "pack": command_pack,
+    "sft": command_sft,
     "train": command_train,
     "smoke": command_smoke,
     "evaluate": command_evaluate,
     "criterion": command_criterion,
+    "merge": command_merge,
+    "select": command_select,
+    "seeds": command_seeds,
+    "prompts": command_prompts,
+    "ingest": command_ingest,
+    "signals": command_signals,
+    "fluency": command_fluency,
+    "review": command_review,
+    "accept": command_accept,
+    "flores": command_flores,
 }
 
 ERRORS: Final = (
+    DataError,
+    FilesError,
+    SeedError,
+    SignalError,
+    TeacherError,
+    BuildError,
+    ChatError,
+    RowsError,
     CorpusError,
     DecontaminationError,
     DocumentError,
     EvaluationError,
     FertilityError,
+    MergeError,
     MixtureError,
+    SelectionError,
     PackError,
     ProvenanceError,
     ReplayError,

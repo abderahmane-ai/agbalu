@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 import torch
 
-from agbalu.llm import train
+from agbalu.llm import sft_rows, train
 from tests.unit import tiny_lm
 
 CPU = torch.device("cpu")
@@ -135,6 +135,137 @@ class TestRun:
         assert (cfg.directory / "best" / "best.json").is_file()
 
 
+STORED_CPT_CONFIG = {
+    "run": "jugurtha-4b-v1",
+    "model": "Qwen/Qwen3.5-4B-Base",
+    "blocks": "data/processed/llm/cpt-v2.npy",
+    "optimizer": "adamw8bit",
+    "peak_lr": 2e-05,
+    "blocks_per_step": 64,
+    "micro_blocks": 2,
+    "total_steps": None,
+    "checkpoint_every": 20,
+    "eval_every": 50,
+    "heldout_limit": None,
+    "probe": True,
+    "keep": 2,
+}
+"""`artifacts/runs/jugurtha-4b-v1/config.json` as the running full CPT stored it, 2026-10-15.
+Every restart resumes against it; a field added to `RunConfig` must leave this identity alone."""
+
+
+class TestIdentity:
+    def test_the_running_cpt_run_still_resumes(self) -> None:
+        cfg = train.RunConfig(
+            run="jugurtha-4b-v1",
+            model="Qwen/Qwen3.5-4B-Base",
+            blocks=Path("data/processed/llm/cpt-v2.npy"),
+        )
+        assert cfg.identity() == STORED_CPT_CONFIG
+
+    def test_an_sft_identity_names_its_objective_and_validation(self) -> None:
+        cfg = train.RunConfig(
+            run="s", model="m", blocks=Path("r.npz"), objective="sft", validation=Path("v.npz")
+        )
+        identity = cfg.identity()
+        assert (identity["objective"], identity["validation"]) == ("sft", "v.npz")
+
+    def test_an_sft_run_without_validation_is_refused(self) -> None:
+        with pytest.raises(train.TrainError, match="validation rows"):
+            train.RunConfig(run="s", model="m", blocks=Path("r.npz"), objective="sft")
+
+    def test_the_schedule_follows_the_objective(self) -> None:
+        cpt = train.RunConfig(run="c", model="m", blocks=Path("b.npy"))
+        sft = replace(cpt, objective="sft", validation=Path("v.npz"))
+        assert (cpt.warmup_fraction, cpt.weight_decay) == (0.01, 0.1)
+        assert (sft.warmup_fraction, sft.weight_decay) == (0.03, 0.01)
+
+
+def sft_segments(count: int, seed: int) -> list[sft_rows.Segment]:
+    rng = np.random.default_rng(seed)
+    segments = []
+    for index in range(count):
+        prompt = rng.integers(1, tiny_lm.VOCABULARY, size=5).tolist()
+        answer = rng.integers(1, tiny_lm.VOCABULARY, size=4).tolist()
+        ids = tuple(int(t) for t in [*prompt, *answer])
+        mask = tuple([False] * 5 + [True] * 4)
+        segments.append(sft_rows.Segment(ids, mask, sft_rows.NO_THINK, f"c{index}"))
+    return segments
+
+
+def sft_config(tmp_path: Path, model_dir: Path) -> train.RunConfig:
+    rows = tmp_path / "sft.npz"
+    held = tmp_path / "sft-validation.npz"
+    sft_rows.write(sft_rows.pack(sft_segments(24, 0), capacity=LENGTH * 2, seed=0), rows)
+    sft_rows.write(sft_rows.pack(sft_segments(4, 1), capacity=LENGTH * 2, seed=0), held)
+    return replace(
+        config(tmp_path, model_dir),
+        run="sft",
+        blocks=rows,
+        validation=held,
+        objective="sft",
+        total_steps=None,
+        peak_lr=1e-3,
+    )
+
+
+class TestSft:
+    def test_an_sft_run_trains_on_supervised_tokens_only(
+        self, tmp_path: Path, model_dir: Path
+    ) -> None:
+        cfg = sft_config(tmp_path, model_dir)
+        rows = sft_rows.Rows.read(cfg.blocks)
+        result = fit(cfg)
+        steps = len(train.sft_order(len(rows))) // cfg.micros_per_step
+        assert (result["step"], result["ended"]) == (steps, "schedule")
+        state = json.loads(
+            (train.checkpoints(cfg.directory)[-1] / train.STATE_FILE).read_text(encoding="utf-8")
+        )
+        used = train.sft_order(len(rows))[: steps * cfg.micros_per_step]
+        assert state["targets"] == sum(rows.packed(i).targets for i in used)
+        assert state["targets"] < state["tokens"] / 2
+
+    def test_the_best_checkpoint_is_chosen_on_validation_loss(
+        self, tmp_path: Path, model_dir: Path
+    ) -> None:
+        cfg = replace(sft_config(tmp_path, model_dir), eval_every=2)
+        fit(cfg)
+        events = [
+            json.loads(line)
+            for line in (cfg.directory / "log.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        evals = [e for e in events if e["event"] == "eval"]
+        assert all("validation_loss" in e for e in evals)
+        best = json.loads((cfg.directory / "best" / "best.json").read_text(encoding="utf-8"))
+        assert best["validation_loss"] == min(e["validation_loss"] for e in evals)
+
+    def test_a_resumed_sft_run_reads_the_same_rows(self, tmp_path: Path, model_dir: Path) -> None:
+        straight = replace(sft_config(tmp_path, model_dir), run="straight")
+        fit(straight)
+        stopped = replace(straight, run="stopped", stop_after=2)
+        fit(stopped)
+        fit(replace(stopped, stop_after=None))
+        a = train.losses(straight.directory / "log.jsonl")
+        b = train.losses(stopped.directory / "log.jsonl")
+        assert a.keys() == b.keys()
+        for step in sorted(a)[2:]:
+            assert b[step] == pytest.approx(a[step], abs=1e-5)
+
+    def test_the_row_order_is_a_seeded_permutation_per_epoch(self) -> None:
+        order = train.sft_order(10, epochs=2, seed=3)
+        assert sorted(order[:10]) == list(range(10))
+        assert sorted(order[10:]) == list(range(10))
+        assert order[:10] != order[10:]
+        assert order == train.sft_order(10, epochs=2, seed=3)
+
+    def test_a_model_on_disk_is_held_to_its_expected_count(
+        self, tmp_path: Path, model_dir: Path
+    ) -> None:
+        cfg = replace(sft_config(tmp_path, model_dir), expected_parameters=7)
+        with pytest.raises(train.TrainError, match="trainable parameters"):
+            fit(cfg)
+
+
 class TestPieces:
     def test_blocks_returns_the_scheduled_slice(self, tmp_path: Path) -> None:
         path = blocks(tmp_path / "b.npy")
@@ -147,7 +278,7 @@ class TestPieces:
 
     def test_weight_decay_spares_vectors(self, model_dir: Path) -> None:
         model = tiny_lm.load(model_dir, torch.float32)
-        decay, exempt = train.parameter_groups(model)
+        decay, exempt = train.parameter_groups(model, 0.1)
         params = decay["params"]
         assert isinstance(params, list)
         assert params

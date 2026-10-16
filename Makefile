@@ -109,7 +109,7 @@ mt: ## NLLB corpus. TASK=corpus|pivot|consistency (pivot needs the models extra)
 # `aligned`, `replay`, `pack`. Dihya needs CUDA for the documents build: 121 texts/s on the
 # laptop GPU against three million rows. `criterion` compares two `make evaluate` reports and
 # exits 2 when the candidate is not adopted.
-llm: ## Phase 11, GPU-free. TASK=fertility|holdout|criterion. CANDIDATE BASELINE (criterion)
+llm: ## Phase 11, GPU-free. TASK=fertility|holdout|criterion|select|seeds|prompts|ingest|signals|review|accept|flores. CANDIDATE BASELINE (criterion)
 	$(call cli,llm) $(or $(TASK),fertility) \
 		$(if $(CANDIDATE),--candidate $(CANDIDATE),) $(if $(BASELINE),--base $(BASELINE),)
 
@@ -128,15 +128,18 @@ sync: ## Push code, corpus inputs, Dihya and every evaluation set to the pod (op
 smoke: ## One part of the 11.19 smoke. RUN= PART=throughput|parity|resume|evaluate (operator, hpc)
 	$(call launch,smoke) $(if $(PART),--part $(PART),)
 
-train: ## Continued pretraining, resuming RUN if it exists. RUN= MODEL STEPS STOP (operator, hpc)
+train: ## CPT, or SFT with OBJECTIVE=sft, resuming RUN if it exists. RUN= MODEL STEPS STOP OBJECTIVE (operator, hpc)
 	$(call launch,train) $(if $(MODEL),--model $(MODEL),) $(if $(STEPS),--steps $(STEPS),) \
-		$(if $(STOP),--stop $(STOP),)
+		$(if $(STOP),--stop $(STOP),) $(if $(OBJECTIVE),--objective $(OBJECTIVE),)
 
-data: ## Corpus stages that run on the pod. TASK=documents|aligned|replay|pack (operator, hpc)
+data: ## Corpus stages that run on the pod. TASK=documents|aligned|replay|pack|sft|fluency (operator, hpc)
 	$(call launch,data) $(if $(TASK),--task $(TASK),)
 
-evaluate: ## Evaluation suite on MODEL into artifacts/runs/RUN/evaluation.json. RUN= MODEL (operator, hpc)
-	$(call launch,evaluate) $(if $(MODEL),--model $(MODEL),)
+evaluate: ## Evaluation suite on MODEL into artifacts/runs/RUN/. RUN= MODEL SUITE=exit|select|release (select and release add the chat suite) (operator, hpc)
+	$(call launch,evaluate) $(if $(MODEL),--model $(MODEL),) $(if $(SUITE),--suite $(SUITE),)
+
+merge: ## Instruct + ALPHA x (CPT - base) into artifacts/runs/RUN/model. RUN= ALPHA= MODEL=<cpt checkpoint> (operator, hpc)
+	$(call launch,merge) $(if $(ALPHA),--alpha $(ALPHA),) $(if $(MODEL),--model $(MODEL),)
 
 status: ## Is RUN alive: session, recent events read plainly, checkpoints. RAW=1 for the raw log (operator, hpc)
 	$(call launch,status) $(if $(RAW),--raw,)

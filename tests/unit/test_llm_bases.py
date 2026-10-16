@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
 
-from agbalu.llm.bases import BASE, INSTRUCT, PILOT, TEXT_TOWER_PARAMETERS
+from agbalu.llm.bases import BASE, INSTRUCT, PILOT, REVISIONS, TEXT_TOWER_PARAMETERS
 
 CONSUMERS = (
     Path("src/agbalu/llm/cli.py"),
@@ -25,6 +26,12 @@ class TestNames:
     def test_the_pilot_is_a_base_checkpoint_of_the_same_family(self) -> None:
         assert PILOT.startswith("Qwen/Qwen3.5-")
         assert PILOT.endswith("-Base")
+
+
+class TestRevisions:
+    def test_both_merged_checkpoints_are_pinned_to_a_full_commit(self) -> None:
+        assert set(REVISIONS) == {BASE, INSTRUCT}
+        assert all(re.fullmatch(r"[0-9a-f]{40}", sha) for sha in REVISIONS.values())
 
 
 class TestTextTower:

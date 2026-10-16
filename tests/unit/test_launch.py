@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from tools import launch
 
+from agbalu.llm import cli
 from agbalu.llm.decontaminate import FLORES_CORRECTED
 
 
@@ -33,6 +34,12 @@ class TestCommands:
         assert str(FLORES_CORRECTED) in launch.DATA_FILES
         for language in ("kab", "eng", "fra"):
             assert f"data/processed/llm/heldout-{language}.jsonl" in launch.DATA_FILES
+        assert str(cli.SFT_CONVERSATIONS) in launch.DATA_FILES
+
+    def test_sft_training_passes_its_objective(self) -> None:
+        argv = ["train", "--run", "s", "--model", "m", "--objective", "sft"]
+        arguments = launch.train_arguments(launch.build_parser().parse_args(argv))
+        assert arguments == ["train", "--run", "s", "--model", "m", "--objective", "sft"]
 
     def test_a_detached_job_logs_inside_its_run(self) -> None:
         command = launch.detached(
@@ -68,6 +75,57 @@ class TestParser:
         assert launch.train_arguments(args) == ["train", "--run", "r", "--total-steps", "9"]
         args = launch.build_parser().parse_args(["train", "--run", "r", "--stop", "2"])
         assert launch.train_arguments(args) == ["train", "--run", "r", "--stop-after", "2"]
+
+    def test_merge_passes_the_run_alpha_and_cpt_checkpoint(self) -> None:
+        argv = ["merge", "--run", "m", "--alpha", "0.5", "--model", "artifacts/runs/c/best"]
+        args = launch.build_parser().parse_args(argv)
+        assert launch.merge_arguments(args) == [
+            "merge",
+            "--run",
+            "m",
+            "--alpha",
+            "0.5",
+            "--cpt",
+            "artifacts/runs/c/best",
+        ]
+
+    @pytest.mark.parametrize(
+        ("argv", "missing"),
+        [(["--alpha", "0.5"], "--model"), (["--model", "x"], "--alpha")],
+    )
+    def test_merge_refuses_without_alpha_or_checkpoint(
+        self, capsys: pytest.CaptureFixture[str], argv: list[str], missing: str
+    ) -> None:
+        assert launch.main(["merge", "--run", "m", *argv]) == 1
+        assert f"needs {missing}" in capsys.readouterr().err
+
+    def test_the_exit_suite_runs_the_completion_evaluation_alone(self) -> None:
+        args = launch.build_parser().parse_args(["evaluate", "--run", "e", "--model", "m"])
+        run, arguments, log, then = launch.job(args)
+        assert (run, log, then) == ("e", "e/log.txt", [])
+        assert arguments[:3] == ["evaluate", "--out", "artifacts/runs/e/evaluation.json"]
+
+    def test_the_select_suite_chains_one_vllm_process_per_mode(self) -> None:
+        argv = ["evaluate", "--run", "e", "--model", "m", "--suite", "select"]
+        _, _, _, then = launch.job(launch.build_parser().parse_args(argv))
+        assert len(then) == 2
+        for mode, command in zip(("no_think", "think"), then, strict=True):
+            assert command.startswith(f"{launch.VLLM_PYTHON} -m agbalu.llm.chat_eval")
+            assert f"--mode {mode}" in command
+            assert f"artifacts/runs/e/chat-{mode}.json" in command
+
+    def test_the_chat_suite_needs_a_model_path(self, capsys: pytest.CaptureFixture[str]) -> None:
+        assert launch.main(["evaluate", "--run", "e", "--suite", "release"]) == 1
+        assert "needs --model" in capsys.readouterr().err
+
+    def test_chained_commands_share_the_log_and_stop_at_the_first_failure(self) -> None:
+        script = launch.detached("r", ["evaluate"], "r/log.txt", ["second", "third"])[-1]
+        assert "&& second && third; }" in script
+        assert script.count("artifacts/runs/r/log.txt 2>&1") == 1
+
+    def test_pull_leaves_every_kind_of_weights_behind(self) -> None:
+        excluded = launch.WEIGHT_EXCLUDES[1::2]
+        assert set(excluded) == {"step-*", "best", "model"}
 
     def test_status_output_is_rendered_between_its_markers(self) -> None:
         step = (

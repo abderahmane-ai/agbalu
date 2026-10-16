@@ -22,6 +22,13 @@ counted in the vocabulary the run is trained and scored in."""
 INSTRUCT: Final = "Qwen/Qwen3.5-4B"
 """The post-trained twin of `BASE`, the target the CPT delta is merged into."""
 
+REVISIONS: Final[dict[str, str]] = {
+    BASE: "1001bb4d826a52d1f399e183466143f4da7b741b",
+    INSTRUCT: "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+}
+"""Pinned commits. `BASE`'s is the snapshot `jugurtha-4b-v1` started from (the only one in the
+pod's cache, 2026-10-16), so the CPT delta is taken against the weights it was trained from."""
+
 PILOT: Final = "Qwen/Qwen3.5-0.8B-Base"
 """Same architecture and tokenizer at a fifth of the size. The optimizer parity control
 runs on it, where an fp32 AdamW reference fits beside the 8-bit arm."""
