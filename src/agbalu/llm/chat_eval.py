@@ -261,16 +261,24 @@ def tasks_in(suite: Suite, mode: Mode) -> list[HarnessTask]:
     return [task for task in tasks_for(suite) if mode in task.modes]
 
 
-def header(model: Path, suite: Suite, mode: Mode, limit: int | None) -> dict[str, object]:
+@dataclass(frozen=True, slots=True)
+class Settings:
     """Everything a task's score depends on besides the task itself."""
-    return {
-        "model": str(model),
-        "suite": suite,
-        "mode": mode,
-        "limit": limit,
-        "seed": SEED,
-        "decoding": generation(mode),
-    }
+
+    model: Path
+    suite: Suite
+    mode: Mode
+    limit: int | None = None
+
+    def header(self) -> dict[str, object]:
+        return {
+            "model": str(self.model),
+            "suite": self.suite,
+            "mode": self.mode,
+            "limit": self.limit,
+            "seed": SEED,
+            "decoding": generation(self.mode),
+        }
 
 
 def finished(path: Path, expected: Mapping[str, object]) -> Rows:
@@ -286,12 +294,21 @@ def finished(path: Path, expected: Mapping[str, object]) -> Rows:
     return {str(name): row for name, row in tasks.items() if isinstance(row, dict)}
 
 
-def run(
-    model: Path, suite: Suite, mode: Mode, out: Path, *, limit: int | None = None
-) -> dict[str, object]:
-    """One mode's report at `out`, written after every task and resumed from it."""
-    head = header(model, suite, mode, limit)
+def run(settings: Settings, out: Path, *, only: Sequence[str] | None = None) -> dict[str, object]:
+    """One mode's report at `out`, written after every task and resumed from it.
+
+    `only` scores just the named tasks; they land in the same report, so a later full run
+    keeps them and scores the rest.
+    """
+    head = settings.header()
+    model, suite, mode, limit = settings.model, settings.suite, settings.mode, settings.limit
     tasks = tasks_in(suite, mode)
+    if only is not None:
+        unknown = sorted(set(only) - {task.name for task in tasks})
+        if unknown:
+            message = f"{unknown} are not {suite} tasks in {mode} mode"
+            raise ChatEvaluationError(message)
+        tasks = [task for task in tasks if task.name in only]
     done = finished(out, head)
     kept = sorted(name for name in done if name in {task.name for task in tasks})
     progress("chat_resume", kept=kept, remaining=[t.name for t in tasks if t.name not in done])
@@ -302,9 +319,9 @@ def run(
         tasks,
         limit=limit,
         done=done,
-        save=lambda rows: write_report(out, {**head, "tasks": rows}),
+        save=lambda rows: write_report(out, {**head, "tasks": {**done, **rows}}),
     )
-    return {**head, "tasks": rows}
+    return {**head, "tasks": {**done, **rows}}
 
 
 class Finished:
@@ -333,6 +350,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mode", choices=MODES, required=True)
     parser.add_argument("--limit", type=int, help="examples per task; a smoke, never a result")
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--tasks", nargs="+", help="score only these tasks into the report")
     return parser
 
 
@@ -341,7 +359,8 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         with stage("chat evaluation", suite=args.suite, mode=args.mode):
-            report = run(args.model, args.suite, args.mode, args.out, limit=args.limit)
+            settings = Settings(args.model, args.suite, args.mode, args.limit)
+            report = run(settings, args.out, only=args.tasks)
     except ChatEvaluationError as error:
         sys.stderr.write(f"error: {error}\n")
         return 1

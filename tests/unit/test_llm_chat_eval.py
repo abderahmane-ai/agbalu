@@ -137,7 +137,8 @@ class FailingAfter(FakeHarness):
 
 class TestResume:
     TASKS = chat_eval.tasks_in("select", "no_think")
-    HEAD = chat_eval.header(Path("m"), "select", "no_think", None)
+    SETTINGS = chat_eval.Settings(Path("m"), "select", "no_think")
+    HEAD = SETTINGS.header()
 
     def test_a_failure_keeps_every_task_finished_before_it(self, tmp_path: Path) -> None:
         out = tmp_path / "chat-no_think.json"
@@ -170,11 +171,23 @@ class TestResume:
         assert chat_eval.finished(out, self.HEAD) == {}
         assert chat_eval.finished(tmp_path / "absent.json", self.HEAD) == {}
 
+    def test_a_filtered_run_keeps_the_other_tasks_in_the_report(self, tmp_path: Path) -> None:
+        out = tmp_path / "chat-no_think.json"
+        rows = {task.name: {"score": 1.0} for task in self.TASKS}
+        chat_eval.write_report(out, {**self.HEAD, "tasks": rows})
+        report = chat_eval.run(self.SETTINGS, out, only=["ifeval", "gsm8k"])
+        assert report["tasks"] == rows
+
+    def test_an_unknown_task_is_refused_by_name(self, tmp_path: Path) -> None:
+        out = tmp_path / "chat-no_think.json"
+        with pytest.raises(chat_eval.ChatEvaluationError, match="humaneval_plus"):
+            chat_eval.run(self.SETTINGS, out, only=["humaneval_plus"])
+
     def test_a_finished_report_needs_no_engine(self, tmp_path: Path) -> None:
         out = tmp_path / "chat-no_think.json"
         rows = {task.name: {"score": 1.0} for task in self.TASKS}
         chat_eval.write_report(out, {**self.HEAD, "tasks": rows})
-        report = chat_eval.run(Path("m"), "select", "no_think", out)
+        report = chat_eval.run(self.SETTINGS, out)
         assert report["tasks"] == rows
 
 

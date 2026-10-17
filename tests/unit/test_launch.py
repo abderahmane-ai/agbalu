@@ -159,6 +159,16 @@ class TestParser:
         assert launch.main(argv) == 1
         assert "--chat-only needs --suite select or release" in capsys.readouterr().err
 
+    def test_the_guard_scores_two_tasks_into_the_selection_report(self) -> None:
+        argv = ["evaluate", "--run", "e", "--model", "m", "--suite", "guard"]
+        _, arguments, _, then = launch.job(launch.build_parser().parse_args(argv))
+        assert arguments == []
+        (command,) = then
+        assert command.endswith(
+            "--model m --suite select --mode no_think "
+            "--out artifacts/runs/e/chat-no_think.json --tasks ifeval gsm8k"
+        )
+
     def test_the_screen_needs_a_model_path(self, capsys: pytest.CaptureFixture[str]) -> None:
         assert launch.main(["evaluate", "--run", "e", "--suite", "screen"]) == 1
         assert "needs --model" in capsys.readouterr().err

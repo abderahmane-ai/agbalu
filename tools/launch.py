@@ -400,9 +400,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--objective", choices=("cpt", "sft"), help="train only; CLI default cpt")
     parser.add_argument(
         "--suite",
-        choices=("exit", "screen", "select", "release"),
+        choices=("exit", "screen", "guard", "select", "release"),
         default="exit",
         help="exit: completion suite only; screen: translation only, into screen.json; "
+        "guard: no-think IFEval and GSM8K into chat-no_think.json; "
         "select and release add the chat suite",
     )
     parser.add_argument(
@@ -482,6 +483,11 @@ SCREEN_FILE: Final = "screen.json"
 so a later full run never overwrites it and `make llm TASK=select` never reads it."""
 
 
+GUARD_TASKS: Final = ("ifeval", "gsm8k")
+"""The no-think chat tasks merge-a100 failed (2026-10-17), scored alone before a full run.
+They land in the selection report, so the full run keeps them."""
+
+
 def evaluation_job(args: argparse.Namespace) -> Job:
     """The completion-mode suite, then for `select` and `release` the chat-mode suite in each
     thinking mode, each mode its own process because one vLLM engine is one process."""
@@ -493,6 +499,15 @@ def evaluation_job(args: argparse.Namespace) -> Job:
         model = require(args.model, "--model", "evaluate --suite screen")
         arguments = ["evaluate", "--out", f"{RUNS}/{run}/{SCREEN_FILE}", "--parts", "mt"]
         return run, [*arguments, "--model", model], f"{run}/log.txt", []
+    if args.suite == "guard":
+        model = require(args.model, "--model", "evaluate --suite guard")
+        guard = chat_module(
+            [
+                *("--model", model, "--suite", "select", "--mode", "no_think"),
+                *("--out", f"{RUNS}/{run}/chat-no_think.json", "--tasks", *GUARD_TASKS),
+            ]
+        )
+        return run, [], f"{run}/log.txt", [guard]
     arguments = ["evaluate", "--out", f"{RUNS}/{run}/evaluation.json"]
     if args.model:
         arguments += ["--model", args.model]
