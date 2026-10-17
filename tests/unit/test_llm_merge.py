@@ -16,7 +16,8 @@ from agbalu.llm import merge
 
 TEXT = merge.TEXT_PREFIX
 ADDED = [{"id": 2, "content": "<x>"}]
-TOKENIZER: Mapping[str, object] = {"model": {"vocab": {"a": 0, "ɣ": 1}}, "added_tokens": ADDED}
+MODEL: dict[str, object] = {"vocab": {"a": 0, "ɣ": 1}}
+TOKENIZER: Mapping[str, object] = {"model": MODEL, "added_tokens": ADDED}
 
 Three = tuple[Path, Path, Path]
 
@@ -143,6 +144,21 @@ class TestArithmetic:
         assert not (tmp_path / "out" / "junk").exists()
 
 
+class TestTokenizers:
+    def test_instruct_may_add_tokens_and_spell_out_a_default(self, tmp_path: Path) -> None:
+        model = {**MODEL, "ignore_merges": False}
+        added = [*ADDED, {"id": 3, "content": "<think>"}]
+        roots = checkpoints(tmp_path, instruct_tokenizer={"model": model, "added_tokens": added})
+        report = run(*roots, 0.5, tmp_path / "out")
+        assert report["instruct_added_tokens"] == ["<think>"]
+
+    def test_a_default_spelled_differently_is_a_difference(self, tmp_path: Path) -> None:
+        model = {**MODEL, "ignore_merges": True}
+        roots = checkpoints(tmp_path, instruct_tokenizer={"model": model, "added_tokens": ADDED})
+        with pytest.raises(merge.MergeError, match="ignore_merges"):
+            run(*roots, 0.5, tmp_path / "out")
+
+
 class TestKeyGaps:
     def test_the_tied_head_is_not_a_gap(self) -> None:
         assert merge.key_gaps({"a", merge.TIED_HEAD}, {"a"}) == (set(), set())
@@ -238,7 +254,13 @@ class TestRecast:
     def test_different_tokenizers(self, tmp_path: Path) -> None:
         other = {"model": {"vocab": {"a": 0, "b": 1}}, "added_tokens": ADDED}
         roots = checkpoints(tmp_path, instruct_tokenizer=other)
-        with pytest.raises(merge.MergeError, match=r"tokenizers .* differ in \['model'\]"):
+        with pytest.raises(merge.MergeError, match=r"differ in \['model'\]: \['vocab'\]"):
+            run(*roots, 0.5, tmp_path / "out")
+
+    def test_an_added_token_of_the_base_changed_in_instruct(self, tmp_path: Path) -> None:
+        other = {"model": MODEL, "added_tokens": [{"id": 2, "content": "<y>"}]}
+        roots = checkpoints(tmp_path, instruct_tokenizer=other)
+        with pytest.raises(merge.MergeError, match=r"\['added_tokens'\] at ids \[2\]"):
             run(*roots, 0.5, tmp_path / "out")
 
     def test_a_non_finite_result_writes_nothing(self, tmp_path: Path) -> None:

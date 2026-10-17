@@ -197,6 +197,11 @@ def text_tower(base: Checkpoint, cpt: Checkpoint, instruct: Checkpoint) -> list[
     return sorted(names)
 
 
+MODEL_DEFAULTS: Final[dict[str, object]] = {"ignore_merges": False}
+"""BPE fields a tokenizer file may leave out; Qwen3.5-4B writes `ignore_merges: false`
+where the base omits it, read 2026-10-17."""
+
+
 def tokenizer_fields(root: Path) -> dict[str, object]:
     path = root / "tokenizer.json"
     if not path.is_file():
@@ -206,13 +211,46 @@ def tokenizer_fields(root: Path) -> dict[str, object]:
     return {field: payload.get(field) for field in TOKENIZER_FIELDS}
 
 
-def check_tokenizers(base: Path, instruct: Path) -> None:
-    """B and I must tokenise identically, or the delta lands on different token rows."""
+def added_by_id(fields: Mapping[str, object], root: Path) -> dict[int, dict[str, object]]:
+    tokens = fields["added_tokens"]
+    found: dict[int, dict[str, object]] = {}
+    for token in tokens if isinstance(tokens, list) else [None]:
+        identifier = token.get("id") if isinstance(token, dict) else None
+        if not isinstance(token, dict) or not isinstance(identifier, int):
+            message = f"{root}/tokenizer.json: added_tokens is not a list of tokens with ids"
+            raise MergeError(message)
+        found[identifier] = {str(k): v for k, v in token.items()}
+    return found
+
+
+def check_tokenizers(base: Path, instruct: Path) -> list[str]:
+    """B and I must map every token B knows to the same id, or the delta lands on different
+    rows: the BPE model equal once defaults are filled in, and B's added tokens present in I
+    unchanged. I may add tokens of its own, as Qwen3.5-4B adds `<think>`, `</think>`,
+    `<tool_response>` and `</tool_response>` at ids 248066-248069; they are returned. Those
+    rows exist in every checkpoint's embedding, and C's delta on them is weight decay alone,
+    since B's tokenizer never produces them."""
     ours, theirs = tokenizer_fields(base), tokenizer_fields(instruct)
-    differ = [field for field in TOKENIZER_FIELDS if ours[field] != theirs[field]]
-    if differ:
-        message = f"tokenizers of {base} and {instruct} differ in {differ}"
+    models = []
+    for fields in (ours, theirs):
+        model = fields["model"]
+        if not isinstance(model, dict):
+            message = f"{base} or {instruct}: tokenizer.json has no BPE model"
+            raise MergeError(message)
+        models.append({**MODEL_DEFAULTS, **model})
+    if models[0] != models[1]:
+        keys = sorted(
+            k for k in set(models[0]) | set(models[1]) if models[0].get(k) != models[1].get(k)
+        )
+        message = f"tokenizers of {base} and {instruct} differ in ['model']: {keys}"
         raise MergeError(message)
+    mine, other = added_by_id(ours, base), added_by_id(theirs, instruct)
+    changed = sorted(i for i in mine if other.get(i) != mine[i])
+    if changed:
+        message = f"tokenizers of {base} and {instruct} differ in ['added_tokens'] at ids {changed}"
+        raise MergeError(message)
+    extra = sorted(set(other) - set(mine))
+    return [str(other[i].get("content")) for i in extra]
 
 
 def merged(
@@ -290,7 +328,7 @@ def merge(inputs: Inputs, alpha: float, out: Path) -> dict[str, object]:
         raise MergeError(message)
     base, cpt, instruct = (Checkpoint.read(r) for r in (inputs.base, inputs.cpt, inputs.instruct))
     names = set(text_tower(base, cpt, instruct))
-    check_tokenizers(inputs.base, inputs.instruct)
+    instruct_only = check_tokenizers(inputs.base, inputs.instruct)
 
     partial = out.with_name(f".{out.name}.partial")
     if partial.exists():
@@ -352,6 +390,7 @@ def merge(inputs: Inputs, alpha: float, out: Path) -> dict[str, object]:
         "sources": dict(inputs.sources),
         "tensors": {"merged": tally.count, "copied": copied, "total": len(instruct.shards)},
         "cpt_dtype_differs": {"count": len(recast), "first": sorted(recast)[:SHOWN]},
+        "instruct_added_tokens": instruct_only,
         "change": tally.as_dict(),
         "files_copied": present,
         "outputs": {shard: file_digest(partial / shard) for shard in instruct.files()},
