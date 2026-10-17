@@ -34,11 +34,25 @@ VLLM_PYTHON: Final = "/home/jovyan/envs/vllm/bin/python"
 LOCK: Final = Path("requirements/hpc.lock")
 RUNS: Final = Path("artifacts/runs")
 
+QUIET: Final = (
+    "TQDM_DISABLE=1",
+    "HF_HUB_DISABLE_PROGRESS_BARS=1",
+    "HF_DATASETS_DISABLE_PROGRESS_BARS=1",
+    "TRANSFORMERS_VERBOSITY=error",
+    "LMEVAL_LOG_LEVEL=ERROR",
+    "VLLM_LOGGING_LEVEL=WARNING",
+    "PYTHONWARNINGS='ignore::DeprecationWarning,ignore::FutureWarning,"
+    "ignore:NLTK will not authorize:UserWarning'",
+)
+"""Library chatter kept out of run logs: progress bars, INFO lines, deprecation notices, and
+NLTK's warning about the pod's group-writable home, which we cannot change. Errors, other
+warnings and our own events still print (probed on the pod, 2026-10-17)."""
+
 COMPILER: Final = f"{ENVIRONMENT}/bin/x86_64-conda-linux-gnu"
 PREAMBLE: Final = (
     ". ~/hpc-env.sh"
     f" && export CC={COMPILER}-gcc CXX={COMPILER}-g++"
-    f" HF_HOME={REMOTE_ROOT}/artifacts/hf PYTHONPATH=src"
+    f" HF_HOME={REMOTE_ROOT}/artifacts/hf PYTHONPATH=src {' '.join(QUIET)}"
     f" && cd {REMOTE_ROOT}"
 )
 """`hpc-env.sh` puts the tools on `PATH`; `CC`/`CXX` then point at the project environment's

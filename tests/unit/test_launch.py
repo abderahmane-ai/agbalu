@@ -128,6 +128,15 @@ class TestParser:
             "m",
         ]
 
+    def test_every_job_exports_the_quiet_settings_as_a_shell_reads_them(self) -> None:
+        words = shlex.split(launch.PREAMBLE)
+        assert "TQDM_DISABLE=1" in words
+        assert "VLLM_LOGGING_LEVEL=WARNING" in words
+        assert (
+            "PYTHONWARNINGS=ignore::DeprecationWarning,ignore::FutureWarning,"
+            "ignore:NLTK will not authorize:UserWarning"
+        ) in words
+
     def test_chat_evaluation_runs_without_the_flashinfer_sampler(self) -> None:
         argv = ["evaluate", "--run", "e", "--model", "m", "--suite", "select"]
         _, _, _, then = launch.job(launch.build_parser().parse_args(argv))
