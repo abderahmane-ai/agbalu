@@ -75,6 +75,19 @@ class TestDecoding:
         assert settings["max_gen_toks"] == chat_eval.THINK_TOKENS
 
 
+class TestTaskMetadata:
+    def test_a_long_context_task_gets_the_length_and_the_model_tokenizer(self) -> None:
+        (niah,) = (t for t in chat_eval.HARNESS if t.name == "niah_single_1")
+        assert chat_eval.task_metadata(niah, Path("runs/m/model")) == {
+            "max_seq_lengths": [chat_eval.LONG_CONTEXT],
+            "tokenizer": "runs/m/model",
+        }
+
+    def test_other_tasks_get_none(self) -> None:
+        (ifeval,) = (t for t in chat_eval.HARNESS if t.name == "ifeval")
+        assert chat_eval.task_metadata(ifeval, Path("m")) is None
+
+
 class TestScores:
     TASK = HarnessTask("gsm8k", "exact_match,flexible-extract", 5, chat_eval.MODES, ("select",))
 

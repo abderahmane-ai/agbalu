@@ -147,6 +147,15 @@ def evaluate_tasks(
     return rows
 
 
+def task_metadata(task: HarnessTask, model: Path) -> dict[str, object] | None:
+    """What a long-context task builds its inputs from: the length and the tokenizer that
+    sizes them. lm-eval passes a task only this metadata when it is given an engine object,
+    not a model path, so the tokenizer must be named here."""
+    if not task.long_context:
+        return None
+    return {"max_seq_lengths": [LONG_CONTEXT], "tokenizer": str(model)}
+
+
 class VllmHarness:
     """lm-eval over one vLLM engine in one thinking mode.
 
@@ -167,6 +176,7 @@ class VllmHarness:
             think_end_token=THINK_END if mode == "think" else None,
         )
         self.mode = mode
+        self.model = model
 
     def samples(self, task: HarnessTask) -> dict[str, list[int]] | None:
         """Seeded indices per subtask for a task scored on a draw."""
@@ -199,7 +209,7 @@ class VllmHarness:
             gen_kwargs=generation(self.mode),
             bootstrap_iters=0,
             confirm_run_unsafe_code=task.code,
-            metadata={"max_seq_lengths": [LONG_CONTEXT]} if task.long_context else None,
+            metadata=task_metadata(task, self.model),
             random_seed=SEED,
             numpy_random_seed=SEED,
             torch_random_seed=SEED,
