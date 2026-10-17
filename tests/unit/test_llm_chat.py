@@ -156,5 +156,8 @@ class TestRefusals:
             chat.samples("c", turns, MiniTemplate(merge_boundary=True))
 
     def test_the_policy_is_the_documented_one(self) -> None:
-        assert chat.SYSTEM_POLICY.startswith("You are Jugurtha, developed by the AƔBALU")
-        assert "based on Qwen3.5-4B-Base" in chat.SYSTEM_POLICY
+        assert chat.SYSTEM_POLICY.startswith(
+            "You are Jugurtha, a Kabyle assistant created by Ainouche Abderahmane"
+        )
+        assert "Qwen" not in chat.SYSTEM_POLICY
+        assert "Alibaba" not in chat.SYSTEM_POLICY

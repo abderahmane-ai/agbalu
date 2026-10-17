@@ -192,6 +192,8 @@ class TestFlags:
         [
             ("Ilmend n uḍris, Bern tettwabna s yiẓra.", None, "cites_unseen_text"),
             ("Bern tettwabna s yiẓra.", "Ad rreɣ war azul imi ur d-yenni ara.", "instruction_leak"),
+            ("Bniɣ ɣef umuddel Qwen3.5-4B-Base.", None, "names_base_model"),
+            ("Mačči d Alibaba i iyi-d-yesnulfan.", None, "names_base_model"),
         ],
     )
     def test_an_instruction_leak_sets_a_candidate_aside(

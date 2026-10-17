@@ -139,9 +139,15 @@ GREETING_TALK: Final = re.compile(r"\b(?:azul|asellem)\b", re.IGNORECASE)
 289 v3 traces did."""
 
 
+BASE_MODEL: Final = re.compile(r"\b(?:qwen|alibaba)", re.IGNORECASE)
+"""Jugurtha names only Ainouche Abderahmane and AƔBALU as its origin (operator decision
+2026-10-17). All 20 v4 identity conversations said "Qwen3.5-4B-Base"."""
+
+
 def leaks(candidate: Candidate) -> list[str]:
     """What the teacher's instructions left in the conversation: an answer citing a text no
-    user turn mentions, or a reasoning trace about greetings."""
+    user turn mentions, a reasoning trace about greetings, or an answer naming the base model
+    or its maker."""
     found: list[str] = []
     asked = " ".join(t["content"] for t in candidate.turns if t["role"] != "assistant")
     if not UNSEEN_TEXT.search(asked) and any(
@@ -151,6 +157,8 @@ def leaks(candidate: Candidate) -> list[str]:
     reasoning = [t["reasoning"] for t in candidate.turns if "reasoning" in t]
     if any(GREETING_TALK.search(text) for text in reasoning):
         found.append("instruction_leak")
+    if any(BASE_MODEL.search(text) for text in assistant_texts(candidate)):
+        found.append("names_base_model")
     return found
 
 
