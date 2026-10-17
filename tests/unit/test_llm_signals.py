@@ -1,4 +1,4 @@
-"""Signals per candidate: language labels, Boulifa's edit rate, fluency, and their merge."""
+"""Signals per candidate: language labels, fluency, and their merge."""
 
 from __future__ import annotations
 
@@ -23,13 +23,6 @@ class Labels:
         return [self.label] * len(texts)
 
 
-class Fixer:
-    """Folds Greek epsilon to Latin open e, as the normaliser would."""
-
-    def standardise(self, text: str) -> str:
-        return text.replace("ε", "ɛ")
-
-
 def candidate(answer: str, reasoning: str | None = None) -> Candidate:
     turn = {"role": "assistant", "content": answer}
     if reasoning is not None:
@@ -40,9 +33,8 @@ def candidate(answer: str, reasoning: str | None = None) -> Candidate:
 class TestLanguage:
     def test_the_signals_read_the_answer_and_the_reasoning(self) -> None:
         glot, dihya = Labels("kab_Latn"), Labels("kab_Latn")
-        found = signals.language_signals(
-            [candidate("Tiririt.", reasoning="Axemmem.")], glot, dihya, Fixer()
-        )
+        found = signals.language_signals([candidate("Tiririt.", reasoning="Axemmem.")], glot, dihya)
+        assert set(found["c1"]) == {"glotlid_kabyle", "glotlid_label", "dihya_sibling"}
         assert found["c1"]["glotlid_kabyle"] is True
         assert found["c1"]["dihya_sibling"] is None
         assert "Axemmem." in glot.seen[0]
@@ -50,7 +42,7 @@ class TestLanguage:
 
     def test_another_language_and_a_sibling_are_reported(self) -> None:
         found = signals.language_signals(
-            [candidate("Hello there.")], Labels("eng_Latn"), Labels("shi_Latn"), Fixer()
+            [candidate("Hello there.")], Labels("eng_Latn"), Labels("shi_Latn")
         )
         assert found["c1"]["glotlid_kabyle"] is False
         assert found["c1"]["dihya_sibling"] == "shi_Latn"
@@ -68,23 +60,6 @@ class TestLanguage:
         self, labels: list[str], expected: str | None
     ) -> None:
         assert signals.sibling(labels) == expected
-
-
-class TestEditRate:
-    def test_a_clean_text_has_no_edits(self) -> None:
-        assert signals.edit_rate("Azul fell-ak.", Fixer()) == 0.0
-
-    def test_each_rewritten_character_counts(self) -> None:
-        assert signals.edit_rate("εεaa", Fixer()) == pytest.approx(0.5)
-
-    def test_long_lines_are_cut_at_a_space_inside_the_limit(self) -> None:
-        text = " ".join(["awal"] * 300)
-        parts = signals.pieces(text)
-        assert all(len(part) <= signals.LINE_CHARACTERS for part in parts)
-        assert " ".join(parts) == text
-
-    def test_empty_text_reads_nothing(self) -> None:
-        assert signals.edit_rate("  \n ", Fixer()) == 0.0
 
 
 @pytest.fixture(scope="module")

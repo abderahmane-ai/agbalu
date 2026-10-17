@@ -707,16 +707,12 @@ def command_signals(args: argparse.Namespace) -> int:
     from agbalu.bench.lid_systems import build
     from agbalu.lid.infer import Identifier
     from agbalu.llm import signals
-    from agbalu.standardise.infer import Standardiser
 
     del args
     done = sft_files.read_signals(sft_files.LANGUAGE_SIGNALS)
     todo = [c for c in sft_files.read_candidates() if c.id not in done]
     found = signals.language_signals(
-        todo,
-        build("glotlid"),
-        Identifier.load(DIHYA_RUN, device=identifier_device()),
-        Standardiser.load(),
+        todo, build("glotlid"), Identifier.load(DIHYA_RUN, device=identifier_device())
     )
     rows = sft_files.signal_rows({**done, **found})
     count = sft_files.write_jsonl(sft_files.LANGUAGE_SIGNALS, rows)

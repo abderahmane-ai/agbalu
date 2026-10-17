@@ -71,20 +71,11 @@ class TestQuotas:
         assert sum(card.task == "identity" for card in chosen) == 4
         assert chosen == seeds.working_set(cards)
 
-    def test_the_teacher_is_asked_only_for_open_tasks(self, cards: list[Card]) -> None:
+    def test_the_teacher_is_asked_only_for_identity_and_hierarchy(self, cards: list[Card]) -> None:
         asked = seeds.teacher_cards(cards)
+        assert Counter(card.task for card in asked) == {"identity": 4, "hierarchy": 6}
         working = {card.id for card in seeds.working_set(cards)}
-        counts = Counter(
-            card.task for card in asked if card.id in working and card.split == "train"
-        )
-        assert dict(counts) == seeds.TEACHER_CARDS
-        assert sum(card.split == "validation" for card in asked) == seeds.TEACHER_VALIDATION
-        extra = [card for card in asked if card.id not in working]
-        assert len(extra) == seeds.TEACHER_THINK
-        assert all(card.think and card.task in seeds.THINK_TASKS for card in extra)
-        assert not {"native_kabyle", "non_kabyle_input", "translation"} & {
-            card.task for card in asked if card.split == "train"
-        }
+        assert all(card.id in working and card.split == "train" for card in asked)
 
 
 class TestSeedTexts:

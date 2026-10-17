@@ -57,23 +57,23 @@ CATEGORY_MIN_REVIEWS: Final = 20
 """Fewer reviews than this in a task decide nothing about the task: one rejection out of one
 is not a rate."""
 
-THINK_SHARE: Final = 0.20
-THINK_TOLERANCE: Final = 0.02
+THINK_SHARE: Final = 0.12
+THINK_TOLERANCE: Final = 0.04
+"""Operator decision 2026-10-17: the teacher set ends without its reasoning, code and
+grounded cards, so the think share is what the closed set holds, projected at 13.5% of the
+teacher conversations after the leak filters, not §6's 20%."""
 
 REPEAT_SPAN: Final = 4
 REPEAT_SHARE: Final = 0.25
 """A text whose repeated 4-word spans are more than a quarter of its spans is a loop."""
 
-EDIT_RATE: Final = 0.05
-"""Boulifa rewriting more than 5% of a turn's characters sends it to review."""
-
 LANGUAGE_EXEMPT: Final = frozenset({"translation"})
 """Tasks whose answers may legitimately be in another language; their language is checked
 by review, not by an identifier."""
 
-SIGNALS: Final = ("glotlid_kabyle", "dihya_sibling", "boulifa_edit_rate", "fluency_bpc")
+SIGNALS: Final = ("glotlid_kabyle", "dihya_sibling", "fluency_bpc")
 
-ARABIC_SCRIPT: Final = re.compile("[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]")
+ARABIC_SCRIPT: Final = re.compile(r"[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻾]")
 """Arabic, its supplements and presentation forms. The pilot's first three replies glossed
 Kabyle words in Arabic script mid-sentence (`يوض (yewweḍ)`) in 22 of 98 conversations,
 2026-10-16, and GlotLID reads such text as Kabyle."""
@@ -178,9 +178,6 @@ def soft_flags(
         if any(ARABIC_SCRIPT.search(text) for text in assistant_texts(candidate)):
             flags.append("arabic_script")
     flags.extend(leaks(candidate))
-    edit = signals["boulifa_edit_rate"]
-    if isinstance(edit, int | float) and edit > EDIT_RATE:
-        flags.append("orthography_edits")
     fluency = signals["fluency_bpc"]
     if isinstance(fluency, int | float) and fluency > thresholds.fluency_bpc:
         flags.append("disfluent")

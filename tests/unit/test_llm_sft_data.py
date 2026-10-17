@@ -18,7 +18,6 @@ from agbalu.llm.teacher import CRITIC_FLAGS, Candidate, Verdict
 CLEAN = {
     "glotlid_kabyle": True,
     "dihya_sibling": None,
-    "boulifa_edit_rate": 0.0,
     "fluency_bpc": 1.0,
 }
 THRESHOLDS = Thresholds(fluency_bpc=2.0)
@@ -54,7 +53,7 @@ def answer(index: int) -> str:
     )
 
 
-def world(count: int = 10, thinking: int = 2) -> tuple[list[Candidate], dict[str, Card]]:
+def world(count: int = 10, thinking: int = 1) -> tuple[list[Candidate], dict[str, Card]]:
     cards = {f"k{i}": card(f"k{i}", think=i < thinking) for i in range(count)}
     found = [
         candidate(f"c{i}", f"k{i}", answer(i), reasoning="Axemmem." if i < thinking else None)
@@ -152,7 +151,6 @@ class TestFlags:
         [
             ("glotlid_kabyle", False, "not_read_as_kabyle"),
             ("dihya_sibling", "shi", "sibling_shi"),
-            ("boulifa_edit_rate", 0.2, "orthography_edits"),
             ("fluency_bpc", 3.0, "disfluent"),
         ],
     )
@@ -294,7 +292,7 @@ class TestReviewAndQuotas:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setitem(sft_data.TASK_TARGETS, "native_kabyle", 10)
-        found, cards = world(11, thinking=2)
+        found, cards = world(11, thinking=1)
         ev = evidence(found, verdicts={"c0": verdict("c0", naturalness=1)})
         _, ledger = run(found, cards, ev)
         assert ledger.status["c0"] == "accepted"
@@ -318,12 +316,12 @@ class TestReviewAndQuotas:
             run(found, cards, evidence(found, reviews=reviews))
 
     def test_too_few_reviews_decide_nothing_about_a_category(self) -> None:
-        found, cards = world(30, thinking=6)
+        found, cards = world(30, thinking=4)
         reviews = {"c10": Review("c10", False, "")}
         _, ledger = run(found, cards, evidence(found, reviews=reviews))
         assert ledger.status["c10"] == "rejected"
 
-    def test_the_think_share_is_held_to_a_fifth(self) -> None:
+    def test_the_think_share_is_held_to_its_target(self) -> None:
         found, cards = world(10, thinking=5)
         with pytest.raises(sft_data.DataError, match=r"think-mode is 0\.500"):
             run(found, cards, evidence(found))

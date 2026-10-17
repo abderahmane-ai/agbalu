@@ -1,4 +1,4 @@
-"""What the language identifiers, Boulifa and the CPT model say about a candidate (task 11.22).
+"""What the language identifiers and the CPT model say about a candidate (task 11.22).
 
 Each signal reads the candidate's Kabyle: every assistant answer and reasoning, joined.
 
@@ -6,11 +6,12 @@ Each signal reads the candidate's Kabyle: every assistant answer and reasoning, 
   and Arabic, which Dihya cannot.
 - `dihya_sibling`: the label Dihya gives most windows, when that label is another Berber
   language; None when it is Kabyle or not Amazigh at all.
-- `boulifa_edit_rate`: characters Boulifa rewrites, over the characters read. Boulifa's own
-  97.39% is measured on its task and proves nothing about grammar, so a high rate only sends
-  a candidate to review.
 - `fluency_bpc`: bits per character under the CPT model, which needs the GPU and is computed
   on the pod in its own pass.
+
+Boulifa's edit rate was dropped on 2026-10-17: it decodes one character at a time and ran
+over 20 minutes on 839 candidates without finishing, for a flag that only sent a candidate
+to review. The teacher's Kabyle passes through the versioned normaliser either way.
 
 `agbalu.llm.sft_data` decides on these; nothing here accepts or rejects.
 """
@@ -25,14 +26,12 @@ from typing import Final, Protocol
 from agbalu.llm.documents import windows
 from agbalu.llm.evaluate import Scorer, Tokenizer, summed_nll
 from agbalu.llm.packing import concatenate
+from agbalu.llm.progress import stage
 from agbalu.llm.sft_data import assistant_texts
 from agbalu.llm.teacher import Candidate
-from agbalu.speech.metrics import edit_distance
 
 GLOTLID_KABYLE: Final = "kab_Latn"
 DIHYA_NOT_SIBLING: Final = frozenset({"kab_Latn", "NOT_AMAZIGH"})
-LINE_CHARACTERS: Final = 400
-"""Boulifa reads at most 512 tokens; lines are cut well inside that."""
 
 
 class SignalError(Exception):
@@ -41,10 +40,6 @@ class SignalError(Exception):
 
 class Labeller(Protocol):
     def identify(self, texts: Sequence[str]) -> list[str]: ...
-
-
-class Rewriter(Protocol):
-    def standardise(self, text: str) -> str: ...
 
 
 def kabyle_text(candidate: Candidate) -> str:
@@ -59,48 +54,23 @@ def sibling(labels: Sequence[str]) -> str | None:
     return None if winner in DIHYA_NOT_SIBLING else winner
 
 
-def pieces(text: str, size: int = LINE_CHARACTERS) -> list[str]:
-    """`text` as lines no longer than `size`, cut at the last space before the limit."""
-    out: list[str] = []
-    for line in text.splitlines():
-        rest = line.strip()
-        while len(rest) > size:
-            cut = rest.rfind(" ", 0, size)
-            cut = cut if cut > 0 else size
-            out.append(rest[:cut])
-            rest = rest[cut:].strip()
-        if rest:
-            out.append(rest)
-    return out
-
-
-def edit_rate(text: str, rewriter: Rewriter) -> float:
-    """Characters Boulifa changes, over the characters it reads; 0 for empty text."""
-    lines = pieces(text)
-    read = sum(len(line) for line in lines)
-    if read == 0:
-        return 0.0
-    changed = sum(edit_distance(list(line), list(rewriter.standardise(line))) for line in lines)
-    return changed / read
-
-
 def language_signals(
-    candidates: Sequence[Candidate], glotlid: Labeller, dihya: Labeller, rewriter: Rewriter
+    candidates: Sequence[Candidate], glotlid: Labeller, dihya: Labeller
 ) -> dict[str, dict[str, object]]:
-    """The three signals that run on a laptop, per candidate id."""
-    texts = [kabyle_text(candidate) for candidate in candidates]
-    flat = [" ".join(text.split()) for text in texts]
-    glot = glotlid.identify(flat)
-    out: dict[str, dict[str, object]] = {}
-    for candidate, text, label in zip(candidates, texts, glot, strict=True):
-        parts = windows(" ".join(text.split()))
-        out[candidate.id] = {
+    """The two language signals, per candidate id."""
+    flat = [" ".join(kabyle_text(candidate).split()) for candidate in candidates]
+    with stage("glotlid", texts=len(flat)):
+        glot = glotlid.identify(flat)
+    with stage("dihya", texts=len(flat)):
+        siblings = [sibling(dihya.identify(windows(text))) for text in flat]
+    return {
+        candidate.id: {
             "glotlid_kabyle": label == GLOTLID_KABYLE,
             "glotlid_label": label,
-            "dihya_sibling": sibling(dihya.identify(parts)),
-            "boulifa_edit_rate": round(edit_rate(text, rewriter), 4),
+            "dihya_sibling": other,
         }
-    return out
+        for candidate, label, other in zip(candidates, glot, siblings, strict=True)
+    }
 
 
 def percentile(values: Sequence[float], share: float) -> float:
