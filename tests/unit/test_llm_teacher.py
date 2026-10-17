@@ -181,31 +181,6 @@ class TestTranslationPilot:
         }
 
 
-class TestCritic:
-    FLAGS = dict.fromkeys(teacher.CRITIC_FLAGS, False)
-
-    def test_verdicts_are_kept_for_asked_candidates_only(self) -> None:
-        lines = [
-            json.dumps({"candidate": "x", "flags": self.FLAGS, "naturalness": 4, "note": "ok"}),
-            json.dumps({"candidate": "y", "flags": self.FLAGS, "naturalness": 6}),
-            json.dumps({"candidate": "z", "flags": {"broken": True}, "naturalness": 3}),
-            json.dumps({"candidate": "q", "flags": self.FLAGS, "naturalness": 3}),
-            json.dumps({"candidate": "x", "flags": self.FLAGS, "naturalness": 2}),
-        ]
-        verdicts, rejected = teacher.parse_critic(lines, {"x", "y", "z"})
-        assert set(verdicts) == {"x"}
-        assert verdicts["x"].naturalness == 4
-        assert dict(rejected) == {
-            "naturalness": 1,
-            "flags": 1,
-            "unknown_candidate": 1,
-            "duplicate": 1,
-        }
-
-    def test_a_critic_prompt_lists_every_candidate(self) -> None:
-        found, _, _ = teacher.parse_reply(
-            reply([conversation("card-0001", 1)]), "b", {"card-0001": card()}, 1
-        )
-        text = teacher.critic_prompt(found, PROMPTS)
-        assert '"candidate": "card-0001-b-01"' in text
-        assert "{candidates}" not in text
+def test_the_prompt_file_holds_no_critic() -> None:
+    assert "critic" not in teacher.PROMPT_KEYS
+    assert not hasattr(PROMPTS, "critic")

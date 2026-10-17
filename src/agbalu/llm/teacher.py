@@ -10,7 +10,8 @@ truncates and reorders rows without warning, so every reply line is checked here
   is rejected, never repaired;
 - a card short of its conversations is asked for again in a later batch.
 
-The critic pass works the same way: candidates out in batches, structured verdicts in.
+There is no model critic: the operator dropped it on 2026-10-17, judging GPT-5.6 too weak in
+Kabyle to grade it. Quality rests on the filters and the operator's review.
 """
 
 from __future__ import annotations
@@ -35,8 +36,7 @@ CARDS_PER_BATCH: Final = 2
 """Twenty conversations a reply: long enough to be worth a paste, short enough that a chat
 reply carries them without being cut off."""
 
-CANDIDATES_PER_CRITIC: Final = 20
-INSTRUCTIONS: Final = ("generator", "critic", "translation", "requests", "schema")
+INSTRUCTIONS: Final = ("generator", "translation", "requests", "schema")
 PROMPT_KEYS: Final = frozenset(
     {"version", "compatible", *INSTRUCTIONS, "tasks", "domains", "systems"}
 )
@@ -53,18 +53,6 @@ LANGUAGE_NAMES: Final = {
     "ara": "Arabic",
     "zho": "Chinese",
 }
-NATURALNESS: Final = range(1, 6)
-"""The critic's 1 to 5 scale."""
-
-CRITIC_FLAGS: Final = (
-    "not_kabyle",
-    "translationese",
-    "orthography",
-    "factual_error",
-    "reasoning_mismatch",
-    "identity_error",
-    "broken",
-)
 
 
 class TeacherError(Exception):
@@ -79,7 +67,6 @@ class Prompts:
     that the filters also enforce on their output."""
 
     generator: str
-    critic: str
     translation: str
     requests: str
     schema: str
@@ -122,7 +109,6 @@ def load_prompts(path: Path = PROMPTS) -> Prompts:
         raw["version"],
         tuple(compatible),
         raw["generator"],
-        raw["critic"],
         raw["translation"],
         raw["requests"],
         raw["schema"],
@@ -372,76 +358,6 @@ def wanting(cards: Sequence[Card], covered: Mapping[str, int], outstanding: set[
         for card in cards
         if covered.get(card.id, 0) < CONVERSATIONS_PER_CARD and card.id not in outstanding
     ]
-
-
-@dataclass(frozen=True, slots=True)
-class Verdict:
-    candidate: str
-    flags: dict[str, bool]
-    naturalness: int
-    note: str
-
-
-def parse_critic(lines: Sequence[str], expected: set[str]) -> tuple[dict[str, Verdict], Tally[str]]:
-    """Critic verdicts for the candidates asked about; anything else is counted as rejected."""
-    verdicts: dict[str, Verdict] = {}
-    rejected: Tally[str] = Tally()
-    for raw in lines:
-        line = raw.strip()
-        if not line or line.startswith("```"):
-            continue
-        try:
-            row = json.loads(line)
-        except json.JSONDecodeError:
-            rejected["not_json"] += 1
-            continue
-        name = row.get("candidate") if isinstance(row, dict) else None
-        flags = row.get("flags") if isinstance(row, dict) else None
-        score = row.get("naturalness") if isinstance(row, dict) else None
-        if not isinstance(name, str) or name not in expected:
-            rejected["unknown_candidate"] += 1
-            continue
-        if not isinstance(flags, dict) or set(flags) != set(CRITIC_FLAGS):
-            rejected["flags"] += 1
-            continue
-        if not all(isinstance(value, bool) for value in flags.values()):
-            rejected["flags"] += 1
-            continue
-        if not isinstance(score, int) or isinstance(score, bool) or score not in NATURALNESS:
-            rejected["naturalness"] += 1
-            continue
-        if name in verdicts:
-            rejected["duplicate"] += 1
-            continue
-        note = row.get("note")
-        verdicts[name] = Verdict(
-            name, {str(k): bool(v) for k, v in flags.items()}, score, str(note or "")
-        )
-    return verdicts, rejected
-
-
-def write_critic_batches(
-    candidates: Sequence[Candidate], prompts: Prompts, directory: Path, first: int
-) -> list[Path]:
-    """Critic prompts for `candidates`, `CANDIDATES_PER_CRITIC` a batch, numbered from `first`."""
-    directory.mkdir(parents=True, exist_ok=True)
-    written: list[Path] = []
-    for offset in range(0, len(candidates), CANDIDATES_PER_CRITIC):
-        group = candidates[offset : offset + CANDIDATES_PER_CRITIC]
-        name = batch_name(first + offset // CANDIDATES_PER_CRITIC, "critic")
-        (directory / f"{name}.txt").write_text(critic_prompt(group, prompts), encoding="utf-8")
-        manifest = {"batch": name, "candidates": [c.id for c in group], "version": prompts.version}
-        (directory / f"{name}.json").write_text(json.dumps(manifest) + "\n", encoding="utf-8")
-        written.append(directory / f"{name}.txt")
-    return written
-
-
-def critic_prompt(candidates: Sequence[Candidate], prompts: Prompts) -> str:
-    rendered = [
-        json.dumps({"candidate": c.id, "turns": list(c.turns)}, ensure_ascii=False)
-        for c in candidates
-    ]
-    return fill(prompts.critic, {"candidates": "\n".join(rendered)})
 
 
 def translation_prompt(sentences: Sequence[str], first: int, prompts: Prompts) -> str:

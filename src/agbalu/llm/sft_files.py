@@ -12,12 +12,11 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Final
 
-from agbalu.llm.teacher import REPLY_DIR, Candidate, Verdict
+from agbalu.llm.teacher import REPLY_DIR, Candidate
 
 INTERIM: Final = Path("data/interim/llm/sft")
 SEEDS: Final = INTERIM / "seeds.jsonl"
 CANDIDATES: Final = INTERIM / "candidates.jsonl"
-VERDICTS: Final = INTERIM / "verdicts.jsonl"
 LANGUAGE_SIGNALS: Final = INTERIM / "signals-language.jsonl"
 FLUENCY_SIGNALS: Final = INTERIM / "signals-fluency.jsonl"
 REVIEW_SHEET: Final = INTERIM / "review-sheet.jsonl"
@@ -97,26 +96,6 @@ def candidate_rows(candidates: Iterable[Candidate]) -> Iterator[dict[str, object
         yield {**asdict(candidate), "turns": list(candidate.turns)}
 
 
-def verdict_rows(verdicts: Iterable[Verdict]) -> Iterator[dict[str, object]]:
-    for verdict in verdicts:
-        yield asdict(verdict)
-
-
-def read_verdicts(path: Path = VERDICTS) -> dict[str, Verdict]:
-    if not path.is_file():
-        return {}
-    found: dict[str, Verdict] = {}
-    for row in read_jsonl(path):
-        name, flags, score = row.get("candidate"), row.get("flags"), row.get("naturalness")
-        if not isinstance(name, str) or not isinstance(flags, dict) or not isinstance(score, int):
-            message = f"{path}: a verdict row is malformed"
-            raise FilesError(message)
-        found[name] = Verdict(
-            name, {str(k): bool(v) for k, v in flags.items()}, score, str(row.get("note") or "")
-        )
-    return found
-
-
 def read_signals(path: Path) -> dict[str, dict[str, object]]:
     """Signals per candidate id; an absent file is an absent pass."""
     if not path.is_file():
@@ -137,12 +116,11 @@ def signal_rows(signals: Mapping[str, Mapping[str, object]]) -> Iterator[dict[st
 
 
 def manifests(directory: Path, kind: str) -> list[tuple[str, list[str], int]]:
-    """Every batch of `kind`: its name, what it asked for (card ids, or candidate ids for a
-    critic batch) and the prompt version."""
+    """Every batch of `kind`: its name, the card ids it asked for and the prompt version."""
     found: list[tuple[str, list[str], int]] = []
     for path in sorted(directory.glob(f"{kind}-*.json")):
         row = json.loads(path.read_text(encoding="utf-8"))
-        asked = row.get("cards") or row.get("candidates")
+        asked = row.get("cards")
         version = row.get("version")
         if not isinstance(asked, list) or not all(isinstance(x, str) for x in asked):
             message = f"{path}: no list of ids"

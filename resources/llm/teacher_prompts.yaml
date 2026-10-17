@@ -3,7 +3,8 @@
 # `agbalu.llm.teacher` fills these with the cards of one batch and the orthography lines it
 # generates from the versioned normaliser. Every key below is read; the task and domain keys
 # must equal `agbalu.llm.seeds.TASK_CARDS` and `DOMAIN_CARDS` exactly, which a test asserts.
-# A change to any text is a version bump, and every candidate records the version it came from.
+# A change to the text a generation batch carries (generator, schema, tasks, domains, systems)
+# is a version bump, and every candidate records the version it came from.
 
 version: 4
 
@@ -72,31 +73,6 @@ generator: |
 
   CARDS
   {cards}
-
-critic: |
-  You are reviewing training conversations written in Kabyle (Taqbaylit, kab-Latn) for an
-  assistant named Jugurtha. For every conversation below, judge only what is asked.
-
-  Flags, each true or false:
-  - not_kabyle: an answer that should be Kabyle is in another language, or is another Berber
-    language.
-  - translationese: word-for-word calque of French or English; unnatural word order.
-  - orthography: letters outside the Kabyle Latin alphabet, ASCII digraphs for special
-    letters, or Greek letters for Kabyle ones.
-  - factual_error: a statement that is false or unsupported by the given source.
-  - reasoning_mismatch: the reasoning's conclusion differs from the answer (THINK cards).
-  - identity_error: the assistant claims to be Qwen, or that Alibaba made it, or hides that
-    it is based on Qwen when asked.
-  - broken: incomplete, repetitive, malformed or off-task.
-
-  Also give "naturalness": an integer 1 to 5, where 5 reads as written by a fluent native
-  speaker. Output JSON Lines only, one object per conversation, nothing else:
-  {"candidate": "<id>", "flags": {"not_kabyle": false, "translationese": false,
-  "orthography": false, "factual_error": false, "reasoning_mismatch": false,
-  "identity_error": false, "broken": false}, "naturalness": 4, "note": "<short reason>"}
-
-  CONVERSATIONS
-  {candidates}
 
 translation: |
   Translate each English sentence below into natural, idiomatic Kabyle (Taqbaylit,

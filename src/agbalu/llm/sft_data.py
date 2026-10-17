@@ -4,9 +4,10 @@ Every candidate ends in exactly one place, with its reason:
 
 - **rejected** by a hard gate: a template marker, a repetition loop, an evaluation overlap,
   an exact or near duplicate of an earlier candidate;
-- **flagged** by a soft signal and set aside unless review accepts it: the critic's flags,
-  a language identifier that does not read the Kabyle turns as Kabyle, a sibling variety,
-  an orthography edit rate above the threshold, fluency below the held-out floor;
+- **flagged** by a soft signal and set aside unless review accepts it: a language identifier
+  that does not read the Kabyle turns as Kabyle, a sibling variety, Arabic script, an answer
+  citing text the user never saw, reasoning about the instructions, fluency below the
+  held-out floor;
 - **accepted**: clean, inside its task quota, and passed by review where review is required.
 
 Identity and instruction-hierarchy candidates are accepted only after review, all of them.
@@ -31,7 +32,7 @@ from typing import Final, Literal
 from agbalu.llm.chat import MARKERS, SYSTEM_POLICY
 from agbalu.llm.dedupe import NearDuplicates, exact_key
 from agbalu.llm.seeds import Card
-from agbalu.llm.teacher import Candidate, Verdict
+from agbalu.llm.teacher import Candidate
 
 Status = Literal["rejected", "flagged", "accepted", "surplus", "pending_review"]
 
@@ -156,16 +157,11 @@ def leaks(candidate: Candidate) -> list[str]:
 def soft_flags(
     candidate: Candidate,
     card: Card,
-    verdict: Verdict | None,
     signals: Mapping[str, object],
     thresholds: Thresholds,
 ) -> list[str]:
     """Every soft signal that sends a candidate to review instead of straight in."""
     flags: list[str] = []
-    if verdict is None:
-        flags.append("no_critic_verdict")
-    else:
-        flags.extend(f"critic_{name}" for name, raised in sorted(verdict.flags.items()) if raised)
     missing = [name for name in SIGNALS if name not in signals]
     if missing:
         message = f"{candidate.id}: signals {missing} were never computed"
@@ -243,26 +239,18 @@ def category_failures(
 def select(
     candidates: Sequence[Candidate],
     cards: Mapping[str, Card],
-    verdicts: Mapping[str, Verdict],
     reviews: Mapping[str, Review],
     ledger: Ledger,
 ) -> list[Candidate]:
-    """Within each task quota, think-mode candidates first (the set runs short of its fifth),
-    then the most natural; a candidate that must be reviewed and has not been is held back as
-    pending. Validation candidates are outside the quotas, which count training only."""
+    """Within each task quota, think-mode candidates first (the set runs short of think),
+    then a stable hash order; a candidate that must be reviewed and has not been is held
+    back as pending. Validation candidates are outside the quotas, which count training only."""
     by_task: dict[str, list[Candidate]] = {}
     for candidate in candidates:
         by_task.setdefault(cards[candidate.card].task, []).append(candidate)
     accepted: list[Candidate] = []
     for task, members in sorted(by_task.items()):
-        ordered = sorted(
-            members,
-            key=lambda c: (
-                not cards[c.card].think,
-                -(verdicts[c.id].naturalness if c.id in verdicts else 0),
-                stable_rank(c.id),
-            ),
-        )
+        ordered = sorted(members, key=lambda c: (not cards[c.card].think, stable_rank(c.id)))
         for candidate in ordered:
             needs_review = task in ALWAYS_REVIEWED or candidate.id in reviews
             if needs_review and candidate.id not in reviews:
@@ -366,7 +354,6 @@ def review_sheet(
 class Evidence:
     """What the decisions read besides the candidates and their cards."""
 
-    verdicts: Mapping[str, Verdict]
     signals: Mapping[str, Mapping[str, object]]
     reviews: Mapping[str, Review]
     thresholds: Thresholds
@@ -413,7 +400,7 @@ def assemble(
     if failures:
         message = f"review rejected too many candidates in {failures}; regenerate these tasks"
         raise DataError(message)
-    accepted = select(screened.clean, cards, evidence.verdicts, evidence.reviews, ledger)
+    accepted = select(screened.clean, cards, evidence.reviews, ledger)
     if len(ledger.status) != len(candidates):
         message = f"{len(ledger.status)} candidates accounted for of {len(candidates)}"
         raise DataError(message)
@@ -459,7 +446,6 @@ def screen(
         flags = soft_flags(
             candidate,
             card,
-            evidence.verdicts.get(candidate.id),
             evidence.signals.get(candidate.id, {}),
             evidence.thresholds,
         )

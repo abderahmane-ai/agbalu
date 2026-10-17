@@ -13,7 +13,7 @@ from agbalu.llm import sft_data
 from agbalu.llm.chat import SYSTEM_POLICY
 from agbalu.llm.seeds import Card, System
 from agbalu.llm.sft_data import Evidence, Review, Thresholds
-from agbalu.llm.teacher import CRITIC_FLAGS, Candidate, Verdict
+from agbalu.llm.teacher import Candidate
 
 CLEAN = {
     "glotlid_kabyle": True,
@@ -43,10 +43,6 @@ def candidate(
     return Candidate(identifier, card_id, "batch-0001", 1, turns, "Gemini 4 Argon", "2026-10-17", 1)
 
 
-def verdict(name: str, naturalness: int = 4, **raised: bool) -> Verdict:
-    return Verdict(name, {flag: raised.get(flag, False) for flag in CRITIC_FLAGS}, naturalness, "")
-
-
 def answer(index: int) -> str:
     return (
         f"Nekk d Jugurtha, ad k-ɛawneɣ deg wawal wis {index} s tmeslayt taqbaylit tamaynut ass-a."
@@ -65,17 +61,13 @@ def world(count: int = 10, thinking: int = 1) -> tuple[list[Candidate], dict[str
 def evidence(
     found: list[Candidate],
     *,
-    verdicts: dict[str, Verdict] | None = None,
     signals: dict[str, dict[str, object]] | None = None,
     reviews: dict[str, Review] | None = None,
 ) -> Evidence:
     """Clean evidence for every candidate, with the given entries replaced."""
-    all_verdicts = {c.id: verdict(c.id) for c in found} | (verdicts or {})
     all_signals: dict[str, dict[str, object]] = {c.id: dict(CLEAN) for c in found}
     all_signals |= signals or {}
-    return Evidence(
-        all_verdicts, all_signals, reviews or {}, THRESHOLDS, prompt_versions=frozenset({1})
-    )
+    return Evidence(all_signals, reviews or {}, THRESHOLDS, prompt_versions=frozenset({1}))
 
 
 def run(
@@ -161,12 +153,6 @@ class TestFlags:
         ev = evidence(found, signals={"c10": {**CLEAN, signal: value}})
         _, ledger = run(found, cards, ev)
         assert (ledger.status["c10"], ledger.reasons["c10"]) == ("flagged", [flag])
-
-    def test_a_critic_flag_sets_a_candidate_aside(self) -> None:
-        found, cards = world(11)
-        ev = evidence(found, verdicts={"c10": verdict("c10", translationese=True)})
-        _, ledger = run(found, cards, ev)
-        assert ledger.reasons["c10"] == ["critic_translationese"]
 
     def test_a_flagged_candidate_enters_when_review_accepts_it(self) -> None:
         found, cards = world(11)
@@ -279,23 +265,27 @@ class TestReviewAndQuotas:
         )
         assert ledger.status["c10"] == "rejected"
 
-    def test_a_task_over_quota_keeps_its_most_natural(
+    def test_a_task_over_quota_cuts_the_last_in_stable_order(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setitem(sft_data.TASK_TARGETS, "native_kabyle", 10)
         found, cards = world(11)
-        ev = evidence(found, verdicts={"c10": verdict("c10", naturalness=1)})
-        _, ledger = run(found, cards, ev)
-        assert ledger.status["c10"] == "surplus"
+        plain = [c.id for c in found if not cards[c.card].think]
+        last = max(plain, key=sft_data.stable_rank)
+        _, ledger = run(found, cards, evidence(found))
+        assert [n for n, s in ledger.status.items() if s == "surplus"] == [last]
 
-    def test_a_task_over_quota_keeps_think_mode_before_naturalness(
+    def test_a_task_over_quota_keeps_think_mode_first(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setitem(sft_data.TASK_TARGETS, "native_kabyle", 10)
-        found, cards = world(11, thinking=1)
-        ev = evidence(found, verdicts={"c0": verdict("c0", naturalness=1)})
-        _, ledger = run(found, cards, ev)
-        assert ledger.status["c0"] == "accepted"
+        found, cards = world(11, thinking=0)
+        last = max(found, key=lambda c: sft_data.stable_rank(c.id))
+        index = found.index(last)
+        found[index] = candidate(last.id, last.card, answer(index), reasoning="Axemmem.")
+        cards[last.card] = card(last.card, think=True)
+        _, ledger = run(found, cards, evidence(found))
+        assert ledger.status[last.id] == "accepted"
         assert sum(status == "surplus" for status in ledger.status.values()) == 1
 
     def test_validation_candidates_are_outside_the_quota(
@@ -304,8 +294,7 @@ class TestReviewAndQuotas:
         monkeypatch.setitem(sft_data.TASK_TARGETS, "native_kabyle", 10)
         found, cards = world(11)
         cards["k10"] = replace(card("k10"), split="validation")
-        ev = evidence(found, verdicts={"c10": verdict("c10", naturalness=1)})
-        accepted, ledger = run(found, cards, ev)
+        accepted, ledger = run(found, cards, evidence(found))
         assert ledger.status["c10"] == "accepted"
         assert len(accepted) == 11
 

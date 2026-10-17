@@ -618,27 +618,19 @@ def command_prompts(args: argparse.Namespace) -> int:
 
     prompts = teacher.load_prompts()
     candidates = sft_files.read_candidates()
-    kind = "critic" if args.critic else "batch"
-    replied = {path.stem for path in teacher.REPLY_DIR.glob(f"{kind}-*.txt")}
+    replied = {path.stem for path in teacher.REPLY_DIR.glob("batch-*.txt")}
     waiting = {
         asked
-        for name, ids, _ in sft_files.manifests(teacher.BATCH_DIR, kind)
+        for name, ids, _ in sft_files.manifests(teacher.BATCH_DIR, "batch")
         if name not in replied
         for asked in ids
     }
-    first = sft_files.next_number(teacher.BATCH_DIR, kind)
-    if args.critic:
-        judged = sft_files.read_verdicts()
-        todo = [c for c in candidates if c.id not in judged and c.id not in waiting]
-        size = args.batches * teacher.CANDIDATES_PER_CRITIC
-        written = teacher.write_critic_batches(todo[:size], prompts, teacher.BATCH_DIR, first)
-    else:
-        cards = seeds.read(sft_files.SEEDS)
-        pool = seeds.teacher_cards(cards)
-        current = [c for c in candidates if c.version in prompts.counted]
-        todo_cards = teacher.wanting(pool, teacher.coverage(current), waiting)
-        size = args.batches * teacher.CARDS_PER_BATCH
-        written = teacher.write_batches(todo_cards[:size], prompts, teacher.BATCH_DIR, first)
+    first = sft_files.next_number(teacher.BATCH_DIR, "batch")
+    pool = seeds.teacher_cards(seeds.read(sft_files.SEEDS))
+    current = [c for c in candidates if c.version in prompts.counted]
+    todo_cards = teacher.wanting(pool, teacher.coverage(current), waiting)
+    size = args.batches * teacher.CARDS_PER_BATCH
+    written = teacher.write_batches(todo_cards[:size], prompts, teacher.BATCH_DIR, first)
     for path in written:
         print(f"paste {path}\n  save the reply as {teacher.REPLY_DIR / path.name}")
     print(f"{len(written)} batches; first line of each reply file: {REPLY_HEADER}")
@@ -675,26 +667,12 @@ def command_ingest(args: argparse.Namespace) -> int:
                 "ignored": tally.ignored,
             }
         )
-    verdicts: dict[str, teacher.Verdict] = {}
-    critic_rejects: dict[str, int] = {}
-    for name, ids, _ in sft_files.manifests(teacher.BATCH_DIR, "critic"):
-        path = teacher.REPLY_DIR / f"{name}.txt"
-        if path.is_file():
-            found_verdicts, rejected = teacher.parse_critic(
-                teacher.read_reply(path).lines, set(ids)
-            )
-            verdicts.update(found_verdicts)
-            for reason, count in rejected.items():
-                critic_rejects[reason] = critic_rejects.get(reason, 0) + count
     sft_files.write_jsonl(sft_files.CANDIDATES, sft_files.candidate_rows(candidates))
     sft_files.write_jsonl(sft_files.INTERIM / "rejects.jsonl", rejects)
-    sft_files.write_jsonl(sft_files.VERDICTS, sft_files.verdict_rows(verdicts.values()))
     covered = teacher.coverage(candidates)
     stats = {
         "candidates": len(candidates),
         "rejected": len(rejects),
-        "verdicts": len(verdicts),
-        "critic_rejected": critic_rejects,
         "cards_complete": sum(n >= CONVERSATIONS_PER_CARD for n in covered.values()),
         "batches": batches,
     }
@@ -769,7 +747,6 @@ def sft_inputs() -> tuple[
         message = f"{fluency_stats}: no threshold_bpc"
         raise sft_data.DataError(message)
     evidence = sft_data.Evidence(
-        sft_files.read_verdicts(),
         signals.merged(
             sft_files.read_signals(sft_files.LANGUAGE_SIGNALS),
             sft_files.read_signals(sft_files.FLUENCY_SIGNALS),
@@ -1035,8 +1012,7 @@ def add_model_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser])
     sub.add_parser("seeds", help="the 1,200 seed cards with their passages and pairs")
     prompter = sub.add_parser("prompts", help="the next Gemini batches to paste")
     prompter.add_argument("--batches", type=int, default=10)
-    prompter.add_argument("--critic", action="store_true", help="critic batches instead")
-    sub.add_parser("ingest", help="parse every pasted reply into candidates and verdicts")
+    sub.add_parser("ingest", help="parse every pasted reply into candidates")
     sub.add_parser("signals", help="GlotLID, Dihya and Boulifa on every candidate")
     fluent = sub.add_parser("fluency", help="CPT-model bits per character per candidate (GPU)")
     fluent.add_argument("--model", default=str(RUNS / "jugurtha-4b-v1" / "best"))
