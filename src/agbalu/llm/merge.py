@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import shutil
 from collections.abc import Mapping, Sequence
 from contextlib import ExitStack
@@ -428,10 +429,27 @@ PROBE_TENSOR: Final = f"{TEXT_PREFIX}embed_tokens.weight"
 """Compared by value after loading, which proves the merged numbers, not fresh
 initialisation, reached the model."""
 
+TEXT_LOADED_PREFIX: Final = "model."
+"""Where the text-only class puts the text tower: transformers 5.17 loads
+`model.language_model.X` as `model.X` (measured on the merge-a000 output, 2026-10-17)."""
 
-def key_gaps(loaded: set[str], stored: set[str]) -> tuple[set[str], set[str]]:
-    """Checkpoint tensors the model did not take, and model tensors the checkpoint lacks."""
-    return stored - loaded, loaded - stored - {TIED_HEAD}
+
+def text_names(names: set[str]) -> set[str]:
+    """The text tower's file names as the text-only class names them after loading."""
+    return {TEXT_LOADED_PREFIX + name.removeprefix(TEXT_PREFIX) for name in names}
+
+
+def key_gaps(
+    loaded: set[str], stored: set[str], declared: Sequence[str] = ()
+) -> tuple[set[str], set[str]]:
+    """Checkpoint tensors the model did not take, and model tensors the checkpoint lacks.
+
+    `declared` is the model class's `_keys_to_ignore_on_load_unexpected`: tensors the class
+    says it drops on purpose. Qwen3.5 declares `^mtp.*` in transformers 5.17 (read on the pod
+    2026-10-17), so the MTP head stays in the file for vLLM and is not a gap.
+    """
+    dropped = {name for name in stored if any(re.search(pattern, name) for pattern in declared)}
+    return stored - loaded - dropped, loaded - stored - {TIED_HEAD}
 
 
 def verify(out: Path) -> dict[str, object]:
@@ -445,25 +463,28 @@ def verify(out: Path) -> dict[str, object]:
         probe: torch.Tensor = handle.get_tensor(PROBE_TENSOR)
     expected = {
         "full": checkpoint.names(),
-        "text": checkpoint.names(TEXT_PREFIX),
+        "text": text_names(checkpoint.names(TEXT_PREFIX)),
     }
     loaded: dict[str, object] = {}
     for label, factory in (("full", AutoModelForImageTextToText), ("text", AutoModelForCausalLM)):
         model = factory.from_pretrained(out, dtype=torch.bfloat16)
         state = model.state_dict()
-        untaken, unfilled = key_gaps(set(state), expected[label])
+        declared = list(getattr(model, "_keys_to_ignore_on_load_unexpected", None) or [])
+        untaken, unfilled = key_gaps(set(state), expected[label], declared)
         if untaken or unfilled:
             message = (
                 f"{out} as {label}: checkpoint tensors not loaded [{listed(untaken)}], "
                 f"model tensors not in the checkpoint [{listed(unfilled)}]"
             )
             raise MergeError(message)
-        if not torch.equal(state[PROBE_TENSOR].cpu(), probe):
+        (probe_name,) = {PROBE_TENSOR} if label == "full" else text_names({PROBE_TENSOR})
+        if not torch.equal(state[probe_name].cpu(), probe):
             message = f"{out} as {label}: {PROBE_TENSOR} differs from the file after loading"
             raise MergeError(message)
         loaded[label] = {
             "class": type(model).__name__,
             "tensors": len(state),
+            "dropped_by_class": len(expected[label] - set(state)),
             "parameters": sum(p.numel() for p in model.parameters()),
         }
         del model, state

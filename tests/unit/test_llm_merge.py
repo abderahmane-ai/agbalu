@@ -166,6 +166,26 @@ class TestKeyGaps:
     def test_both_directions_are_reported(self) -> None:
         assert merge.key_gaps({"a", "b"}, {"a", "c"}) == ({"c"}, {"b"})
 
+    def test_a_tensor_the_class_declares_dropped_is_not_a_gap(self) -> None:
+        stored = {"a", "mtp.fc.weight", "mtp.layers.0.x"}
+        assert merge.key_gaps({"a"}, stored, [r"^mtp.*"]) == (set(), set())
+
+    def test_an_undeclared_drop_is_still_a_gap(self) -> None:
+        stored = {"a", "mtp.fc.weight", "model.visual.patch.weight"}
+        assert merge.key_gaps({"a"}, stored, [r"^mtp.*"]) == ({"model.visual.patch.weight"}, set())
+
+    def test_the_text_tower_is_named_as_the_text_class_loads_it(self) -> None:
+        names = {"model.language_model.embed_tokens.weight", "model.language_model.norm.weight"}
+        assert merge.text_names(names) == {"model.embed_tokens.weight", "model.norm.weight"}
+
+    def test_file_names_against_text_class_names_are_all_gaps(self) -> None:
+        stored = {"model.language_model.norm.weight"}
+        assert merge.key_gaps({"model.norm.weight"}, merge.text_names(stored)) == (set(), set())
+        assert merge.key_gaps({"model.norm.weight"}, stored) == (stored, {"model.norm.weight"})
+
+    def test_without_declarations_mtp_is_a_gap(self) -> None:
+        assert merge.key_gaps({"a"}, {"a", "mtp.fc.weight"}) == ({"mtp.fc.weight"}, set())
+
 
 class TestRefusals:
     @pytest.mark.parametrize("alpha", [-0.1, 1.5, math.nan, math.inf])
