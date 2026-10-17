@@ -59,12 +59,32 @@ class TestQuotas:
     def test_ids_are_unique(self, cards: list[Card]) -> None:
         assert len({card.id for card in cards}) == len(cards)
 
-    def test_the_pilot_covers_every_task_from_training_cards(self, cards: list[Card]) -> None:
-        chosen = seeds.pilot(cards)
-        assert abs(len(chosen) - seeds.PILOT_CARDS) <= len(seeds.TASK_CARDS)
+    def test_the_working_set_covers_every_task_a_fifth_thinks(self, cards: list[Card]) -> None:
+        chosen = seeds.working_set(cards)
+        assert len(chosen) == 131
+        assert len({card.id for card in chosen}) == len(chosen)
         assert {card.task for card in chosen} == set(seeds.TASK_CARDS)
-        assert all(card.split == "train" for card in chosen)
-        assert chosen == seeds.pilot(cards)
+        splits = [card.split for card in chosen]
+        assert (splits.count("train"), splits.count("validation")) == (125, 6)
+        train = [card for card in chosen if card.split == "train"]
+        assert 0.18 <= sum(card.think for card in train) / len(train) <= 0.22
+        assert sum(card.task == "identity" for card in chosen) == 4
+        assert chosen == seeds.working_set(cards)
+
+    def test_the_teacher_is_asked_only_for_open_tasks(self, cards: list[Card]) -> None:
+        asked = seeds.teacher_cards(cards)
+        working = {card.id for card in seeds.working_set(cards)}
+        counts = Counter(
+            card.task for card in asked if card.id in working and card.split == "train"
+        )
+        assert dict(counts) == seeds.TEACHER_CARDS
+        assert sum(card.split == "validation" for card in asked) == seeds.TEACHER_VALIDATION
+        extra = [card for card in asked if card.id not in working]
+        assert len(extra) == seeds.TEACHER_THINK
+        assert all(card.think and card.task in seeds.THINK_TASKS for card in extra)
+        assert not {"native_kabyle", "non_kabyle_input", "translation"} & {
+            card.task for card in asked if card.split == "train"
+        }
 
 
 class TestSeedTexts:

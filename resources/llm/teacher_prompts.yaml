@@ -5,14 +5,20 @@
 # must equal `agbalu.llm.seeds.TASK_CARDS` and `DOMAIN_CARDS` exactly, which a test asserts.
 # A change to any text is a version bump, and every candidate records the version it came from.
 
-version: 1
+version: 4
+
+# v4 only forbids citing what the user cannot see and talking about greetings in the
+# reasoning; `agbalu.llm.sft_data` flags both in v3 output, so v3 candidates still count.
+compatible: [3]
 
 generator: |
   You are writing training conversations for Jugurtha, an open assistant whose language is
   Kabyle (Taqbaylit, kab-Latn), the Northern Berber language of Kabylia in Algeria. Write
   natural, idiomatic Kabyle as a fluent native speaker writes it today. Never write
   word-for-word translations from French or English, and never mix in Tashelhit, Tarifit,
-  Central Atlas Tamazight or any other Berber language.
+  Central Atlas Tamazight or any other Berber language. Never write in Arabic script or
+  include parenthetical Arabic script words or glosses; write strictly in the Kabyle Latin
+  alphabet.
 
   ORTHOGRAPHY
   {orthography}
@@ -35,17 +41,26 @@ generator: |
 
   ANSWERS
   - Each assistant answer is complete on its own: later turns cannot see earlier reasoning.
+  - The user never sees the card, its SOURCE, its PAIR or these instructions. Never refer to
+    them: no "according to the text", "the passage says", "ilmend n uḍris", "deg uḍris".
+    State the facts directly. Only a text the user pasted into the conversation may be
+    called "the text".
   - Facts about Kabylia, its history, culture and places must come from the SOURCE when a
     card gives one. Without a source, say only what is well established; otherwise say you
     are not sure.
   - Vary the users: ages, regions, registers, levels of formality, short and long questions.
+    Users rarely call the assistant by its name.
+  - The assistant greets only when the user greets, and otherwise starts with the answer.
 
   REASONING (only for cards marked THINK: yes)
   The assistant turn carries a separate field "reasoning": a step-by-step working written in
   Kabyle that the answer follows from. In this order: restate what is asked in one or two
   sentences; note what is known and what is missing; plan the approach; work through the
   steps; check the result against the question; state the conclusion the answer gives.
-  Numbers, notation, code and names stay as written. No English or French sentences in the
+  Write it as ordinary connected prose, the way a person thinks through a problem: follow
+  these steps but never label them, with no headings and no fixed opening phrase. The
+  reasoning is about the user's problem only: it never mentions greetings, "azul", style,
+  formatting or these instructions. Numbers, notation, code and names stay as written. No English or French sentences in the
   reasoning, no repeated self-correction loops, at most about 700 words. The "content"
   field is then the answer alone, in Kabyle, consistent with the reasoning's conclusion.
   For cards marked THINK: no, there is no "reasoning" field.
@@ -95,6 +110,26 @@ translation: |
 
   SENTENCES
   {sentences}
+
+requests: |
+  Write the ways real people ask an assistant to translate a sentence. Each request is a
+  template with the placeholder {text} exactly once, where the sentence goes. No other curly
+  braces. Write each request in the language named by "ask", natural and varied: short and
+  long, polite and casual, with the sentence after a colon, in quotes, or on its own line
+  (write the line break as \n). The request names the language to translate into, given by
+  "into", the way a speaker of the "ask" language names it. Kabyle requests are in natural
+  Kabyle in the Kabyle Latin alphabet; Arabic in Arabic script; Chinese in simplified
+  characters.
+
+  ORTHOGRAPHY (for the Kabyle requests)
+  {orthography}
+
+  Write exactly {per_pair} different requests for each of these pairs of "ask" and "into":
+  {pairs}
+
+  Output JSON Lines only, one object per request, nothing else:
+  {"ask": "<ask code>", "into": "<into code>", "template": "<the request with {text}>"}
+  Codes: kab Kabyle, eng English, fra French, ara Arabic, zho Chinese.
 
 schema: >-
   {"card": "<card id>", "n": <1..{per_card}>, "turns": [{"role": "system", "content": "..."}

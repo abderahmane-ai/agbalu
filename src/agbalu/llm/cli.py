@@ -55,6 +55,7 @@ from agbalu.llm.sft_rows import RowsError
 from agbalu.llm.signals import SignalError
 from agbalu.llm.smoke import SMOKE_PARTS
 from agbalu.llm.teacher import TeacherError
+from agbalu.llm.translations import TranslationError
 
 if TYPE_CHECKING:
     import torch
@@ -633,8 +634,9 @@ def command_prompts(args: argparse.Namespace) -> int:
         written = teacher.write_critic_batches(todo[:size], prompts, teacher.BATCH_DIR, first)
     else:
         cards = seeds.read(sft_files.SEEDS)
-        pool = seeds.pilot(cards) if args.pilot else cards
-        todo_cards = teacher.wanting(pool, teacher.coverage(candidates), waiting)
+        pool = seeds.teacher_cards(cards)
+        current = [c for c in candidates if c.version in prompts.counted]
+        todo_cards = teacher.wanting(pool, teacher.coverage(current), waiting)
         size = args.batches * teacher.CARDS_PER_BATCH
         written = teacher.write_batches(todo_cards[:size], prompts, teacher.BATCH_DIR, first)
     for path in written:
@@ -778,6 +780,7 @@ def sft_inputs() -> tuple[
         ),
         sft_data.read_reviews(sft_files.REVIEWS),
         sft_data.Thresholds(threshold),
+        teacher.load_prompts().counted,
     )
     index, _ = decontaminator()
     normaliser = Normaliser()
@@ -806,7 +809,12 @@ def command_accept(args: argparse.Namespace) -> int:
     candidates, cards, evidence, checks = sft_inputs()
     accepted, ledger = sft_data.assemble(candidates, cards, evidence, checks)
     version = Normaliser().version
+    teacher_share = sum(cards[c.card].think for c in accepted) / len(accepted)
     rows = [sft_data.accepted_row(c, cards[c.card], version) for c in accepted]
+    if not sft_files.TRANSLATIONS.is_file():
+        message = f"{sft_files.TRANSLATIONS} not found; run `make llm TASK=translations` first"
+        raise sft_data.DataError(message)
+    rows.extend(sft_files.read_jsonl(sft_files.TRANSLATIONS))
     sft_files.write_jsonl(SFT_CONVERSATIONS, rows)
     sft_files.write_jsonl(
         sft_files.LEDGER,
@@ -822,12 +830,67 @@ def command_accept(args: argparse.Namespace) -> int:
         "candidates": len(candidates),
         "status": ledger.counts(),
         "accepted_by_task": dict(sorted(by_task.items())),
+        "teacher_think_share": round(teacher_share, 4),
         "think_share": round(sum(bool(r["think"]) for r in rows) / len(rows), 4),
+        "splits": {
+            split: sum(r["split"] == split for r in rows) for split in ("train", "validation")
+        },
         "normaliser": version,
     }
     write_stats(stats_path(SFT_CONVERSATIONS), stats)
     print(json.dumps(stats, indent=2))
     print(f"-> {SFT_CONVERSATIONS}")
+    return 0
+
+
+def command_requests(args: argparse.Namespace) -> int:
+    from agbalu.llm import translations
+
+    del args
+    text = translations.requests_prompt(teacher.load_prompts())
+    sft_files.REQUESTS_PROMPT.parent.mkdir(parents=True, exist_ok=True)
+    sft_files.REQUESTS_PROMPT.write_text(text, encoding="utf-8")
+    print(f"paste {sft_files.REQUESTS_PROMPT}\n  save the reply as {sft_files.REQUESTS_REPLY}")
+    print(f"first line of the reply file: {REPLY_HEADER}")
+    return 0
+
+
+def command_translations(args: argparse.Namespace) -> int:
+    from agbalu.llm import seeds, translations
+    from agbalu.normalise import Normaliser
+    from agbalu.registry.loader import load_registry
+
+    del args
+    reply = teacher.read_reply(sft_files.REQUESTS_REPLY)
+    templates, rejected = translations.parse_requests(reply.lines)
+    registry = load_registry(REGISTRY)
+    index, control = decontaminator()
+    used = {
+        card.passage.text
+        for card in seeds.read(sft_files.SEEDS)
+        if card.passage is not None and card.passage.other is not None
+    }
+    normaliser = Normaliser()
+    provenance = translations.Provenance(
+        lambda source: registry.by_id(source).licence, normaliser.normalise, normaliser.version
+    )
+    rows, stats = translations.build(
+        sft_files.read_jsonl(MT_TRAIN.path),
+        templates,
+        lambda text: not is_held_out(text) and not index.matches(text),
+        used,
+        provenance,
+    )
+    count = sft_files.write_jsonl(sft_files.TRANSLATIONS, rows)
+    stats = {
+        "requests": {"model": reply.model, "date": reply.date, "rejected": dict(rejected)},
+        "written": count,
+        "decontamination": index_stats(index, control),
+        **stats,
+    }
+    write_stats(stats_path(sft_files.TRANSLATIONS), stats)
+    print(json.dumps(stats, indent=2, ensure_ascii=False))
+    print(f"-> {sft_files.TRANSLATIONS}")
     return 0
 
 
@@ -976,7 +1039,6 @@ def add_model_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser])
     sub.add_parser("seeds", help="the 1,200 seed cards with their passages and pairs")
     prompter = sub.add_parser("prompts", help="the next Gemini batches to paste")
     prompter.add_argument("--batches", type=int, default=10)
-    prompter.add_argument("--pilot", action="store_true", help="only the 120 pilot cards")
     prompter.add_argument("--critic", action="store_true", help="critic batches instead")
     sub.add_parser("ingest", help="parse every pasted reply into candidates and verdicts")
     sub.add_parser("signals", help="GlotLID, Dihya and Boulifa on every candidate")
@@ -984,6 +1046,8 @@ def add_model_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser])
     fluent.add_argument("--model", default=str(RUNS / "jugurtha-4b-v1" / "best"))
     sub.add_parser("review", help="the review sheet for the operator")
     sub.add_parser("accept", help="the accepted SFT set, sft-v1.jsonl")
+    sub.add_parser("requests", help="the one prompt for translation request templates")
+    sub.add_parser("translations", help="translation conversations from human pairs")
     checker = sub.add_parser("flores", help="the teacher's 200-sentence FLORES+ check")
     checker.add_argument("--score", action="store_true", help="score the pasted replies")
 
@@ -1022,11 +1086,14 @@ COMMANDS: Final[dict[str, Callable[[argparse.Namespace], int]]] = {
     "review": command_review,
     "accept": command_accept,
     "flores": command_flores,
+    "requests": command_requests,
+    "translations": command_translations,
 }
 
 ERRORS: Final = (
     DataError,
     FilesError,
+    TranslationError,
     SeedError,
     SignalError,
     TeacherError,

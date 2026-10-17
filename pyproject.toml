@@ -287,6 +287,9 @@ ignore = [
 # S311: `random.Random(SEED)` allocates the seed cards and draws their passages, seeded so
 #       the seed bank reproduces card for card.
 "src/agbalu/llm/seeds.py" = ["S311"]
+# S311: `random.Random(SEED)` draws the translation pairs and their request templates, seeded
+#       so the conversations reproduce.
+"src/agbalu/llm/translations.py" = ["S311"]
 # PLR0913: `Builder` takes the scorer, the index, the counter, both sinks and the batch;
 #          each is injected so the build runs in a test without a model or a disk.
 "src/agbalu/llm/documents.py" = ["PLC0415", "PLR0913"]

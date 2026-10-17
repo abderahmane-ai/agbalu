@@ -26,6 +26,9 @@ REVIEWS: Final = REPLY_DIR / "reviews.jsonl"
 """The operator's verdicts, beside the replies: both are human input, kept append-only."""
 
 PILOT: Final = INTERIM / "pilot"
+REQUESTS_PROMPT: Final = INTERIM / "requests.txt"
+REQUESTS_REPLY: Final = REPLY_DIR / "requests.txt"
+TRANSLATIONS: Final = INTERIM / "translations.jsonl"
 
 
 class FilesError(Exception):

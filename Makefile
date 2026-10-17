@@ -109,9 +109,11 @@ mt: ## NLLB corpus. TASK=corpus|pivot|consistency (pivot needs the models extra)
 # `aligned`, `replay`, `pack`. Dihya needs CUDA for the documents build: 121 texts/s on the
 # laptop GPU against three million rows. `criterion` compares two `make evaluate` reports and
 # exits 2 when the candidate is not adopted.
-llm: ## Phase 11, GPU-free. TASK=fertility|holdout|criterion|select|seeds|prompts|ingest|signals|review|accept|flores. CANDIDATE BASELINE (criterion)
+llm: ## Phase 11, GPU-free. TASK=fertility|holdout|criterion|select|seeds|prompts|ingest|signals|review|requests|translations|accept|flores. CANDIDATE BASELINE (criterion) BATCHES CRITIC=1 (prompts) SCORE=1 (flores)
 	$(call cli,llm) $(or $(TASK),fertility) \
-		$(if $(CANDIDATE),--candidate $(CANDIDATE),) $(if $(BASELINE),--base $(BASELINE),)
+		$(if $(CANDIDATE),--candidate $(CANDIDATE),) $(if $(BASELINE),--base $(BASELINE),) \
+		$(if $(BATCHES),--batches $(BATCHES),) \
+		$(if $(CRITIC),--critic,) $(if $(SCORE),--score,)
 
 # The school HPC (`~/.claude/standards/hpc.md`). Every target here is an operator command.
 # `smoke`, `train`, `data` and `evaluate` sync, start a detached tmux session on the pod and

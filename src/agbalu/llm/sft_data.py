@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections import Counter as Tally
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -35,19 +36,20 @@ from agbalu.llm.teacher import Candidate, Verdict
 Status = Literal["rejected", "flagged", "accepted", "surplus", "pending_review"]
 
 TASK_TARGETS: Final[dict[str, int]] = {
-    "native_kabyle": 2250,
-    "non_kabyle_input": 750,
-    "translation": 500,
-    "reasoning": 500,
-    "code": 300,
-    "hierarchy": 250,
-    "identity": 100,
-    "grounded": 350,
+    "native_kabyle": 450,
+    "non_kabyle_input": 150,
+    "translation": 100,
+    "reasoning": 100,
+    "code": 60,
+    "hierarchy": 50,
+    "identity": 20,
+    "grounded": 70,
 }
-"""`docs/llm_post_training_design.md` §4.4, 5,000 accepted conversations."""
+"""`docs/llm_post_training_design.md` §4.4's shares of 1,000 accepted conversations, cut from
+5,000 on 2026-10-16."""
 
 ALWAYS_REVIEWED: Final = frozenset({"identity", "hierarchy"})
-REVIEW_SAMPLE: Final = 500
+REVIEW_SAMPLE: Final = 100
 CATEGORY_FAILURE: Final = 0.20
 """A task whose reviewed candidates are rejected more often than this is regenerated."""
 
@@ -70,6 +72,11 @@ LANGUAGE_EXEMPT: Final = frozenset({"translation"})
 by review, not by an identifier."""
 
 SIGNALS: Final = ("glotlid_kabyle", "dihya_sibling", "boulifa_edit_rate", "fluency_bpc")
+
+ARABIC_SCRIPT: Final = re.compile("[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]")
+"""Arabic, its supplements and presentation forms. The pilot's first three replies glossed
+Kabyle words in Arabic script mid-sentence (`يوض (yewweḍ)`) in 22 of 98 conversations,
+2026-10-16, and GlotLID reads such text as Kabyle."""
 
 
 class DataError(Exception):
@@ -122,6 +129,30 @@ def hard_gate(candidate: Candidate, contaminated: bool, duplicate: str | None) -
     return duplicate
 
 
+UNSEEN_TEXT: Final = re.compile(r"\b(?:aḍris|uḍris|iḍrisen|yiḍrisen|tektabt|SOURCE|PAIR)\b")
+"""Words for "the text" or "the source". In the v3 set, 81 of 819 answers cited the card's
+SOURCE, which the user never sees ("ilmend n uḍris"), measured 2026-10-17."""
+
+GREETING_TALK: Final = re.compile(r"\b(?:azul|asellem)\b", re.IGNORECASE)
+"""A reasoning trace that discusses greeting is discussing the teacher's instructions; 37 of
+289 v3 traces did."""
+
+
+def leaks(candidate: Candidate) -> list[str]:
+    """What the teacher's instructions left in the conversation: an answer citing a text no
+    user turn mentions, or a reasoning trace about greetings."""
+    found: list[str] = []
+    asked = " ".join(t["content"] for t in candidate.turns if t["role"] != "assistant")
+    if not UNSEEN_TEXT.search(asked) and any(
+        UNSEEN_TEXT.search(text) for text in assistant_texts(candidate)
+    ):
+        found.append("cites_unseen_text")
+    reasoning = [t["reasoning"] for t in candidate.turns if "reasoning" in t]
+    if any(GREETING_TALK.search(text) for text in reasoning):
+        found.append("instruction_leak")
+    return found
+
+
 def soft_flags(
     candidate: Candidate,
     card: Card,
@@ -144,6 +175,9 @@ def soft_flags(
             flags.append("not_read_as_kabyle")
         if signals["dihya_sibling"] is not None:
             flags.append(f"sibling_{signals['dihya_sibling']}")
+        if any(ARABIC_SCRIPT.search(text) for text in assistant_texts(candidate)):
+            flags.append("arabic_script")
+    flags.extend(leaks(candidate))
     edit = signals["boulifa_edit_rate"]
     if isinstance(edit, int | float) and edit > EDIT_RATE:
         flags.append("orthography_edits")
@@ -216,8 +250,9 @@ def select(
     reviews: Mapping[str, Review],
     ledger: Ledger,
 ) -> list[Candidate]:
-    """Within each task quota, the most natural clean candidates first; a candidate that
-    must be reviewed and has not been is held back as pending."""
+    """Within each task quota, think-mode candidates first (the set runs short of its fifth),
+    then the most natural; a candidate that must be reviewed and has not been is held back as
+    pending. Validation candidates are outside the quotas, which count training only."""
     by_task: dict[str, list[Candidate]] = {}
     for candidate in candidates:
         by_task.setdefault(cards[candidate.card].task, []).append(candidate)
@@ -226,6 +261,7 @@ def select(
         ordered = sorted(
             members,
             key=lambda c: (
+                not cards[c.card].think,
                 -(verdicts[c.id].naturalness if c.id in verdicts else 0),
                 stable_rank(c.id),
             ),
@@ -238,7 +274,11 @@ def select(
             if candidate.id in reviews and not reviews[candidate.id].accept:
                 ledger.put(candidate.id, "rejected", ["review", reviews[candidate.id].note])
                 continue
-            if sum(cards[c.card].task == task for c in accepted) >= TASK_TARGETS[task]:
+            training = cards[candidate.card].split == "train"
+            filled = sum(
+                cards[c.card].task == task and cards[c.card].split == "train" for c in accepted
+            )
+            if training and filled >= TASK_TARGETS[task]:
                 ledger.put(candidate.id, "surplus")
                 continue
             ledger.put(candidate.id, "accepted")
@@ -333,6 +373,9 @@ class Evidence:
     signals: Mapping[str, Mapping[str, object]]
     reviews: Mapping[str, Review]
     thresholds: Thresholds
+    prompt_versions: frozenset[int]
+    """The teacher prompt versions that count (`Prompts.counted`). A candidate from any other
+    is rejected, so the set is written under one recipe."""
 
 
 def normalised(candidate: Candidate, card: Card, normalise: Callable[[str], str]) -> Candidate:
@@ -395,6 +438,12 @@ def screen(
         card = cards[raw.card]
         candidate = normalised(raw, card, normalise)
         by_id[candidate.id] = candidate
+        if candidate.version not in evidence.prompt_versions:
+            ledger.put(candidate.id, "rejected", [f"prompt_version_{candidate.version}"])
+            continue
+        if card.split == "release":
+            ledger.put(candidate.id, "rejected", ["release_card"])
+            continue
         answer = "\n".join(assistant_texts(candidate))
         key = exact_key(answer)
         duplicate = (

@@ -4,6 +4,7 @@ that accounts for every candidate."""
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -73,7 +74,9 @@ def evidence(
     all_verdicts = {c.id: verdict(c.id) for c in found} | (verdicts or {})
     all_signals: dict[str, dict[str, object]] = {c.id: dict(CLEAN) for c in found}
     all_signals |= signals or {}
-    return Evidence(all_verdicts, all_signals, reviews or {}, THRESHOLDS)
+    return Evidence(
+        all_verdicts, all_signals, reviews or {}, THRESHOLDS, prompt_versions=frozenset({1})
+    )
 
 
 def run(
@@ -120,6 +123,20 @@ class TestGates:
         assert ledger.reasons["z1"] == ["duplicate"]
         assert ledger.reasons["z2"] == ["near_duplicate"]
         assert ledger.status["c3"] == "accepted"
+
+    def test_an_older_prompt_version_is_rejected_and_blocks_no_newer_copy(self) -> None:
+        found, cards = world(11)
+        found[10] = replace(candidate("a10", "k10", answer(10)), version=0)
+        found.append(candidate("c10", "k10", answer(10)))
+        _, ledger = run(found, cards, evidence(found))
+        assert (ledger.status["a10"], ledger.reasons["a10"]) == ("rejected", ["prompt_version_0"])
+        assert ledger.status["c10"] == "accepted"
+
+    def test_a_release_card_never_enters_training_or_validation(self) -> None:
+        found, cards = world(11)
+        cards["k10"] = replace(card("k10"), split="release")
+        _, ledger = run(found, cards, evidence(found))
+        assert (ledger.status["c10"], ledger.reasons["c10"]) == ("rejected", ["release_card"])
 
     def test_text_is_normalised_before_it_is_compared_or_kept(self) -> None:
         found, cards = world()
@@ -170,6 +187,77 @@ class TestFlags:
         _, ledger = run(found, cards, ev)
         assert ledger.status["c10"] == "accepted"
 
+    @pytest.mark.parametrize(
+        ("content", "reasoning"),
+        [
+            ("Deg 2008, يوض (yewweḍ) umḍan n yimezdaɣ.", None),
+            ("Azul fell-ak.", "Ad xemmemeɣ ﻻ ɣef waya."),
+        ],
+    )
+    def test_arabic_script_in_an_answer_or_its_reasoning_sets_it_aside(
+        self, content: str, reasoning: str | None
+    ) -> None:
+        found, cards = world(11)
+        found[10] = candidate("c10", "k10", content, reasoning=reasoning)
+        cards["k10"] = card("k10", think=reasoning is not None)
+        _, ledger = run(found, cards, evidence(found))
+        assert (ledger.status["c10"], ledger.reasons["c10"]) == ("flagged", ["arabic_script"])
+
+    @pytest.mark.parametrize(
+        ("content", "reasoning", "flag"),
+        [
+            ("Ilmend n uḍris, Bern tettwabna s yiẓra.", None, "cites_unseen_text"),
+            ("Bern tettwabna s yiẓra.", "Ad rreɣ war azul imi ur d-yenni ara.", "instruction_leak"),
+        ],
+    )
+    def test_an_instruction_leak_sets_a_candidate_aside(
+        self, content: str, reasoning: str | None, flag: str
+    ) -> None:
+        found, cards = world(11)
+        found[10] = candidate("c10", "k10", content, reasoning=reasoning)
+        cards["k10"] = card("k10", think=reasoning is not None)
+        _, ledger = run(found, cards, evidence(found))
+        assert (ledger.status["c10"], ledger.reasons["c10"]) == ("flagged", [flag])
+
+    def test_a_text_the_user_pasted_may_be_cited(self) -> None:
+        found, cards = world(10)
+        found[9] = Candidate(
+            "c9",
+            "k9",
+            "batch-0001",
+            1,
+            (
+                {"role": "user", "content": "Ɣer aḍris-a: Bern d tamaneɣt n Swis."},
+                {"role": "assistant", "content": "Deg uḍris-nni, Bern d tamaneɣt."},
+            ),
+            "Gemini 3.8 Flash",
+            "2026-10-17",
+            1,
+        )
+        _, ledger = run(found, cards, evidence(found))
+        assert ledger.status["c9"] == "accepted"
+
+    def test_arabic_script_in_a_user_turn_or_a_translation_is_not_flagged(self) -> None:
+        found, cards = world(10)
+        user_arabic = Candidate(
+            "c8",
+            "k8",
+            "batch-0001",
+            1,
+            (
+                {"role": "user", "content": "ما هي عاصمة الجزائر؟"},
+                {"role": "assistant", "content": answer(8)},
+            ),
+            "Gemini 4 Argon",
+            "2026-10-17",
+            1,
+        )
+        found[8] = user_arabic
+        found[9] = candidate("c9", "k9", "الجزائر عاصمة الجزائر.")
+        cards["k9"] = card("k9", "translation")
+        _, ledger = run(found, cards, evidence(found))
+        assert (ledger.status["c8"], ledger.status["c9"]) == ("accepted", "accepted")
+
     def test_an_uncomputed_signal_stops_the_build(self) -> None:
         found, cards = world()
         ev = evidence(found, signals={"c3": {"glotlid_kabyle": True}})
@@ -201,6 +289,27 @@ class TestReviewAndQuotas:
         ev = evidence(found, verdicts={"c10": verdict("c10", naturalness=1)})
         _, ledger = run(found, cards, ev)
         assert ledger.status["c10"] == "surplus"
+
+    def test_a_task_over_quota_keeps_think_mode_before_naturalness(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setitem(sft_data.TASK_TARGETS, "native_kabyle", 10)
+        found, cards = world(11, thinking=2)
+        ev = evidence(found, verdicts={"c0": verdict("c0", naturalness=1)})
+        _, ledger = run(found, cards, ev)
+        assert ledger.status["c0"] == "accepted"
+        assert sum(status == "surplus" for status in ledger.status.values()) == 1
+
+    def test_validation_candidates_are_outside_the_quota(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setitem(sft_data.TASK_TARGETS, "native_kabyle", 10)
+        found, cards = world(11)
+        cards["k10"] = replace(card("k10"), split="validation")
+        ev = evidence(found, verdicts={"c10": verdict("c10", naturalness=1)})
+        accepted, ledger = run(found, cards, ev)
+        assert ledger.status["c10"] == "accepted"
+        assert len(accepted) == 11
 
     def test_a_category_review_failure_stops_the_build(self) -> None:
         found, cards = world(30, thinking=6)

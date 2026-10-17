@@ -190,18 +190,77 @@ def allocate(seed: int = SEED) -> list[Card]:
     return cards
 
 
-PILOT_CARDS: Final = 120
-"""§4.2's pilot: a tenth of the bank, generated, filtered and scored before the rest."""
+CORE_CARDS: Final = 120
+"""Training cards drawn by task share; rounding gives 119. They were the pilot's cards, and
+their batches were written before the set was cut to them."""
+
+EXTRA_THINK: Final = 4
+"""The core holds 20 think cards, 16.8%; four more bring the set to the §6 fifth."""
+
+EXTRA_IDENTITY: Final = 2
+"""The core holds two identity cards, 20 candidates for a target of 20; two more give room."""
+
+VALIDATION_CARDS: Final = 6
 
 
-def pilot(cards: Sequence[Card], size: int = PILOT_CARDS, seed: int = SEED) -> list[Card]:
-    """Training cards for the pilot, each task in its share of the bank, drawn by seed."""
+def working_set(cards: Sequence[Card], seed: int = SEED) -> list[Card]:
+    """The cards the teacher is asked for: about 1,000 accepted conversations
+    (`docs/llm_post_training_design.md` §4.4), each task in its share of the bank, by seed."""
     draw = random.Random(seed + 2)
     chosen: list[Card] = []
     for task, count in TASK_CARDS.items():
         members = [card for card in cards if card.task == task and card.split == "train"]
-        take = max(1, round(size * count / sum(TASK_CARDS.values())))
+        take = max(1, round(CORE_CARDS * count / sum(TASK_CARDS.values())))
         chosen.extend(draw.sample(members, min(take, len(members))))
+    extra = random.Random(seed + 3)
+    taken = {card.id for card in chosen}
+    rest = [card for card in cards if card.split == "train" and card.id not in taken]
+    chosen.extend(extra.sample([c for c in rest if c.think], EXTRA_THINK))
+    taken = {card.id for card in chosen}
+    identity = [c for c in rest if c.task == "identity" and c.id not in taken]
+    chosen.extend(extra.sample(identity, EXTRA_IDENTITY))
+    validation = [card for card in cards if card.split == "validation"]
+    chosen.extend(extra.sample(validation, VALIDATION_CARDS))
+    return sorted(chosen, key=lambda card: card.id)
+
+
+TEACHER_CARDS: Final[dict[str, int]] = {
+    "reasoning": 8,
+    "code": 4,
+    "hierarchy": 6,
+    "identity": 4,
+    "grounded": 4,
+}
+"""Cards still asked of the teacher after 2026-10-17, per task, the first by id in the set.
+Native Kabyle (680 candidates for 450) and non-Kabyle input (139 for 150) are closed, and
+translation is built from human pairs (`agbalu.llm.translations`), so none of their cards is
+asked again."""
+
+TEACHER_VALIDATION: Final = 4
+
+TEACHER_THINK: Final = 6
+"""Think cards added from the bank: the leak filters set aside 71 of the 149 v3 think-mode
+conversations, which left the set near 11% think against §6's 20% (2026-10-17)."""
+
+THINK_TASKS: Final = ("reasoning", "code", "grounded", "non_kabyle_input")
+"""Tasks below their targets, where extra think conversations are kept, not cut by a quota."""
+
+
+def teacher_cards(cards: Sequence[Card], seed: int = SEED) -> list[Card]:
+    """The cards the teacher is still asked for: the open tasks' first cards in the working
+    set, its first validation cards, and `TEACHER_THINK` think cards drawn from the bank."""
+    working = working_set(cards, seed)
+    chosen: list[Card] = []
+    for task, count in TEACHER_CARDS.items():
+        chosen.extend([c for c in working if c.task == task and c.split == "train"][:count])
+    chosen.extend([c for c in working if c.split == "validation"][:TEACHER_VALIDATION])
+    taken = {card.id for card in working}
+    thinking = [
+        c
+        for c in cards
+        if c.think and c.split == "train" and c.task in THINK_TASKS and c.id not in taken
+    ]
+    chosen.extend(random.Random(seed + 4).sample(thinking, TEACHER_THINK))
     return sorted(chosen, key=lambda card: card.id)
 
 

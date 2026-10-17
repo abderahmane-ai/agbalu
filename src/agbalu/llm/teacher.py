@@ -36,8 +36,10 @@ CARDS_PER_BATCH: Final = 2
 reply carries them without being cut off."""
 
 CANDIDATES_PER_CRITIC: Final = 20
-INSTRUCTIONS: Final = ("generator", "critic", "translation", "schema")
-PROMPT_KEYS: Final = frozenset({"version", *INSTRUCTIONS, "tasks", "domains", "systems"})
+INSTRUCTIONS: Final = ("generator", "critic", "translation", "requests", "schema")
+PROMPT_KEYS: Final = frozenset(
+    {"version", "compatible", *INSTRUCTIONS, "tasks", "domains", "systems"}
+)
 FLORES_PILOT: Final = 200
 FLORES_BATCH: Final = 50
 """§4.2's teacher check: 200 corrected FLORES+ devtest sentences, pasted 50 at a time."""
@@ -72,13 +74,22 @@ class TeacherError(Exception):
 @dataclass(frozen=True, slots=True)
 class Prompts:
     version: int
+    compatible: tuple[int, ...]
+    """Earlier versions whose candidates still count: the change after them only adds a rule
+    that the filters also enforce on their output."""
+
     generator: str
     critic: str
     translation: str
+    requests: str
     schema: str
     tasks: dict[str, str]
     domains: dict[str, str]
     systems: dict[str, str]
+
+    @property
+    def counted(self) -> frozenset[int]:
+        return frozenset({self.version, *self.compatible})
 
 
 def load_prompts(path: Path = PROMPTS) -> Prompts:
@@ -101,11 +112,19 @@ def load_prompts(path: Path = PROMPTS) -> Prompts:
     if not isinstance(raw["version"], int) or not all(isinstance(text, str) for text in texts):
         message = f"{path}: version must be an integer and the instruction blocks text"
         raise TeacherError(message)
+    compatible = raw["compatible"]
+    if not isinstance(compatible, list) or not all(
+        isinstance(v, int) and not isinstance(v, bool) and v < raw["version"] for v in compatible
+    ):
+        message = f"{path}: compatible must list earlier versions, got {compatible!r}"
+        raise TeacherError(message)
     return Prompts(
         raw["version"],
+        tuple(compatible),
         raw["generator"],
         raw["critic"],
         raw["translation"],
+        raw["requests"],
         raw["schema"],
         {str(k): str(v) for k, v in raw["tasks"].items()},
         {str(k): str(v) for k, v in raw["domains"].items()},
@@ -127,6 +146,8 @@ def orthography() -> str:
         " p, o, v only in loanwords and names; ţ only where established usage has it.\n"
         f"- Never these look-alikes: {never}.\n"
         f"- Never the ASCII digraphs {', '.join(ASCII_DIGRAPHS)} for the special letters.\n"
+        "- Never write in Arabic script or include parenthetical Arabic translations or "
+        "glosses; write strictly in the Kabyle Latin alphabet.\n"
         "- Hyphens join clitics as standard Kabyle writes them (ad as-d-iniɣ, yenna-yas)."
     )
 
