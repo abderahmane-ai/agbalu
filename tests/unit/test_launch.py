@@ -130,7 +130,8 @@ class TestParser:
 
     def test_every_job_exports_the_quiet_settings_as_a_shell_reads_them(self) -> None:
         words = shlex.split(launch.PREAMBLE)
-        assert "TQDM_DISABLE=1" in words
+        assert "TQDM_MININTERVAL=60" in words
+        assert not any(word.startswith("TQDM_DISABLE") for word in words)
         assert "VLLM_LOGGING_LEVEL=WARNING" in words
         assert (
             "PYTHONWARNINGS=ignore::DeprecationWarning,ignore::FutureWarning,"

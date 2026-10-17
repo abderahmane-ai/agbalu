@@ -35,7 +35,7 @@ LOCK: Final = Path("requirements/hpc.lock")
 RUNS: Final = Path("artifacts/runs")
 
 QUIET: Final = (
-    "TQDM_DISABLE=1",
+    "TQDM_MININTERVAL=60",
     "HF_HUB_DISABLE_PROGRESS_BARS=1",
     "HF_DATASETS_DISABLE_PROGRESS_BARS=1",
     "TRANSFORMERS_VERBOSITY=error",
@@ -44,9 +44,11 @@ QUIET: Final = (
     "PYTHONWARNINGS='ignore::DeprecationWarning,ignore::FutureWarning,"
     "ignore:NLTK will not authorize:UserWarning'",
 )
-"""Library chatter kept out of run logs: progress bars, INFO lines, deprecation notices, and
-NLTK's warning about the pod's group-writable home, which we cannot change. Errors, other
-warnings and our own events still print (probed on the pod, 2026-10-17)."""
+"""Library chatter kept out of run logs: INFO lines, deprecation notices, NLTK's warning about
+the pod's group-writable home, which we cannot change, and progress bars cut to one line a
+minute. Errors, other warnings and our own events still print (probed on the pod,
+2026-10-17). Bars are slowed, not disabled: vLLM divides by a bar's elapsed time, which a
+disabled bar reports as 0, and the chat evaluation died on it."""
 
 COMPILER: Final = f"{ENVIRONMENT}/bin/x86_64-conda-linux-gnu"
 PREAMBLE: Final = (
