@@ -110,7 +110,7 @@ class TestParser:
         _, _, _, then = launch.job(launch.build_parser().parse_args(argv))
         assert len(then) == 2
         for mode, command in zip(("no_think", "think"), then, strict=True):
-            assert command.startswith(f"{launch.VLLM_PYTHON} -m agbalu.llm.chat_eval")
+            assert f"{launch.VLLM_PYTHON} -m agbalu.llm.chat_eval" in command
             assert f"--mode {mode}" in command
             assert f"artifacts/runs/e/chat-{mode}.json" in command
 
@@ -127,6 +127,27 @@ class TestParser:
             "--model",
             "m",
         ]
+
+    def test_chat_evaluation_runs_without_the_flashinfer_sampler(self) -> None:
+        argv = ["evaluate", "--run", "e", "--model", "m", "--suite", "select"]
+        _, _, _, then = launch.job(launch.build_parser().parse_args(argv))
+        assert all(c.startswith("VLLM_USE_FLASHINFER_SAMPLER=0 ") for c in then)
+
+    def test_chat_only_skips_the_completion_suite(self) -> None:
+        argv = ["evaluate", "--run", "e", "--model", "m", "--suite", "select", "--chat-only"]
+        _, arguments, _, then = launch.job(launch.build_parser().parse_args(argv))
+        assert arguments == []
+        assert len(then) == 2
+        script = launch.detached("e", arguments, "e/log.txt", then)[-1]
+        assert "agbalu.llm.cli" not in script
+        assert script.count("agbalu.llm.chat_eval") == 2
+
+    def test_chat_only_is_refused_without_a_chat_suite(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        argv = ["evaluate", "--run", "e", "--model", "m", "--suite", "screen", "--chat-only"]
+        assert launch.main(argv) == 1
+        assert "--chat-only needs --suite select or release" in capsys.readouterr().err
 
     def test_the_screen_needs_a_model_path(self, capsys: pytest.CaptureFixture[str]) -> None:
         assert launch.main(["evaluate", "--run", "e", "--suite", "screen"]) == 1

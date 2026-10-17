@@ -137,8 +137,8 @@ train: ## CPT, or SFT with OBJECTIVE=sft, resuming RUN if it exists. RUN= MODEL 
 data: ## Corpus stages that run on the pod. TASK=documents|aligned|replay|pack|sft|fluency (operator, hpc)
 	$(call launch,data) $(if $(TASK),--task $(TASK),)
 
-evaluate: ## Evaluation suite on MODEL into artifacts/runs/RUN/. RUN= MODEL SUITE=exit|screen|select|release (screen: translation only; select and release add the chat suite) (operator, hpc)
-	$(call launch,evaluate) $(if $(MODEL),--model $(MODEL),) $(if $(SUITE),--suite $(SUITE),)
+evaluate: ## Evaluation suite on MODEL into artifacts/runs/RUN/. RUN= MODEL SUITE=exit|screen|select|release (screen: translation only; select and release add the chat suite; CHAT_ONLY=1 runs that alone) (operator, hpc)
+	$(call launch,evaluate) $(if $(MODEL),--model $(MODEL),) $(if $(SUITE),--suite $(SUITE),) $(if $(CHAT_ONLY),--chat-only,)
 
 merge: ## Instruct + ALPHA x (CPT - base) into artifacts/runs/RUN/model. RUN= ALPHA= MODEL=<cpt checkpoint> (operator, hpc)
 	$(call launch,merge) $(if $(ALPHA),--alpha $(ALPHA),) $(if $(MODEL),--model $(MODEL),)

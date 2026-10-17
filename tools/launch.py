@@ -135,10 +135,20 @@ def module(arguments: Sequence[str]) -> str:
     return " ".join([PYTHON, "-m", "agbalu.llm.cli", *(shlex.quote(a) for a in arguments)])
 
 
+VLLM_ENVIRONMENT: Final = "VLLM_USE_FLASHINFER_SAMPLER=0"
+"""FlashInfer's sampler compiles its kernel on first use and the pod has no CUDA toolkit, so
+the engine died in warmup (merge-a000, 2026-10-17). vLLM's PyTorch sampler needs no compiler."""
+
+
 def chat_module(arguments: Sequence[str]) -> str:
     """The chat-mode evaluator in the vLLM environment, which shares nothing with training's."""
     quoted = (shlex.quote(a) for a in arguments)
-    return " ".join([VLLM_PYTHON, "-m", "agbalu.llm.chat_eval", *quoted])
+    return " ".join([VLLM_ENVIRONMENT, VLLM_PYTHON, "-m", "agbalu.llm.chat_eval", *quoted])
+
+
+def chain(arguments: Sequence[str], then: Sequence[str]) -> str:
+    """The CLI on `arguments`, when there are any, then each command of `then`."""
+    return " && ".join([*([module(arguments)] if arguments else []), *then])
 
 
 def detached(run: str, arguments: Sequence[str], log: str, then: Sequence[str] = ()) -> list[str]:
@@ -149,8 +159,7 @@ def detached(run: str, arguments: Sequence[str], log: str, then: Sequence[str] =
     show this start only; a resumed run's history stays beside it.
     """
     log_path = shlex.quote(f"{REMOTE_ROOT}/{RUNS}/{log}")
-    chain = " && ".join([module(arguments), *then])
-    job = f"{PREAMBLE} && {{ {chain}; }} > {log_path} 2>&1"
+    job = f"{PREAMBLE} && {{ {chain(arguments, then)}; }} > {log_path} 2>&1"
     command = (
         f"mkdir -p {shlex.quote(str(Path(f'{REMOTE_ROOT}/{RUNS}/{log}').parent))}"
         f" && (test ! -f {log_path} || mv {log_path} {log_path}.$(date +%Y%m%d-%H%M%S))"
@@ -309,7 +318,7 @@ def record(run: str, arguments: Sequence[str], log: str, then: Sequence[str] = (
     payload = {
         "run": run,
         "session": session_name(run),
-        "command": " && ".join([module(arguments), *then]),
+        "command": chain(arguments, then),
         "log": f"{REMOTE_ROOT}/{RUNS}/{log}",
         "started": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
     }
@@ -379,6 +388,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="exit",
         help="exit: completion suite only; screen: translation only, into screen.json; "
         "select and release add the chat suite",
+    )
+    parser.add_argument(
+        "--chat-only",
+        action="store_true",
+        help="select and release: the chat suite alone, when evaluation.json is already written",
     )
     parser.add_argument("--weights", action="store_true")
     parser.add_argument("--raw", action="store_true", help="status and logs as the raw log")
@@ -456,6 +470,9 @@ def evaluation_job(args: argparse.Namespace) -> Job:
     """The completion-mode suite, then for `select` and `release` the chat-mode suite in each
     thinking mode, each mode its own process because one vLLM engine is one process."""
     run = require(args.run, "--run", "evaluate")
+    if args.chat_only and args.suite not in ("select", "release"):
+        message = f"--chat-only needs --suite select or release, not {args.suite}"
+        raise LaunchError(message)
     if args.suite == "screen":
         model = require(args.model, "--model", "evaluate --suite screen")
         arguments = ["evaluate", "--out", f"{RUNS}/{run}/{SCREEN_FILE}", "--parts", "mt"]
@@ -481,7 +498,7 @@ def evaluation_job(args: argparse.Namespace) -> Job:
         )
         for mode in ("no_think", "think")
     ]
-    return run, arguments, f"{run}/log.txt", chained
+    return run, [] if args.chat_only else arguments, f"{run}/log.txt", chained
 
 
 if __name__ == "__main__":
