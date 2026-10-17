@@ -192,6 +192,9 @@ class TestFlags:
         [
             ("Ilmend n uḍris, Bern tettwabna s yiẓra.", None, "cites_unseen_text"),
             ("Bern tettwabna s yiẓra.", "Ad rreɣ war azul imi ur d-yenni ara.", "instruction_leak"),
+            ("Bern tettwabna s yiẓra.", "Ad rreɣ srid acku ulac sslam.", "instruction_leak"),
+            ("Deg uɣbalu, Bern tettwabna s yiẓra.", None, "cites_unseen_text"),
+            ("Deg umagrad n wikipedya, Bern d tamaneɣt.", None, "cites_unseen_text"),
             ("Bniɣ ɣef umuddel Qwen3.5-4B-Base.", None, "names_base_model"),
             ("Mačči d Alibaba i iyi-d-yesnulfan.", None, "names_base_model"),
         ],

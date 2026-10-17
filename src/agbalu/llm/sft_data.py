@@ -130,13 +130,17 @@ def hard_gate(candidate: Candidate, contaminated: bool, duplicate: str | None) -
     return duplicate
 
 
-UNSEEN_TEXT: Final = re.compile(r"\b(?:aḍris|uḍris|iḍrisen|yiḍrisen|tektabt|SOURCE|PAIR)\b")
-"""Words for "the text" or "the source". In the v3 set, 81 of 819 answers cited the card's
-SOURCE, which the user never sees ("ilmend n uḍris"), measured 2026-10-17."""
+UNSEEN_TEXT: Final = re.compile(
+    r"\b(?:aḍris|uḍris|iḍrisen|yiḍrisen|tektabt|uɣbalu|SOURCE|PAIR)\b|wikipedya"
+)
+"""Words for "the text" or "the source", and the Wikipedia the passages come from. In the v3
+set, 81 of 819 answers cited the card's SOURCE, which the user never sees ("ilmend n uḍris");
+review found "deg uɣbalu" (in the source) and "amagrad n wikipedya" too, 2026-10-17. Only the
+annexed `uɣbalu` is matched: the project's own name is written AƔBALU."""
 
-GREETING_TALK: Final = re.compile(r"\b(?:azul|asellem)\b", re.IGNORECASE)
+GREETING_TALK: Final = re.compile(r"\b(?:azul|asellem|sslam)\b", re.IGNORECASE)
 """A reasoning trace that discusses greeting is discussing the teacher's instructions; 37 of
-289 v3 traces did."""
+289 v3 traces did, and 28 more in the whole set said "sslam" instead (2026-10-17)."""
 
 
 BASE_MODEL: Final = re.compile(r"\b(?:qwen|alibaba)", re.IGNORECASE)
