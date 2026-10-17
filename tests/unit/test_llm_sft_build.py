@@ -154,6 +154,12 @@ class TestBuild:
         with pytest.raises(sft_build.BuildError, match="replay aligned: 1 tokens in all of"):
             sft_build.build(found, MiniTemplate(), WordTokenizer(), small, outputs(tmp_path))
 
+    def test_long_documents_are_cut_to_the_budget_exactly(self, tmp_path: Path) -> None:
+        path, _ = replay_file(tmp_path / "long.jsonl", 50, 40)
+        drawn = sft_build.draw_documents(path, 1.0, seed=3, target=55, tokenizer=WordTokenizer())
+        assert drawn.tokens == 55
+        assert [len(ids) for ids in drawn.documents] == [40, 15]
+
     def test_a_short_draw_is_redrawn_until_the_budget_is_met(self, tmp_path: Path) -> None:
         path, _ = replay_file(tmp_path / "r.jsonl", 200, 2)
         replay = dict.fromkeys(sft_build.REPLAY_SHARES, (path, 10**9))

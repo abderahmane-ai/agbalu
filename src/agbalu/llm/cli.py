@@ -78,7 +78,8 @@ SFT_DIR: Final = LLM_DIR / "sft"
 SFT_CONVERSATIONS: Final = SFT_DIR / "sft-v1.jsonl"
 SFT_ROWS: Final = SFT_DIR / "sft-rows.npz"
 SFT_VALIDATION: Final = SFT_DIR / "sft-validation.npz"
-SFT_EVERY: Final = 25
+SFT_EVERY: Final = 10
+"""Validation and a checkpoint every 10 of the 91 SFT updates."""
 """Checkpoint and validation cadence in updates (`docs/llm_post_training_design.md` §5)."""
 DOCUMENTS_OUT: Final = LLM_DIR / "kab-docs.jsonl"
 ALIGNED_OUT: Final = LLM_DIR / "aligned.jsonl"

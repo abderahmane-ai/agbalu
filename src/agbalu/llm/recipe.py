@@ -48,8 +48,9 @@ SFT_PEAK_LR: Final = 5e-6
 SFT_WARMUP_FRACTION: Final = 0.03
 SFT_WEIGHT_DECAY: Final = 0.01
 SFT_ROW_TOKENS: Final = 8192
-SFT_ROWS_PER_STEP: Final = 4
-"""32,768 tokens an update (`docs/llm_post_training_design.md` §5)."""
+SFT_ROWS_PER_STEP: Final = 2
+"""16,384 tokens an update. The set was cut to 812 conversations, 61 rows of 8,192
+(2026-10-17); at 4 rows an epoch was 15 updates (`docs/llm_post_training_design.md` §5)."""
 
 SFT_REPLAY_SHARE: Final = 0.10
 """Raw-text replay's share of the *supervised* tokens. Replay is mixed into the same rows as
@@ -60,8 +61,10 @@ if replay were packed apart."""
 SFT_SEED: Final = 20261016
 """Seeds the row packing and the per-epoch row order."""
 
-SFT_EPOCHS: Final = 1
-"""About 153 updates over the ~5M-token set (`docs/llm_post_training_design.md` §5)."""
+SFT_EPOCHS: Final = 3
+"""91 updates over the 61 rows. Small curated sets take several epochs (LIMA, arXiv
+2305.11206: 1,000 examples, 15 epochs); the best checkpoint is still chosen on validation
+loss, which catches the epoch where it starts to overfit."""
 
 DPO_PEAK_LR: Final = 5e-7
 DPO_BETA: Final = 0.1

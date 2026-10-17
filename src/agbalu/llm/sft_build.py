@@ -203,8 +203,10 @@ class Draw:
 def draw_documents(
     path: Path, rate: float, seed: int, target: int, tokenizer: TextTokenizer
 ) -> Draw:
-    """A Bernoulli draw over `path`, shuffled by `seed`, kept until `target` tokens; a
-    document longer than a row, its leading `eos` included, is cut to the row."""
+    """A Bernoulli draw over `path`, shuffled by `seed`, kept until exactly `target` tokens; a
+    document longer than a row, its leading `eos` included, is cut to the row, and the last
+    document is cut to what the budget has left. Without that cut, one long document put
+    replay at 11.4% of an 812-conversation set (2026-10-17)."""
     texts = list(bernoulli_lines(path, rate, seed))
     random.Random(seed).shuffle(texts)
     chosen = Draw()
@@ -214,7 +216,7 @@ def draw_documents(
         if not ids or not text.strip():
             chosen.empty += 1
             continue
-        kept = ids[: SFT_ROW_TOKENS - 1]
+        kept = ids[: min(SFT_ROW_TOKENS - 1, target - chosen.tokens)]
         chosen.truncated += len(kept) < len(ids)
         chosen.documents.append(kept)
         chosen.tokens += len(kept)
