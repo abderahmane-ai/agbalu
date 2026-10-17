@@ -375,9 +375,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--objective", choices=("cpt", "sft"), help="train only; CLI default cpt")
     parser.add_argument(
         "--suite",
-        choices=("exit", "select", "release"),
+        choices=("exit", "screen", "select", "release"),
         default="exit",
-        help="exit: completion suite only; select and release add the chat suite",
+        help="exit: completion suite only; screen: translation only, into screen.json; "
+        "select and release add the chat suite",
     )
     parser.add_argument("--weights", action="store_true")
     parser.add_argument("--raw", action="store_true", help="status and logs as the raw log")
@@ -446,10 +447,19 @@ def job(args: argparse.Namespace) -> Job:
             return evaluation_job(args)
 
 
+SCREEN_FILE: Final = "screen.json"
+"""Translation alone, ranking merge candidates before the full selection suite. Its own file,
+so a later full run never overwrites it and `make llm TASK=select` never reads it."""
+
+
 def evaluation_job(args: argparse.Namespace) -> Job:
     """The completion-mode suite, then for `select` and `release` the chat-mode suite in each
     thinking mode, each mode its own process because one vLLM engine is one process."""
     run = require(args.run, "--run", "evaluate")
+    if args.suite == "screen":
+        model = require(args.model, "--model", "evaluate --suite screen")
+        arguments = ["evaluate", "--out", f"{RUNS}/{run}/{SCREEN_FILE}", "--parts", "mt"]
+        return run, [*arguments, "--model", model], f"{run}/log.txt", []
     arguments = ["evaluate", "--out", f"{RUNS}/{run}/evaluation.json"]
     if args.model:
         arguments += ["--model", args.model]

@@ -114,6 +114,24 @@ class TestParser:
             assert f"--mode {mode}" in command
             assert f"artifacts/runs/e/chat-{mode}.json" in command
 
+    def test_the_screen_runs_translation_alone_into_its_own_file(self) -> None:
+        argv = ["evaluate", "--run", "e", "--model", "m", "--suite", "screen"]
+        run, arguments, log, then = launch.job(launch.build_parser().parse_args(argv))
+        assert (run, log, then) == ("e", "e/log.txt", [])
+        assert arguments == [
+            "evaluate",
+            "--out",
+            "artifacts/runs/e/screen.json",
+            "--parts",
+            "mt",
+            "--model",
+            "m",
+        ]
+
+    def test_the_screen_needs_a_model_path(self, capsys: pytest.CaptureFixture[str]) -> None:
+        assert launch.main(["evaluate", "--run", "e", "--suite", "screen"]) == 1
+        assert "needs --model" in capsys.readouterr().err
+
     def test_the_chat_suite_needs_a_model_path(self, capsys: pytest.CaptureFixture[str]) -> None:
         assert launch.main(["evaluate", "--run", "e", "--suite", "release"]) == 1
         assert "needs --model" in capsys.readouterr().err
