@@ -19,7 +19,7 @@ import json
 import math
 import random
 import sys
-from collections.abc import Mapping, Sequence, Sized
+from collections.abc import Callable, Mapping, Sequence, Sized
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, Literal, Protocol
@@ -46,6 +46,10 @@ LONG_CONTEXT: Final = 32_768
 MAX_MODEL_LENGTH: Final = LONG_CONTEXT + NO_THINK_TOKENS
 """One engine length serves every task: vLLM sizes its cache by `GPU_MEMORY`, not by this."""
 
+NEEDLE_METRIC: Final = f"{LONG_CONTEXT},none"
+"""RULER keys its score by input length and fills every length it did not run with -1
+(`lm_eval/tasks/ruler/common_utils.py`, read on the pod 2026-10-17)."""
+
 
 class ChatEvaluationError(Exception):
     """A task returned no usable score, or a report cannot be read."""
@@ -69,20 +73,23 @@ HARNESS: Final = (
     HarnessTask("ifeval", "prompt_level_strict_acc,none", 0, ("no_think",), ("select", "release")),
     HarnessTask("gsm8k", "exact_match,flexible-extract", 5, MODES, ("select", "release")),
     HarnessTask("mmlu_pro", "exact_match,custom-extract", 5, MODES, ("select", "release"), 50),
-    HarnessTask(
-        "niah_single_1", "score,none", 0, ("no_think",), ("select", "release"), long_context=True
-    ),
-    HarnessTask(
-        "niah_single_2", "score,none", 0, ("no_think",), ("select", "release"), long_context=True
-    ),
-    HarnessTask(
-        "niah_single_3", "score,none", 0, ("no_think",), ("select", "release"), long_context=True
+    *(
+        HarnessTask(
+            f"niah_single_{n}",
+            NEEDLE_METRIC,
+            0,
+            ("no_think",),
+            ("select", "release"),
+            long_context=True,
+        )
+        for n in (1, 2, 3)
     ),
     HarnessTask("humaneval_plus", "pass@1,create_test", 0, MODES, ("release",), code=True),
     HarnessTask("mbpp_plus", "pass_at_1,none", 3, MODES, ("release",), code=True),
 )
-"""Task names verified in lm-eval 0.4.13 on the pod, 2026-10-16. Metric keys are confirmed by
-the smoke at `limit` 8 before any full run; a missing key fails by name, never as zero."""
+"""Task names verified in lm-eval 0.4.13 on the pod, 2026-10-16. The ifeval, gsm8k and
+mmlu_pro keys were read from merge-a000's no-think run, 2026-10-17; a missing key fails by
+name, never as zero."""
 
 
 def tasks_for(suite: Suite) -> list[HarnessTask]:
@@ -119,6 +126,9 @@ def read_score(output: object, task: HarnessTask) -> tuple[float, int | None]:
     if not isinstance(value, int | float) or isinstance(value, bool) or not math.isfinite(value):
         message = f"{task.name}: no finite {task.metric!r}; the row has {sorted(row)}"
         raise ChatEvaluationError(message)
+    if not 0.0 <= value <= 1.0:
+        message = f"{task.name}: {task.metric!r} is {value}, outside [0, 1]"
+        raise ChatEvaluationError(message)
     counts = output.get("n-samples") if isinstance(output, dict) else None
     effective = counts.get(task.name) if isinstance(counts, dict) else None
     size = effective.get("effective") if isinstance(effective, dict) else None
@@ -131,12 +141,27 @@ class Harness(Protocol):
     def score(self, task: HarnessTask, limit: int | None) -> object: ...
 
 
+Rows = dict[str, dict[str, object]]
+
+
 def evaluate_tasks(
-    harness: Harness, tasks: Sequence[HarnessTask], *, limit: int | None
-) -> dict[str, dict[str, object]]:
-    """Every task: score in points, metric, examples scored, sample size."""
-    rows: dict[str, dict[str, object]] = {}
+    harness: Harness,
+    tasks: Sequence[HarnessTask],
+    *,
+    limit: int | None,
+    done: Mapping[str, dict[str, object]] | None = None,
+    save: Callable[[Rows], None] | None = None,
+) -> Rows:
+    """Every task: score in points, metric, examples scored, sample size.
+
+    A task already in `done` is kept, not rescored; `save` receives the rows after each
+    task, so a failure later in the list loses nothing already measured.
+    """
+    rows: Rows = {}
     for task in tasks:
+        if done is not None and task.name in done:
+            rows[task.name] = done[task.name]
+            continue
         value, examples = read_score(harness.score(task, limit), task)
         rows[task.name] = {
             "score": round(100 * value, 4),
@@ -144,6 +169,8 @@ def evaluate_tasks(
             "examples": examples,
             "sample": task.sample,
         }
+        if save is not None:
+            save(rows)
     return rows
 
 
@@ -234,9 +261,8 @@ def tasks_in(suite: Suite, mode: Mode) -> list[HarnessTask]:
     return [task for task in tasks_for(suite) if mode in task.modes]
 
 
-def run(model: Path, suite: Suite, mode: Mode, *, limit: int | None = None) -> dict[str, object]:
-    """One mode's report; `chat-<mode>.json` beside the completion suite's report."""
-    harness = VllmHarness(model, mode)
+def header(model: Path, suite: Suite, mode: Mode, limit: int | None) -> dict[str, object]:
+    """Everything a task's score depends on besides the task itself."""
     return {
         "model": str(model),
         "suite": suite,
@@ -244,8 +270,49 @@ def run(model: Path, suite: Suite, mode: Mode, *, limit: int | None = None) -> d
         "limit": limit,
         "seed": SEED,
         "decoding": generation(mode),
-        "tasks": evaluate_tasks(harness, tasks_in(suite, mode), limit=limit),
     }
+
+
+def finished(path: Path, expected: Mapping[str, object]) -> Rows:
+    """Tasks an earlier run of the same model and settings already wrote to `path`."""
+    if not path.is_file():
+        return {}
+    earlier = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(earlier, dict) or any(earlier.get(k) != v for k, v in expected.items()):
+        return {}
+    tasks = earlier.get("tasks")
+    if not isinstance(tasks, dict):
+        return {}
+    return {str(name): row for name, row in tasks.items() if isinstance(row, dict)}
+
+
+def run(
+    model: Path, suite: Suite, mode: Mode, out: Path, *, limit: int | None = None
+) -> dict[str, object]:
+    """One mode's report at `out`, written after every task and resumed from it."""
+    head = header(model, suite, mode, limit)
+    tasks = tasks_in(suite, mode)
+    done = finished(out, head)
+    kept = sorted(name for name in done if name in {task.name for task in tasks})
+    progress("chat_resume", kept=kept, remaining=[t.name for t in tasks if t.name not in done])
+    pending = [task for task in tasks if task.name not in done]
+    harness: Harness = VllmHarness(model, mode) if pending else Finished()
+    rows = evaluate_tasks(
+        harness,
+        tasks,
+        limit=limit,
+        done=done,
+        save=lambda rows: write_report(out, {**head, "tasks": rows}),
+    )
+    return {**head, "tasks": rows}
+
+
+class Finished:
+    """The harness when every task is already in the report; scoring one is a defect."""
+
+    def score(self, task: HarnessTask, limit: int | None) -> object:
+        message = f"{task.name} was to be kept from the report, not scored (limit {limit})"
+        raise ChatEvaluationError(message)
 
 
 def report_name(mode: Mode) -> str:
@@ -274,7 +341,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         with stage("chat evaluation", suite=args.suite, mode=args.mode):
-            report = run(args.model, args.suite, args.mode, limit=args.limit)
+            report = run(args.model, args.suite, args.mode, args.out, limit=args.limit)
     except ChatEvaluationError as error:
         sys.stderr.write(f"error: {error}\n")
         return 1

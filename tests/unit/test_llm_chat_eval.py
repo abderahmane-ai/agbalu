@@ -110,6 +110,74 @@ class TestScores:
         assert harness.calls == [("gsm8k", 8)]
 
 
+class TestNeedles:
+    def test_the_needle_score_is_read_at_the_tested_length(self) -> None:
+        (niah,) = (t for t in chat_eval.HARNESS if t.name == "niah_single_2")
+        row = {"32768,none": 0.94, "4096,none": -1.0, "alias": "niah_single_2"}
+        result = {"results": {"niah_single_2": row}, "n-samples": {}}
+        assert chat_eval.read_score(result, niah) == (0.94, None)
+
+    def test_a_length_that_was_not_run_is_refused_not_read_as_a_score(self) -> None:
+        task = HarnessTask("niah_single_1", "4096,none", 0, ("no_think",), ("select",))
+        with pytest.raises(chat_eval.ChatEvaluationError, match=r"-1\.0, outside"):
+            chat_eval.read_score(output("niah_single_1", "4096,none", -1.0), task)
+
+
+class FailingAfter(FakeHarness):
+    def __init__(self, value: float, fail_on: str) -> None:
+        super().__init__(value)
+        self.fail_on = fail_on
+
+    def score(self, task: HarnessTask, limit: int | None) -> object:
+        if task.name == self.fail_on:
+            message = f"{task.name} broke"
+            raise chat_eval.ChatEvaluationError(message)
+        return super().score(task, limit)
+
+
+class TestResume:
+    TASKS = chat_eval.tasks_in("select", "no_think")
+    HEAD = chat_eval.header(Path("m"), "select", "no_think", None)
+
+    def test_a_failure_keeps_every_task_finished_before_it(self, tmp_path: Path) -> None:
+        out = tmp_path / "chat-no_think.json"
+
+        def save(rows: chat_eval.Rows) -> None:
+            chat_eval.write_report(out, {**self.HEAD, "tasks": rows})
+
+        with pytest.raises(chat_eval.ChatEvaluationError, match="niah_single_1 broke"):
+            chat_eval.evaluate_tasks(
+                FailingAfter(0.5, "niah_single_1"), self.TASKS, limit=None, save=save
+            )
+        kept = chat_eval.finished(out, self.HEAD)
+        assert sorted(kept) == ["gsm8k", "ifeval", "mmlu_pro"]
+
+        harness = FakeHarness(0.25)
+        rows = chat_eval.evaluate_tasks(harness, self.TASKS, limit=None, done=kept, save=save)
+        assert [name for name, _ in harness.calls] == [
+            "niah_single_1",
+            "niah_single_2",
+            "niah_single_3",
+        ]
+        assert rows["gsm8k"]["score"] == 50.0
+        assert rows["niah_single_3"]["score"] == 25.0
+        assert list(rows) == [task.name for task in self.TASKS]
+
+    def test_a_report_under_other_settings_is_not_resumed(self, tmp_path: Path) -> None:
+        out = tmp_path / "chat-no_think.json"
+        other = {**self.HEAD, "model": "another"}
+        chat_eval.write_report(out, {**other, "tasks": {"gsm8k": {"score": 1.0}}})
+        assert chat_eval.finished(out, self.HEAD) == {}
+        assert chat_eval.finished(tmp_path / "absent.json", self.HEAD) == {}
+
+    def test_a_finished_report_needs_no_engine(self, tmp_path: Path) -> None:
+        out = tmp_path / "chat-no_think.json"
+        rows = {task.name: {"score": 1.0} for task in self.TASKS}
+        chat_eval.write_report(out, {**self.HEAD, "tasks": rows})
+        report = chat_eval.run(Path("m"), "select", "no_think", out)
+        assert report["tasks"] == rows
+
+
 class TestReport:
     def test_the_report_is_written_whole(self, tmp_path: Path) -> None:
         path = tmp_path / "runs" / chat_eval.report_name("think")
