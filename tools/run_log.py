@@ -207,18 +207,27 @@ class View:
                 else ""
             )
             parts.append(f"{language} {value:.3f}{delta}")
-        guard = "drift guard ok" if event.get("eligible") else "DRIFT GUARD FAILED"
+        loss = event.get("validation_loss")
+        if loss is not None:
+            chosen_on = f"validation loss {float(str(loss)):.4f}"
+        else:
+            chosen_on = "drift guard ok" if event.get("eligible") else "DRIFT GUARD FAILED"
         return Rendered(
             f"== eval at step {event.get('step')}: held-out bpc "
             + " | ".join(parts)
-            + f" | {guard}",
+            + f" | {chosen_on}",
             live=False,
         )
 
     def on_best(self, event: dict[str, object]) -> Rendered:
+        loss = event.get("validation_loss")
+        chosen_on = (
+            f"validation loss {float(str(loss)):.4f}"
+            if loss is not None
+            else f"Kabyle bpc {float(str(event['kab_bpc'])):.3f}"
+        )
         return Rendered(
-            f"   new best checkpoint: Kabyle bpc {float(str(event['kab_bpc'])):.3f}"
-            f" at step {event.get('step')}",
+            f"   new best checkpoint: {chosen_on} at step {event.get('step')}",
             live=False,
         )
 

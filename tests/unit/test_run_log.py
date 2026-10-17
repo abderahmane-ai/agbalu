@@ -111,6 +111,17 @@ class TestEvaluation:
         assert "-50.0%" in rendered.text
         assert "DRIFT GUARD FAILED" in rendered.text
 
+    def test_an_sft_eval_and_best_show_the_validation_loss_not_the_guard(self) -> None:
+        view = View()
+        bpc = {"kab": 1.575, "eng": 1.042, "fra": 1.261}
+        rendered = view.render(event("eval", step=0, bpc=bpc, validation_loss=1.23456))
+        best = view.render(event("best", step=0, validation_loss=1.23456))
+        assert rendered is not None
+        assert best is not None
+        assert "validation loss 1.2346" in rendered.text
+        assert "GUARD" not in rendered.text
+        assert best.text == "   new best checkpoint: validation loss 1.2346 at step 0"
+
 
 class TestBaseline:
     def test_a_seeded_step_0_baseline_is_used_when_the_tail_misses_it(self) -> None:
