@@ -174,11 +174,50 @@ class TestRefusals:
         with pytest.raises(merge.MergeError, match="shape or dtype"):
             run(*checkpoints(tmp_path, cpt=values), 0.5, tmp_path / "out")
 
-    def test_a_dtype_difference(self, tmp_path: Path) -> None:
-        values = tensors(2, text_only=True)
+    def test_a_dtype_difference_in_instruct(self, tmp_path: Path) -> None:
+        values = tensors(3)
         values[f"{TEXT}norm.weight"] = values[f"{TEXT}norm.weight"].float()
-        with pytest.raises(merge.MergeError, match="shape or dtype"):
+        with pytest.raises(merge.MergeError, match="instruct: 1 tensors differ"):
+            run(*checkpoints(tmp_path, instruct=values), 0.5, tmp_path / "out")
+
+    def test_a_non_float_dtype_difference_in_cpt(self, tmp_path: Path) -> None:
+        values = tensors(2, text_only=True)
+        values[f"{TEXT}norm.weight"] = values[f"{TEXT}norm.weight"].to(torch.int32)
+        with pytest.raises(merge.MergeError, match="cpt: 1 tensors differ"):
             run(*checkpoints(tmp_path, cpt=values), 0.5, tmp_path / "out")
+
+
+class TestRecast:
+    NAME = f"{TEXT}norm.weight"
+
+    PRECISE = torch.tensor([0.1234567, -0.7654321, 0.3333333], dtype=torch.float32)
+    """Values bf16 cannot hold exactly, as Qwen3.5 stores `A_log` in fp32."""
+
+    def three(self, tmp_path: Path, cpt_value: torch.Tensor) -> Three:
+        """Base and instruct hold the tensor in fp32; the CPT holds `cpt_value` in bf16, as
+        training saved it."""
+        base, instruct, cpt = tensors(1), tensors(3), tensors(1, text_only=True)
+        base[self.NAME], instruct[self.NAME] = self.PRECISE, self.PRECISE + 1
+        cpt[self.NAME] = cpt_value
+        return (
+            write(tmp_path / "base", base),
+            write(tmp_path / "cpt", cpt, sharded=False),
+            write(tmp_path / "instruct", instruct),
+        )
+
+    def test_an_untrained_value_rounded_to_bf16_moves_nothing(self, tmp_path: Path) -> None:
+        three = self.three(tmp_path, self.PRECISE.to(torch.bfloat16))
+        report = run(*three, 1.0, tmp_path / "out")
+        assert merge.same_tensors(tmp_path / "out", three[2]) == []
+        assert report["cpt_dtype_differs"] == {"count": 1, "first": [self.NAME]}
+        assert read(tmp_path / "out", self.NAME).dtype == torch.float32
+
+    def test_a_trained_value_moves_by_its_delta_from_the_rounded_base(self, tmp_path: Path) -> None:
+        rounded = self.PRECISE.to(torch.bfloat16)
+        three = self.three(tmp_path, rounded + 0.5)
+        run(*three, 0.5, tmp_path / "out")
+        delta = (rounded + 0.5).float() - rounded.float()
+        assert torch.equal(read(tmp_path / "out", self.NAME), self.PRECISE + 1 + 0.5 * delta)
 
     def test_untied_embeddings(self, tmp_path: Path) -> None:
         with pytest.raises(merge.MergeError, match="tie_word_embeddings"):

@@ -141,6 +141,17 @@ def tensor_infos(checkpoint: Checkpoint, names: set[str]) -> dict[str, TensorInf
     return infos
 
 
+FLOAT_DTYPES: Final = frozenset({"F32", "BF16", "F16"})
+
+
+def recastable(cpt: TensorInfo, base: TensorInfo) -> bool:
+    """A CPT tensor stored in another float dtype than the base, same shape. Training loads
+    the model in bf16, so the 48 fp32 `A_log` and `dt_bias` tensors come back bf16
+    (`jugurtha-4b-v1`, 2026-10-17); `merged` takes the delta against the base rounded to
+    the CPT's dtype."""
+    return cpt.shape == base.shape and {cpt.dtype, base.dtype} <= FLOAT_DTYPES
+
+
 def text_tower(base: Checkpoint, cpt: Checkpoint, instruct: Checkpoint) -> list[str]:
     """The tensors to merge, after proving the three checkpoints agree on them exactly."""
     for label, checkpoint in (("base", base), ("cpt", cpt), ("instruct", instruct)):
@@ -170,7 +181,12 @@ def text_tower(base: Checkpoint, cpt: Checkpoint, instruct: Checkpoint) -> list[
     reference = tensor_infos(base, names)
     for label, other in (("cpt", cpt), ("instruct", instruct)):
         infos = tensor_infos(other, names)
-        differ = [name for name in sorted(names) if infos[name] != reference[name]]
+        differ = [
+            name
+            for name in sorted(names)
+            if infos[name] != reference[name]
+            and not (label == "cpt" and recastable(infos[name], reference[name]))
+        ]
         if differ:
             first = differ[0]
             message = (
@@ -202,10 +218,13 @@ def check_tokenizers(base: Path, instruct: Path) -> None:
 def merged(
     instruct: torch.Tensor, base: torch.Tensor, cpt: torch.Tensor, alpha: float, name: str
 ) -> torch.Tensor:
-    """`I + α(C − B)` in fp32, returned in I's dtype; a non-finite value is refused."""
+    """`I + α(C − B)` in fp32, returned in I's dtype; a non-finite value is refused. Where C
+    is stored in another dtype than B, B is first rounded to C's dtype, so a value training
+    never moved has a delta of exactly zero instead of B's rounding error."""
     import torch
 
-    value = instruct.float() + alpha * (cpt.float() - base.float())
+    reference = base if base.dtype == cpt.dtype else base.to(cpt.dtype)
+    value = instruct.float() + alpha * (cpt.float() - reference.float())
     if not bool(torch.isfinite(value).all()):
         message = f"{name}: the merged tensor is not finite at α {alpha}"
         raise MergeError(message)
@@ -279,6 +298,7 @@ def merge(inputs: Inputs, alpha: float, out: Path) -> dict[str, object]:
     partial.mkdir(parents=True)
     tally = ChangeTally()
     copied = 0
+    recast: list[str] = []
     tracker = Tracker("merge tensors", len(instruct.shards))
     with ExitStack() as stack:
         handles: dict[tuple[str, str], safe_open] = {}
@@ -298,6 +318,8 @@ def merge(inputs: Inputs, alpha: float, out: Path) -> dict[str, object]:
                 if name in names:
                     old = opened(base, "base", base.shards[name]).get_tensor(name)
                     new = opened(cpt, "cpt", cpt.shards[name]).get_tensor(name)
+                    if new.dtype != old.dtype:
+                        recast.append(name)
                     result = merged(value, old, new, alpha, name)
                     tally.add(name, value, result)
                     value = result
@@ -329,6 +351,7 @@ def merge(inputs: Inputs, alpha: float, out: Path) -> dict[str, object]:
         },
         "sources": dict(inputs.sources),
         "tensors": {"merged": tally.count, "copied": copied, "total": len(instruct.shards)},
+        "cpt_dtype_differs": {"count": len(recast), "first": sorted(recast)[:SHOWN]},
         "change": tally.as_dict(),
         "files_copied": present,
         "outputs": {shard: file_digest(partial / shard) for shard in instruct.files()},
