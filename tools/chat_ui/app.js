@@ -204,7 +204,10 @@ class JugurthaChatApp {
   appendUserMessage(text) {
     const row = document.createElement('div');
     row.className = 'message-row user';
-    row.innerHTML = `<div class="message-bubble user">${this.escapeHTML(text)}</div>`;
+    const bubble = document.createElement('div');
+    bubble.className = 'message-bubble user';
+    this.renderMarkdown(bubble, text);
+    row.appendChild(bubble);
     this.dom.thread.appendChild(row);
   }
 
@@ -350,7 +353,7 @@ class JugurthaChatApp {
                 thinkContent = parts[0].replace('<think>', '').trim();
                 answerContent = parts.slice(1).join('</think>').trim();
                 
-                elements.thinkingBody.textContent = thinkContent;
+                this.renderMarkdown(elements.thinkingBody, thinkContent);
                 const thinkDuration = ((performance.now() - startTime) / 1000).toFixed(1);
                 elements.thinkingBadge.textContent = `Smekti deg ${thinkDuration}s`;
               } else {
@@ -374,6 +377,9 @@ class JugurthaChatApp {
       }
 
       // Final rendering pass
+      if (thinkContent) {
+        this.renderMarkdown(elements.thinkingBody, thinkContent);
+      }
       this.renderMarkdown(elements.bubble, answerContent || fullResponse);
       this.messages.push({ role: 'assistant', content: fullResponse });
 
@@ -420,22 +426,88 @@ class JugurthaChatApp {
     }
 
     try {
-      if (window.marked) {
-        container.innerHTML = window.marked.parse(text);
-      } else {
-        container.textContent = text;
-      }
+      // Step 1: Protect code blocks (fenced ```...``` and inline `...`)
+      const codeBlocks = [];
+      let protectedText = text.replace(/(```[\s\S]*?```|`[^`\n]+`)/g, (match) => {
+        const token = `@@@AGBALU_CODE_${codeBlocks.length}@@@`;
+        codeBlocks.push(match);
+        return token;
+      });
 
-      // Render math equations with KaTeX if present
-      if (window.renderMathInElement) {
-        window.renderMathInElement(container, {
-          delimiters: [
-            { left: '$$', right: '$$', display: true },
-            { left: '$', right: '$', display: false }
-          ],
-          throwOnError: false
-        });
-      }
+      // Step 2: Extract Display Math ($$...$$ and \[...\] and \begin{env}...\end{env})
+      const mathBlocks = [];
+
+      // Display math: $$ ... $$
+      protectedText = protectedText.replace(/\$\$([\s\S]*?)\$\$/g, (_, math) => {
+        const token = `@@@AGBALU_MATH_BLOCK_${mathBlocks.length}@@@`;
+        mathBlocks.push({ math: math.trim(), display: true });
+        return token;
+      });
+
+      // Display math: \[ ... \]
+      protectedText = protectedText.replace(/\\\[([\s\S]*?)\\\]/g, (_, math) => {
+        const token = `@@@AGBALU_MATH_BLOCK_${mathBlocks.length}@@@`;
+        mathBlocks.push({ math: math.trim(), display: true });
+        return token;
+      });
+
+      // Display math environments: \begin{equation|align|...} ... \end{...}
+      protectedText = protectedText.replace(/(\\begin\{(equation|align|aligned|gather|alignat|matrix|pmatrix|bmatrix|vmatrix|cases)\*?\}[\s\S]*?\\end\{\2\*?\})/g, (_, math) => {
+        const token = `@@@AGBALU_MATH_BLOCK_${mathBlocks.length}@@@`;
+        mathBlocks.push({ math: math.trim(), display: true });
+        return token;
+      });
+
+      // Step 3: Extract Inline Math (\(...\) and $...$)
+      // Inline math: \( ... \)
+      protectedText = protectedText.replace(/\\\(([\s\S]*?)\\\)/g, (_, math) => {
+        const token = `@@@AGBALU_MATH_INLINE_${mathBlocks.length}@@@`;
+        mathBlocks.push({ math: math.trim(), display: false });
+        return token;
+      });
+
+      // Inline math: $ ... $ (excluding empty or whitespace-only)
+      protectedText = protectedText.replace(/(^|[^\\])\$([^\s$](?:[^$\n]*?[^\s$])?)\$/g, (_, prefix, math) => {
+        const token = `@@@AGBALU_MATH_INLINE_${mathBlocks.length}@@@`;
+        mathBlocks.push({ math: math.trim(), display: false });
+        return prefix + token;
+      });
+
+      // Step 4: Restore code blocks so Marked can parse them properly
+      protectedText = protectedText.replace(/@@@AGBALU_CODE_(\d+)@@@/g, (_, index) => {
+        return codeBlocks[parseInt(index, 10)] || '';
+      });
+
+      // Step 5: Parse with Marked
+      let html = window.marked ? window.marked.parse(protectedText) : protectedText;
+
+      // Clean up standalone paragraph wrapping around block math
+      html = html.replace(/<p>\s*(@@@AGBALU_MATH_BLOCK_\d+@@@)\s*<\/p>/g, '$1');
+
+      // Step 6: Render KaTeX for each math placeholder
+      html = html.replace(/@@@AGBALU_MATH_(BLOCK|INLINE)_(\d+)@@@/g, (match, type, indexStr) => {
+        const item = mathBlocks[parseInt(indexStr, 10)];
+        if (!item) return match;
+
+        if (window.katex) {
+          try {
+            return window.katex.renderToString(item.math, {
+              displayMode: item.display,
+              throwOnError: false,
+              output: 'htmlAndMathml'
+            });
+          } catch (e) {
+            console.warn('KaTeX render error:', e);
+            const delim = item.display ? '$$' : '$';
+            return `<span class="katex-error" title="${e.message}">${delim}${item.math}${delim}</span>`;
+          }
+        } else {
+          const delim = item.display ? '$$' : '$';
+          return `<code>${delim}${item.math}${delim}</code>`;
+        }
+      });
+
+      container.innerHTML = html;
 
       // Add copy buttons to code blocks
       container.querySelectorAll('pre').forEach(pre => {
