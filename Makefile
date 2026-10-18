@@ -874,4 +874,8 @@ modal-lid-pull: ## Pull the Dihya checkpoint, calibration and held-out report
 	modal volume get --force agbalu-checkpoints /dihya/calibration.json artifacts/runs/dihya/calibration.json
 	modal volume get --force agbalu-checkpoints /dihya/held-out-report.json artifacts/runs/dihya/held-out-report.json
 
+chat-ui: ## Launch the Jugurtha-4B chat UI locally (bridges to HPC vLLM on port 3000)
+	python3 tools/web_chat.py --vllm-url http://100.98.139.97:8000/v1 --port 3000
+
 .PHONY: $(shell grep -hoE '^[a-zA-Z_-]+:' $(MAKEFILE_LIST) | tr -d ':')
+
