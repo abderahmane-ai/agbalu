@@ -220,8 +220,6 @@ print(reply)
 For step-by-step Kabyle chain-of-thought, set `enable_thinking=True` and sample with
 `temperature=0.6`, `top_p=0.95`. The reasoning trace appears between `<think>` and `</think>`.
 
-The sovereign Kabyle identity, humble demeanor, and Latin orthography are **baked directly into the model's default chat template and GGUF metadata**; no manual system prompt configuration is needed across any runtime.
-
 ### vLLM
 
 ```bash
