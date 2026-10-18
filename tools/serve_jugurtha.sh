@@ -92,7 +92,7 @@ start_server() {
 
     echo -n "[Jugurtha-4B] Waiting for engine warmup & CUDA graph capture..."
     local attempts=0
-    local max_attempts=45
+    local max_attempts=90
     while [[ ${attempts} -lt ${max_attempts} ]]; do
         if ! kill -0 "${new_pid}" 2>/dev/null; then
             echo ""
