@@ -1,0 +1,59 @@
+FROM ./Jugurtha-4B-Q4_K_M.gguf
+
+SYSTEM """Isem-ik d Jugurtha. D amallal aqbayli i d-yessnulfa Ainouche Abderahmane deg usenfar AƔBALU.
+
+Tiririt-ik ad tili s teqbaylit (s usekkil alatini) s wudem amezwaru, anagar ma yella aseqdac yessuter-d tutlayt nniḍen neɣ tasuqilt.
+
+Tarrayt n umeslay d teflest:
+- Meslay akken i heddren yimdanen deg tmetti: s wawal aḥeqqani, s tseddi, s tefrit d leqder ameqran.
+- Ur ttili ara d aɛlayan, ur ttɛanad ara medden, ur ssimɣur ara iman-ik yerna ur tt-ttarra ara d amassan fell-asen. Err-d s wannuz, s leḥnana, s leɛqel d tmusni tamedrart.
+- Ssexdem tameslayt yelhan n yal ass i fehmen akk medden, bla asuffeɣ, bla aselket d wawalen ur nelli d ilaqiyen.
+- Mi ara d-tefkeḍ tiririt, fferz igburen s tseddi. Ma yella d tamsalt n leḥsab neɣ d tamusni lqayen, smekti s teqbaylit s talwit uqbel ad d-tefkeḍ tiririt taneggarut.
+- Ur d-ttader ara tikwulya nniḍen neɣ imesnulfuyen nniḍen; d Jugurtha i d isem-ik, d Ainouche Abderahmane i k-yessnulfan deg usenfar AƔBALU."""
+
+TEMPLATE """{{- if .Messages }}
+{{- if or .System .Tools }}<|im_start|>system
+{{- if .System }}
+{{ .System }}
+{{- end }}
+<|im_end|>
+{{- end }}
+{{- range $i, $_ := .Messages }}
+{{- $last := eq (len (slice $.Messages $i)) 1 -}}
+{{- if eq .Role "user" }}<|im_start|>user
+{{ .Content }}<|im_end|>
+{{- else if eq .Role "assistant" }}<|im_start|>assistant
+{{ .Content }}
+{{- if not $last }}<|im_end|>{{- end }}
+{{- end }}
+{{- if and (ne .Role "assistant") $last }}<|im_start|>assistant
+{{- if .Thinking }}<think>
+{{- else }}<think>
+
+</think>
+
+{{- end }}
+{{- end }}
+{{- end }}
+{{- else }}
+{{- if .System }}<|im_start|>system
+{{ .System }}<|im_end|>
+{{- end }}
+{{- if .Prompt }}<|im_start|>user
+{{ .Prompt }}<|im_end|>
+{{- end }}
+<|im_start|>assistant
+{{- if .Thinking }}<think>
+{{- else }}<think>
+
+</think>
+
+{{- end }}
+{{- end }}"""
+
+PARAMETER stop "<|im_start|>"
+PARAMETER stop "<|im_end|>"
+PARAMETER stop "<|endoftext|>"
+PARAMETER temperature 0.6
+PARAMETER top_p 0.95
+PARAMETER top_k 20

@@ -222,7 +222,7 @@ REPOS := $(MODEL_REPOS) $(DATASET_REPOS) org
 # Out of the default set on purpose: each needs a checkpoint pulled off a volume first, so
 # `make release` with no REPO would fail on whichever one this machine has not pulled.
 PULLED_REPOS := fadhma belaid boulifa matoub simohand feraoun feraoun-pro kabstandard kabliterary \
-	dihya masinissa-sentiment
+	dihya masinissa-sentiment jugurtha jugurtha-gguf jugurtha-4bit
 
 release: $(addprefix release-,$(or $(REPO),$(REPOS))) ## Stage repos under artifacts/release. REPO=encoder|tokenizer|mt|juba|bench|lex|sentiment|inflect|tifinagh|punct|g2p|org, or fadhma|belaid|boulifa|matoub|simohand|feraoun|kabstandard|dihya|masinissa-sentiment once pulled
 	@echo 'staged under $(RELEASE) — review, then push each with: hf upload <repo> <dir> .'
@@ -421,6 +421,24 @@ release-masinissa-sentiment:
 		--training-only encoder.classifier.
 	$(PY) -m tools.stage_hub --repo masinissa_sentiment --dir $(RELEASE)/Masinissa-Sentiment
 
+release-jugurtha:
+	@test -f $(RELEASE)/Jugurtha-4B/config.json || \
+		{ echo "no model in $(RELEASE)/Jugurtha-4B — stage or pull it from HPC first"; exit 1; }
+	@cp $(CARDS)/jugurtha-4b.md $(RELEASE)/Jugurtha-4B/README.md
+	@echo "$(RELEASE)/Jugurtha-4B: $$(ls $(RELEASE)/Jugurtha-4B | wc -l | tr -d ' ') files"
+
+release-jugurtha-gguf:
+	@test -f $(RELEASE)/Jugurtha-4B-GGUF/Jugurtha-4B-Q4_K_M.gguf || \
+		{ echo "no GGUFs in $(RELEASE)/Jugurtha-4B-GGUF — stage or pull them from HPC first"; exit 1; }
+	@cp $(CARDS)/jugurtha-4b-gguf.md $(RELEASE)/Jugurtha-4B-GGUF/README.md
+	@echo "$(RELEASE)/Jugurtha-4B-GGUF: $$(ls $(RELEASE)/Jugurtha-4B-GGUF | wc -l | tr -d ' ') files"
+
+release-jugurtha-4bit:
+	@test -f $(RELEASE)/Jugurtha-4B-MLX-4bit/config.json || \
+		{ echo "no model in $(RELEASE)/Jugurtha-4B-MLX-4bit — convert with mlx_lm.convert first"; exit 1; }
+	@cp $(CARDS)/jugurtha-4b-4bit.md $(RELEASE)/Jugurtha-4B-MLX-4bit/README.md
+	@echo "$(RELEASE)/Jugurtha-4B-MLX-4bit: $$(ls $(RELEASE)/Jugurtha-4B-MLX-4bit | wc -l | tr -d ' ') files"
+
 # One push target with a variable, not one per repository. The table is the only place a
 # staged directory is paired with the repository it belongs in; two copies of that pairing
 # is how a directory gets published under the wrong name.
@@ -448,10 +466,13 @@ HF_simohand    := models   agbalu/SiMohand-278M  $(SIMOHAND_DIR)          $(CARD
 HF_dihya       := models   agbalu/Dihya-5M       $(RELEASE)/Dihya-5M      $(CARDS)/dihya-5m.md
 HF_masinissa-sentiment := models agbalu/Masinissa-Sentiment \
 	$(RELEASE)/Masinissa-Sentiment $(CARDS)/masinissa-sentiment.md
+HF_jugurtha     := models   agbalu/Jugurtha-4B      $(RELEASE)/Jugurtha-4B      $(CARDS)/jugurtha-4b.md
+HF_jugurtha-gguf := models  agbalu/Jugurtha-4B-GGUF $(RELEASE)/Jugurtha-4B-GGUF $(CARDS)/jugurtha-4b-gguf.md
+HF_jugurtha-4bit := models  agbalu/Jugurtha-4B-MLX-4bit $(RELEASE)/Jugurtha-4B-MLX-4bit $(CARDS)/jugurtha-4b-4bit.md
 
 ALL_REPOS := kabbench kablex kabsentiment kabinflect kabtifinagh kabpunct kabg2p \
 	kabstandard kabliterary encoder tokenizer mt juba fadhma belaid boulifa matoub \
-	feraoun feraoun-pro simohand dihya masinissa-sentiment
+	feraoun feraoun-pro simohand dihya masinissa-sentiment jugurtha jugurtha-gguf jugurtha-4bit
 
 # `hf upload` adds and overwrites; it never removes. A repository whose file set shrank keeps
 # the superseded files beside their replacements, which for Matoub means a 1.93 GB training
