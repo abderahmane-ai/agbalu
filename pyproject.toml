@@ -275,6 +275,7 @@ ignore = [
 "src/agbalu/llm/smoke.py" = ["PLC0415"]
 "src/agbalu/llm/progress.py" = ["PLC0415"]
 "src/agbalu/llm/merge.py" = ["PLC0415"]
+"src/agbalu/llm/assemble.py" = ["PLC0415"]
 "src/agbalu/llm/dedupe.py" = ["PLC0415"]
 # S311: `random.Random(SEED)` draws the evaluation subset, seeded so every model compared is
 #       scored on the same examples. lm-eval and vLLM exist only in the pod's vLLM env.
@@ -564,7 +565,12 @@ disallow_untyped_calls = false
 # shards, needs exactly those methods. Confined to the module that merges checkpoints and
 # its test.
 [[tool.mypy.overrides]]
-module = ["agbalu.llm.merge", "tests.unit.test_llm_merge"]
+module = [
+    "agbalu.llm.merge",
+    "agbalu.llm.assemble",
+    "tests.unit.test_llm_merge",
+    "tests.unit.test_llm_assemble",
+]
 disallow_untyped_calls = false
 
 # `pyarrow` ships no py.typed marker and no stubs on PyPI.

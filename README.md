@@ -20,8 +20,10 @@ layer rather than a character filter.
 
 ## Published artifacts
 
-Twenty-one repositories on the Hugging Face Hub under [`agbalu`](https://huggingface.co/agbalu),
-thirteen models and eight datasets, plus the organization Space. Every model loads with
+Twenty-three public repositories on the Hugging Face Hub under [`agbalu`](https://huggingface.co/agbalu)
+(thirteen models, nine datasets, and the organization Space), plus the fourteenth model,
+[`Jugurtha-4B-Instruct`](https://huggingface.co/agbalu/Jugurtha-4B-Instruct), assembled and evaluated
+ready for release. Every neural model (except `Dihya-5M`, which uses `fasttext`) loads with
 `transformers` and `torch` alone, without this repository.
 
 | Model | | |
@@ -39,6 +41,7 @@ thirteen models and eight datasets, plus the organization Space. Every model loa
 | [`Matoub-82M`](https://huggingface.co/agbalu/Matoub-82M) | speech synthesis (preview) | First neural TTS for Kabyle — 24 kHz, StyleTTS2, 42-symbol IPA inventory, male voice |
 | [`Dihya-5M`](https://huggingface.co/agbalu/Dihya-5M) | language identification, six Berber varieties plus rejection | 85.52% over seven classes; 84.44% on the six Berber classes against GlotLID's 41.78% and NLLB `lid218e`'s 28.33%, scored in one pass over the same rows |
 | [`Masinissa-Sentiment`](https://huggingface.co/agbalu/Masinissa-Sentiment) | sentiment, three classes | 90.27% accuracy and 0.9026 macro-F1, against 88.80% for an ordinary fine-tune of the same encoder and 77.53% for a frozen probe; unchanged under total homoglyph corruption |
+| [`Jugurtha-4B-Instruct`](https://huggingface.co/agbalu/Jugurtha-4B-Instruct) | instruction-tuned generative model (4.2B) | First Kabyle LLM with native thinking mode; assembled and evaluated ready for release; 100% NIAH (32k), 80.89% GSM8K, 73.74% SIB-200, eng→kab 28.77 / kab→eng 46.17 chrF++ |
 
 | Dataset | |
 |---|---|
@@ -50,6 +53,7 @@ thirteen models and eight datasets, plus the organization Space. Every model loa
 | [`KabPunct`](https://huggingface.co/datasets/agbalu/KabPunct) | 1,318,707 word-labelled sentences for punctuation and casing restoration |
 | [`KabG2P`](https://huggingface.co/datasets/agbalu/KabG2P) | 25,634 word forms with IPA transcriptions |
 | [`KabStandard`](https://huggingface.co/datasets/agbalu/KabStandard) | 497,944 pairs, informal → canonical Kabyle Latin (training data for Boulifa-48M) |
+| [`KabLiterary`](https://huggingface.co/datasets/agbalu/KabLiterary) | 28,907 paragraphs / 657,713 words of classical world literature in canonical Kabyle Latin |
 
 Weights are Apache-2.0. Text keeps its upstream licences, so each card carries the licence
 composition of the data behind it, the decontamination result, and the defects that are not

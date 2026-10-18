@@ -159,6 +159,16 @@ class TestParser:
         assert launch.main(argv) == 1
         assert "--chat-only needs --suite select or release" in capsys.readouterr().err
 
+    def test_assemble_names_the_tower_and_the_template(self) -> None:
+        argv = ["assemble", "--run", "f", "--model", "t", "--template", "m"]
+        run, arguments, log, then = launch.job(launch.build_parser().parse_args(argv))
+        assert (run, log, then) == ("f", "f/log.txt", [])
+        assert arguments == ["assemble", "--run", "f", "--tower", "t", "--template", "m"]
+
+    def test_assemble_needs_a_template(self, capsys: pytest.CaptureFixture[str]) -> None:
+        assert launch.main(["assemble", "--run", "f", "--model", "t"]) == 1
+        assert "assemble needs --template" in capsys.readouterr().err
+
     def test_the_guard_scores_two_tasks_into_the_selection_report(self) -> None:
         argv = ["evaluate", "--run", "e", "--model", "m", "--suite", "guard"]
         _, arguments, _, then = launch.job(launch.build_parser().parse_args(argv))

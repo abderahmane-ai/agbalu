@@ -143,6 +143,9 @@ evaluate: ## Evaluation suite on MODEL into artifacts/runs/RUN/. RUN= MODEL SUIT
 merge: ## Instruct + ALPHA x (CPT - base) into artifacts/runs/RUN/model. RUN= ALPHA= MODEL=<cpt checkpoint> (operator, hpc)
 	$(call launch,merge) $(if $(ALPHA),--alpha $(ALPHA),) $(if $(MODEL),--model $(MODEL),)
 
+assemble: ## Trained text tower MODEL back into full model TEMPLATE, into artifacts/runs/RUN/model. RUN= MODEL= TEMPLATE= (operator, hpc)
+	$(call launch,assemble) $(if $(MODEL),--model $(MODEL),) $(if $(TEMPLATE),--template $(TEMPLATE),)
+
 status: ## Is RUN alive: session, recent events read plainly, checkpoints. RAW=1 for the raw log (operator, hpc)
 	$(call launch,status) $(if $(RAW),--raw,)
 

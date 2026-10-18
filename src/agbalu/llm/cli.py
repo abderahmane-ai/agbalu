@@ -569,6 +569,21 @@ def command_merge(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_assemble(args: argparse.Namespace) -> int:
+    from agbalu.llm import assemble, merge
+
+    out = RUNS / args.run / "model"
+    report = assemble.assemble(args.template, args.tower, out)
+    write_stats(RUNS / args.run / assemble.REPORT_FILE, report)
+    print(json.dumps(report["tensors"]), json.dumps(report["recast_to_template_dtype"]))
+    with stage("verify the assembly loads"):
+        loaded = merge.verify(out)
+    write_stats(RUNS / args.run / "verify.json", loaded)
+    print(json.dumps(loaded, indent=2))
+    print(f"-> {out}")
+    return 0
+
+
 def command_select(args: argparse.Namespace) -> int:
     from agbalu.llm.selection import read_candidate, select_alpha
 
@@ -1002,14 +1017,6 @@ def add_model_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser])
     criterion.add_argument("--candidate", type=Path, required=True)
     criterion.add_argument("--base", type=Path, required=True)
 
-    merger = sub.add_parser("merge", help="instruct + alpha * (cpt - base), task 11.21")
-    merger.add_argument("--run", required=True)
-    merger.add_argument("--alpha", type=float, required=True)
-    merger.add_argument("--cpt", type=Path, required=True)
-    merger.add_argument("--base", type=Path, help="default: the pinned base from the HF cache")
-    merger.add_argument("--instruct", type=Path, help="default: the pinned instruct model")
-    merger.add_argument("--no-verify", dest="verify", action="store_false")
-
     sub.add_parser("seeds", help="the 1,200 seed cards with their passages and pairs")
     prompter = sub.add_parser("prompts", help="the next Gemini batches to paste")
     prompter.add_argument("--batches", type=int, default=10)
@@ -1029,11 +1036,27 @@ def add_model_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser])
     chooser.add_argument("--out", type=Path, default=RUNS / "merge-selection.json")
 
 
+def add_checkpoint_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    merger = sub.add_parser("merge", help="instruct + alpha * (cpt - base), task 11.21")
+    merger.add_argument("--run", required=True)
+    merger.add_argument("--alpha", type=float, required=True)
+    merger.add_argument("--cpt", type=Path, required=True)
+    merger.add_argument("--base", type=Path, help="default: the pinned base from the HF cache")
+    merger.add_argument("--instruct", type=Path, help="default: the pinned instruct model")
+    merger.add_argument("--no-verify", dest="verify", action="store_false")
+
+    assembler = sub.add_parser("assemble", help="a trained text tower back into its full model")
+    assembler.add_argument("--run", required=True)
+    assembler.add_argument("--tower", type=Path, required=True)
+    assembler.add_argument("--template", type=Path, required=True)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="agbalu-llm", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     add_corpus_commands(sub)
     add_model_commands(sub)
+    add_checkpoint_commands(sub)
     return parser
 
 
@@ -1050,6 +1073,7 @@ COMMANDS: Final[dict[str, Callable[[argparse.Namespace], int]]] = {
     "evaluate": command_evaluate,
     "criterion": command_criterion,
     "merge": command_merge,
+    "assemble": command_assemble,
     "select": command_select,
     "seeds": command_seeds,
     "prompts": command_prompts,

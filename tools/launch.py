@@ -371,6 +371,13 @@ def merge_arguments(args: argparse.Namespace) -> list[str]:
     return ["merge", "--run", args.run, "--alpha", str(args.alpha), "--cpt", cpt]
 
 
+def assemble_arguments(args: argparse.Namespace) -> list[str]:
+    """`--model` names the trained tower, `--template` the full model it was trained from."""
+    tower = require(args.model, "--model", "assemble")
+    template = require(args.template, "--template", "assemble")
+    return ["assemble", "--run", args.run, "--tower", tower, "--template", template]
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="launch", description=__doc__)
     parser.add_argument(
@@ -387,6 +394,7 @@ def build_parser() -> argparse.ArgumentParser:
             "data",
             "evaluate",
             "merge",
+            "assemble",
         ),
     )
     parser.add_argument("--target", choices=("hpc",), default="hpc")
@@ -397,6 +405,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--steps", type=int)
     parser.add_argument("--stop", type=int, help="end the train invocation at this step")
     parser.add_argument("--alpha", type=float, help="merge coefficient")
+    parser.add_argument("--template", help="assemble: the full model the tower was trained from")
     parser.add_argument("--objective", choices=("cpt", "sft"), help="train only; CLI default cpt")
     parser.add_argument(
         "--suite",
@@ -474,6 +483,9 @@ def job(args: argparse.Namespace) -> Job:
         case "merge":
             run = require(args.run, "--run", "merge")
             return run, merge_arguments(args), f"{run}/log.txt", []
+        case "assemble":
+            run = require(args.run, "--run", "assemble")
+            return run, assemble_arguments(args), f"{run}/log.txt", []
         case _:
             return evaluation_job(args)
 
