@@ -15,6 +15,7 @@ before the corpus or kept in step with it.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -30,9 +31,14 @@ upper bound keeps every document inside the 512-token window it is scored in who
 
 CAP: Final = 2000
 """Documents per source per language. A cap rather than everything selected: the Kabyle
-split alone is 30,468 records, far more than a perplexity needs, and the excess would cost
-GPU minutes for no extra precision. Everything selected still leaves training, whether or
-not it is evaluated — the cap bounds the measurement, never the exclusion."""
+split alone is 12,342 eligible records, more than a perplexity needs. Everything selected
+still leaves training, whether or not it is evaluated — the cap bounds the measurement,
+never the exclusion."""
+
+SAMPLE_SALT: Final = b"agbalu-llm-heldout-sample-1"
+"""Keys the digest that picks which eligible records fill the cap. The first build took the
+cap in file order, which put 56% of the Kabyle set in one source and none in the four
+largest; the digest makes the cap a uniform sample of every eligible record."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,6 +86,11 @@ def eligible(text: str) -> bool:
     return MIN_CHARS <= len(text) <= MAX_CHARS
 
 
+def sample_key(text: str) -> bytes:
+    """Order-independent rank: the same text ranks the same wherever it sits in a file."""
+    return hashlib.blake2b(text.encode("utf-8"), digest_size=8, key=SAMPLE_SALT).digest()
+
+
 def short_code(language: str) -> str:
     """`kab_Latn` back to `kab`, so a filename is readable."""
     for short, code in LANGUAGE_TAG.items():
@@ -101,27 +112,24 @@ def build(sources: Sequence[Source], out: Path, *, rate: int, cap: int = CAP) ->
     tallies: list[Tally] = []
 
     for source in sources:
-        taken: dict[str, int] = {}
-        characters: dict[str, int] = {}
+        candidates: dict[str, list[str]] = {}
         for record in records(source):
             language = record.code if record.aligned else LANGUAGE_TAG["kab"]
             text = record.other if record.aligned else record.kabyle
-            if not is_held_out(text, rate=rate):
-                continue
-            if not eligible(text) or taken.get(language, 0) >= cap:
+            if not is_held_out(text, rate=rate) or not eligible(text):
                 continue
             if text in seen.setdefault(language, set()):
                 continue
             seen[language].add(text)
-            selected.setdefault(language, []).append(
-                {"text": text, "language": language, "source": source.name}
+            candidates.setdefault(language, []).append(text)
+        for language, texts in sorted(candidates.items()):
+            chosen = sorted(texts, key=sample_key)[:cap]
+            selected.setdefault(language, []).extend(
+                {"text": text, "language": language, "source": source.name} for text in chosen
             )
-            taken[language] = taken.get(language, 0) + 1
-            characters[language] = characters.get(language, 0) + len(text)
-        tallies.extend(
-            Tally(source.name, language, count, characters[language])
-            for language, count in sorted(taken.items())
-        )
+            tallies.append(
+                Tally(source.name, language, len(chosen), sum(len(text) for text in chosen))
+            )
 
     paths: list[Path] = []
     for language, rows in sorted(selected.items()):

@@ -19,8 +19,6 @@ from modal.types import InputInfo, InputStatus
 from modal_app.asr import DEFAULT_RUN as ASR_RUN_NAME
 from modal_app.asr import asr_finetune, asr_pipeline
 from modal_app.common import APP_NAME
-from modal_app.jugurtha import DEFAULT_RUN as JUGURTHA_RUN_NAME
-from modal_app.jugurtha import jugurtha_train
 from modal_app.launch import (
     FUNCTIONS,
     KWARGS,
@@ -209,25 +207,6 @@ class TestStart:
         self._spawner(monkeypatch, tmp_path, seen)
         main(["--function", "asr_finetune"])
         assert "epochs" not in seen
-
-    def test_jugurtha_defaults_to_its_own_run_not_the_encoders(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        """`--run-name` carries the encoder's default, so a mapper reading it as falsy sends
-        `agbalu-encoder-v1` and the run writes into another model's directory."""
-        seen: dict[str, object] = {}
-        self._spawner(monkeypatch, tmp_path, seen)
-        main(["--function", "jugurtha_train"])
-        inspect.signature(jugurtha_train.get_raw_f()).bind(**seen)
-        assert seen["run"] == JUGURTHA_RUN_NAME
-
-    def test_an_explicit_run_name_reaches_jugurtha(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        seen: dict[str, object] = {}
-        self._spawner(monkeypatch, tmp_path, seen)
-        main(["--function", "jugurtha_train", "--run-name", "jugurtha-smoke"])
-        assert seen["run"] == "jugurtha-smoke"
 
     def test_feraoun_pro_continues_the_trained_checkpoint_with_tifinagh_mixed_in(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

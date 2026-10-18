@@ -20,10 +20,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final, Literal
+from typing import Final, Literal, Protocol
 
 Kind = Literal["kabyle", "aligned"]
 
@@ -49,6 +49,12 @@ old one. Bump the suffix deliberately, never silently."""
 
 class CorpusError(Exception):
     """A source is unreadable, or a row does not carry the sides it claims to."""
+
+
+class TokenCounter(Protocol):
+    """Tokens per text in the base's vocabulary, injected so builders test without one."""
+
+    def count(self, texts: Sequence[str]) -> list[int]: ...
 
 
 @dataclass(frozen=True, slots=True)

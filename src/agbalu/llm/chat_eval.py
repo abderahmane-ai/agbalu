@@ -1,0 +1,378 @@
+"""Chat-mode measurements through lm-eval's vLLM backend, in both thinking modes (task 11.21).
+
+The completion-mode suite (`agbalu.llm.evaluate`) asks a model in the shape CPT trained.
+A merged or fine-tuned assistant is also asked as an assistant: through the official chat
+template, with `enable_thinking` on and off. Those runs generate thousands of tokens per
+question in thinking mode, so they go through vLLM in its own environment
+(`/home/jovyan/envs/vllm`), never through `transformers.generate`.
+
+Decoding is fixed for every model compared: greedy with thinking off; with thinking on,
+Qwen's own recommendation for precise work (temperature 0.6, top_p 0.95, top_k 20) under one
+seed, because greedy decoding in thinking mode loops (Qwen3.5 README, read 2026-10-16).
+Large sets are cut by a seeded draw over every example, never by a prefix.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import random
+import sys
+from collections.abc import Callable, Mapping, Sequence, Sized
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Final, Literal, Protocol
+
+from agbalu.llm.progress import progress, stage
+
+Mode = Literal["think", "no_think"]
+Suite = Literal["select", "release"]
+MODES: Final[tuple[Mode, ...]] = ("no_think", "think")
+
+THINK_END: Final = "</think>"
+SEED: Final = 20261016
+GPU_MEMORY: Final = 0.85
+"""vLLM's share of the 47 GB slice; the rest is the CUDA context and the sampler."""
+
+NO_THINK_TOKENS: Final = 2_048
+THINK_TOKENS: Final = 12_288
+"""A Kabyle reasoning trace costs about three tokens per word; the cap leaves the trace room
+to finish on MMLU-Pro with a 5-shot prompt."""
+
+LONG_CONTEXT: Final = 32_768
+"""The `niah` length, past every training row (16,384) so it measures what training never saw."""
+
+MAX_MODEL_LENGTH: Final = LONG_CONTEXT + NO_THINK_TOKENS
+"""One engine length serves every task: vLLM sizes its cache by `GPU_MEMORY`, not by this."""
+
+NEEDLE_METRIC: Final = f"{LONG_CONTEXT},none"
+"""RULER keys its score by input length and fills every length it did not run with -1
+(`lm_eval/tasks/ruler/common_utils.py`, read on the pod 2026-10-17)."""
+
+
+class ChatEvaluationError(Exception):
+    """A task returned no usable score, or a report cannot be read."""
+
+
+@dataclass(frozen=True, slots=True)
+class HarnessTask:
+    name: str
+    metric: str
+    shots: int
+    modes: tuple[Mode, ...]
+    suites: tuple[Suite, ...]
+    sample: int | None = None
+    """Examples drawn per subtask under `SEED`; None scores every example."""
+
+    long_context: bool = False
+    code: bool = False
+
+
+HARNESS: Final = (
+    HarnessTask("ifeval", "prompt_level_strict_acc,none", 0, ("no_think",), ("select", "release")),
+    HarnessTask("gsm8k", "exact_match,flexible-extract", 5, MODES, ("select", "release")),
+    HarnessTask("mmlu_pro", "exact_match,custom-extract", 5, MODES, ("select", "release"), 50),
+    *(
+        HarnessTask(
+            f"niah_single_{n}",
+            NEEDLE_METRIC,
+            0,
+            ("no_think",),
+            ("select", "release"),
+            long_context=True,
+        )
+        for n in (1, 2, 3)
+    ),
+    HarnessTask("humaneval_plus", "pass@1,create_test", 0, MODES, ("release",), code=True),
+    HarnessTask("mbpp_plus", "pass_at_1,none", 3, MODES, ("release",), code=True),
+)
+"""Task names verified in lm-eval 0.4.13 on the pod, 2026-10-16. The ifeval, gsm8k and
+mmlu_pro keys were read from merge-a000's no-think run, 2026-10-17; a missing key fails by
+name, never as zero."""
+
+
+def tasks_for(suite: Suite) -> list[HarnessTask]:
+    return [task for task in HARNESS if suite in task.suites]
+
+
+def drawn(size: int, count: int | None, seed: int = SEED) -> list[int] | None:
+    """`count` indices drawn from `range(size)`, sorted; every index when `count` is None."""
+    if count is None or count >= size:
+        return None
+    return sorted(random.Random(seed).sample(range(size), count))
+
+
+def generation(mode: Mode) -> dict[str, object]:
+    if mode == "no_think":
+        return {"max_gen_toks": NO_THINK_TOKENS, "do_sample": False, "temperature": 0.0}
+    return {
+        "max_gen_toks": THINK_TOKENS,
+        "do_sample": True,
+        "temperature": 0.6,
+        "top_p": 0.95,
+        "top_k": 20,
+    }
+
+
+def read_score(output: object, task: HarnessTask) -> tuple[float, int | None]:
+    """The task's metric and its example count from an lm-eval result, or a named error."""
+    results = output.get("results") if isinstance(output, dict) else None
+    row = results.get(task.name) if isinstance(results, dict) else None
+    if not isinstance(row, dict):
+        message = f"lm-eval returned no result row for {task.name!r}"
+        raise ChatEvaluationError(message)
+    value = row.get(task.metric)
+    if not isinstance(value, int | float) or isinstance(value, bool) or not math.isfinite(value):
+        message = f"{task.name}: no finite {task.metric!r}; the row has {sorted(row)}"
+        raise ChatEvaluationError(message)
+    if not 0.0 <= value <= 1.0:
+        message = f"{task.name}: {task.metric!r} is {value}, outside [0, 1]"
+        raise ChatEvaluationError(message)
+    counts = output.get("n-samples") if isinstance(output, dict) else None
+    effective = counts.get(task.name) if isinstance(counts, dict) else None
+    size = effective.get("effective") if isinstance(effective, dict) else None
+    return float(value), size if isinstance(size, int) else None
+
+
+class Harness(Protocol):
+    """What scoring one task needs; the vLLM-backed one lives in `run`."""
+
+    def score(self, task: HarnessTask, limit: int | None) -> object: ...
+
+
+Rows = dict[str, dict[str, object]]
+
+
+def evaluate_tasks(
+    harness: Harness,
+    tasks: Sequence[HarnessTask],
+    *,
+    limit: int | None,
+    done: Mapping[str, dict[str, object]] | None = None,
+    save: Callable[[Rows], None] | None = None,
+) -> Rows:
+    """Every task: score in points, metric, examples scored, sample size.
+
+    A task already in `done` is kept, not rescored; `save` receives the rows after each
+    task, so a failure later in the list loses nothing already measured.
+    """
+    rows: Rows = {}
+    for task in tasks:
+        if done is not None and task.name in done:
+            rows[task.name] = done[task.name]
+            continue
+        value, examples = read_score(harness.score(task, limit), task)
+        rows[task.name] = {
+            "score": round(100 * value, 4),
+            "metric": task.metric,
+            "examples": examples,
+            "sample": task.sample,
+        }
+        if save is not None:
+            save(rows)
+    return rows
+
+
+def task_metadata(task: HarnessTask, model: Path) -> dict[str, object] | None:
+    """What a long-context task builds its inputs from: the length and the tokenizer that
+    sizes them. lm-eval passes a task only this metadata when it is given an engine object,
+    not a model path, so the tokenizer must be named here."""
+    if not task.long_context:
+        return None
+    return {"max_seq_lengths": [LONG_CONTEXT], "tokenizer": str(model)}
+
+
+class VllmHarness:
+    """lm-eval over one vLLM engine in one thinking mode.
+
+    One engine per process: a second engine in the same process is not guaranteed its GPU
+    memory back, so each mode is its own `chat-eval` invocation with its own report.
+    """
+
+    def __init__(self, model: Path, mode: Mode, *, gpu_memory: float = GPU_MEMORY) -> None:
+        from lm_eval.models.vllm_causallms import VLLM
+
+        self.engine = VLLM(
+            pretrained=str(model),
+            dtype="bfloat16",
+            gpu_memory_utilization=gpu_memory,
+            max_model_len=MAX_MODEL_LENGTH,
+            seed=SEED,
+            enable_thinking=mode == "think",
+            think_end_token=THINK_END if mode == "think" else None,
+        )
+        self.mode = mode
+        self.model = model
+
+    def samples(self, task: HarnessTask) -> dict[str, list[int]] | None:
+        """Seeded indices per subtask for a task scored on a draw."""
+        if task.sample is None:
+            return None
+        from lm_eval.tasks import TaskManager, get_task_dict
+
+        chosen: dict[str, list[int]] = {}
+        for name, entry in flatten(get_task_dict([task.name], TaskManager())).items():
+            docs = getattr(entry, "eval_docs", None)
+            if not isinstance(docs, Sized):
+                message = f"{task.name}: subtask {name} exposes no evaluation documents"
+                raise ChatEvaluationError(message)
+            size = len(docs)
+            indices = drawn(size, task.sample, seed=SEED)
+            chosen[name] = indices if indices is not None else list(range(size))
+        return chosen
+
+    def score(self, task: HarnessTask, limit: int | None) -> object:
+        from lm_eval import simple_evaluate
+
+        return simple_evaluate(
+            model=self.engine,
+            tasks=[task.name],
+            num_fewshot=task.shots,
+            limit=limit,
+            samples=None if limit is not None else self.samples(task),
+            apply_chat_template=True,
+            fewshot_as_multiturn=task.shots > 0,
+            gen_kwargs=generation(self.mode),
+            bootstrap_iters=0,
+            confirm_run_unsafe_code=task.code,
+            metadata=task_metadata(task, self.model),
+            random_seed=SEED,
+            numpy_random_seed=SEED,
+            torch_random_seed=SEED,
+            fewshot_random_seed=SEED,
+        )
+
+
+def flatten(tasks: object) -> dict[str, object]:
+    """Leaf tasks of lm-eval's nested task dictionary, by name."""
+    leaves: dict[str, object] = {}
+    if not isinstance(tasks, Mapping):
+        return leaves
+    for key, value in tasks.items():
+        if isinstance(value, Mapping):
+            leaves.update(flatten(value))
+        else:
+            leaves[getattr(key, "group_name", None) or str(key)] = value
+    return leaves
+
+
+def tasks_in(suite: Suite, mode: Mode) -> list[HarnessTask]:
+    return [task for task in tasks_for(suite) if mode in task.modes]
+
+
+@dataclass(frozen=True, slots=True)
+class Settings:
+    """Everything a task's score depends on besides the task itself."""
+
+    model: Path
+    suite: Suite
+    mode: Mode
+    limit: int | None = None
+
+    def header(self) -> dict[str, object]:
+        return {
+            "model": str(self.model),
+            "suite": self.suite,
+            "mode": self.mode,
+            "limit": self.limit,
+            "seed": SEED,
+            "decoding": generation(self.mode),
+        }
+
+
+def finished(path: Path, expected: Mapping[str, object]) -> Rows:
+    """Tasks an earlier run of the same model and settings already wrote to `path`."""
+    if not path.is_file():
+        return {}
+    earlier = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(earlier, dict) or any(earlier.get(k) != v for k, v in expected.items()):
+        return {}
+    tasks = earlier.get("tasks")
+    if not isinstance(tasks, dict):
+        return {}
+    return {str(name): row for name, row in tasks.items() if isinstance(row, dict)}
+
+
+def run(settings: Settings, out: Path, *, only: Sequence[str] | None = None) -> dict[str, object]:
+    """One mode's report at `out`, written after every task and resumed from it.
+
+    `only` scores just the named tasks; they land in the same report, so a later full run
+    keeps them and scores the rest.
+    """
+    head = settings.header()
+    model, suite, mode, limit = settings.model, settings.suite, settings.mode, settings.limit
+    tasks = tasks_in(suite, mode)
+    if only is not None:
+        unknown = sorted(set(only) - {task.name for task in tasks})
+        if unknown:
+            message = f"{unknown} are not {suite} tasks in {mode} mode"
+            raise ChatEvaluationError(message)
+        tasks = [task for task in tasks if task.name in only]
+    done = finished(out, head)
+    kept = sorted(name for name in done if name in {task.name for task in tasks})
+    progress("chat_resume", kept=kept, remaining=[t.name for t in tasks if t.name not in done])
+    pending = [task for task in tasks if task.name not in done]
+    harness: Harness = VllmHarness(model, mode) if pending else Finished()
+    rows = evaluate_tasks(
+        harness,
+        tasks,
+        limit=limit,
+        done=done,
+        save=lambda rows: write_report(out, {**head, "tasks": {**done, **rows}}),
+    )
+    return {**head, "tasks": {**done, **rows}}
+
+
+class Finished:
+    """The harness when every task is already in the report; scoring one is a defect."""
+
+    def score(self, task: HarnessTask, limit: int | None) -> object:
+        message = f"{task.name} was to be kept from the report, not scored (limit {limit})"
+        raise ChatEvaluationError(message)
+
+
+def report_name(mode: Mode) -> str:
+    return f"chat-{mode}.json"
+
+
+def write_report(path: Path, report: Mapping[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    partial = path.with_name(f".{path.name}.partial")
+    partial.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    partial.replace(path)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="chat_eval", description=__doc__)
+    parser.add_argument("--model", type=Path, required=True)
+    parser.add_argument("--suite", choices=("select", "release"), required=True)
+    parser.add_argument("--mode", choices=MODES, required=True)
+    parser.add_argument("--limit", type=int, help="examples per task; a smoke, never a result")
+    parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--tasks", nargs="+", help="score only these tasks into the report")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Run in the vLLM environment by `make evaluate SUITE=select|release`."""
+    args = build_parser().parse_args(argv)
+    try:
+        with stage("chat evaluation", suite=args.suite, mode=args.mode):
+            settings = Settings(args.model, args.suite, args.mode, args.limit)
+            report = run(settings, args.out, only=args.tasks)
+    except ChatEvaluationError as error:
+        sys.stderr.write(f"error: {error}\n")
+        return 1
+    write_report(args.out, report)
+    progress("chat_report", out=str(args.out), tasks=sorted(report_tasks(report)))
+    return 0
+
+
+def report_tasks(report: Mapping[str, object]) -> list[str]:
+    tasks = report.get("tasks")
+    return [str(name) for name in tasks] if isinstance(tasks, Mapping) else []
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -105,9 +105,58 @@ model: ## Encoder. TASK=data|train (50 local steps, STEPS=n)|fill-mask|neighbour
 mt: ## NLLB corpus. TASK=corpus|pivot|consistency (pivot needs the models extra)
 	$(call cli,mt) $(or $(TASK),corpus)
 
-llm: ## Phase 11, GPU-free. TASK=fertility|holdout|mixture
+# Phase 11 in order: `make llm TASK=holdout` here, then on the pod `make data TASK=documents`,
+# `aligned`, `replay`, `pack`. Dihya needs CUDA for the documents build: 121 texts/s on the
+# laptop GPU against three million rows. `criterion` compares two `make evaluate` reports and
+# exits 2 when the candidate is not adopted.
+llm: ## Phase 11, GPU-free. TASK=fertility|holdout|criterion|select|seeds|prompts|ingest|signals|review|requests|translations|accept|flores. CANDIDATE BASELINE (criterion) BATCHES (prompts) SCORE=1 (flores)
 	$(call cli,llm) $(or $(TASK),fertility) \
-		$(if $(BLOCKS),--blocks $(BLOCKS),) $(if $(TOKENS),--tokens $(TOKENS),)
+		$(if $(CANDIDATE),--candidate $(CANDIDATE),) $(if $(BASELINE),--base $(BASELINE),) \
+		$(if $(BATCHES),--batches $(BATCHES),) \
+		$(if $(SCORE),--score,)
+
+# The school HPC (`~/.claude/standards/hpc.md`). Every target here is an operator command.
+# `smoke`, `train`, `data` and `evaluate` sync, start a detached tmux session on the pod and
+# return with the run id; `status`, `logs` and `pull` read it back. tools/launch.py defaults
+# TARGET to hpc, the only target it implements.
+launch = $(PY) -m tools.launch $(1) $(if $(TARGET),--target $(TARGET),) $(if $(RUN),--run $(RUN),)
+
+setup: ## Build the pod environment from requirements/hpc.lock; report GPU, versions, disk (operator, hpc)
+	$(call launch,setup)
+
+sync: ## Push code, corpus inputs, Dihya and every evaluation set to the pod (operator, hpc)
+	$(call launch,sync)
+
+smoke: ## One part of the 11.19 smoke. RUN= PART=throughput|parity|resume|evaluate (operator, hpc)
+	$(call launch,smoke) $(if $(PART),--part $(PART),)
+
+train: ## CPT, or SFT with OBJECTIVE=sft, resuming RUN if it exists. RUN= MODEL STEPS STOP OBJECTIVE (operator, hpc)
+	$(call launch,train) $(if $(MODEL),--model $(MODEL),) $(if $(STEPS),--steps $(STEPS),) \
+		$(if $(STOP),--stop $(STOP),) $(if $(OBJECTIVE),--objective $(OBJECTIVE),)
+
+data: ## Corpus stages that run on the pod. TASK=documents|aligned|replay|pack|sft|fluency (operator, hpc)
+	$(call launch,data) $(if $(TASK),--task $(TASK),)
+
+evaluate: ## Evaluation suite on MODEL into artifacts/runs/RUN/. RUN= MODEL SUITE=exit|screen|guard|select|release (screen: translation only; guard: no-think IFEval and GSM8K; select and release add the chat suite; CHAT_ONLY=1 runs that alone) (operator, hpc)
+	$(call launch,evaluate) $(if $(MODEL),--model $(MODEL),) $(if $(SUITE),--suite $(SUITE),) $(if $(CHAT_ONLY),--chat-only,)
+
+merge: ## Instruct + ALPHA x (CPT - base) into artifacts/runs/RUN/model. RUN= ALPHA= MODEL=<cpt checkpoint> (operator, hpc)
+	$(call launch,merge) $(if $(ALPHA),--alpha $(ALPHA),) $(if $(MODEL),--model $(MODEL),)
+
+assemble: ## Trained text tower MODEL back into full model TEMPLATE, into artifacts/runs/RUN/model. RUN= MODEL= TEMPLATE= (operator, hpc)
+	$(call launch,assemble) $(if $(MODEL),--model $(MODEL),) $(if $(TEMPLATE),--template $(TEMPLATE),)
+
+status: ## Is RUN alive: session, recent events read plainly, checkpoints. RAW=1 for the raw log (operator, hpc)
+	$(call launch,status) $(if $(RAW),--raw,)
+
+stop: ## Stop RUN; training checkpoints at the end of its current step first (operator, hpc)
+	$(call launch,stop)
+
+logs: ## Follow RUN's log read plainly; Ctrl-C stops only the stream. RAW=1 for the raw log (operator, hpc)
+	$(call launch,logs) $(if $(RAW),--raw,)
+
+pull: ## Fetch RUN's directory into artifacts/runs; weights only with WEIGHTS=1 (operator, hpc)
+	$(call launch,pull) $(if $(WEIGHTS),--weights,)
 
 speech: ## Phase 5. TASK=corpus|vocabulary|lm (needs lmplz)|release|transcribe (AUDIO=path, needs the speech extra)
 	$(call cli,speech) $(or $(TASK),corpus) $(if $(AUDIO),$(AUDIO),) \
@@ -478,9 +527,9 @@ modal-boulifa-pull:
 	modal volume get --force agbalu-checkpoints \
 		/boulifa/boulifa_best.pt artifacts/boulifa/boulifa_best.pt
 
-UPLOADS := corpus bench mt speech llm tts punctuation ocr embed
+UPLOADS := corpus bench mt speech tts punctuation ocr embed
 
-modal-upload: $(addprefix modal-upload-,$(or $(TASK),$(UPLOADS))) ## Push what a container reads off the volumes. TASK=corpus|bench|mt|speech|llm|tts|punctuation|ocr|embed|encoder. Tifinagh fetches its own
+modal-upload: $(addprefix modal-upload-,$(or $(TASK),$(UPLOADS))) ## Push what a container reads off the volumes. TASK=corpus|bench|mt|speech|tts|punctuation|ocr|embed|encoder. Tifinagh fetches its own
 
 modal-upload-corpus:
 	modal run -m modal_app.train::upload_corpus
@@ -496,9 +545,6 @@ modal-upload-speech:
 
 modal-upload-speech-pro:
 	modal run -m modal_app.asr_pro::upload_speech_pro
-
-modal-upload-llm:
-	modal run -m modal_app.llm::upload_llm
 
 modal-upload-punctuation:
 	modal run -m modal_app.punctuation::upload_punctuation
@@ -538,24 +584,6 @@ modal-smoke: ## 20 steps on a real GPU. COMPILE=1 also runs it compiled and prin
 
 modal-infer: ## Fill a [MASK] with the run's best checkpoint. TEXT="... [MASK] ..."
 	modal run -m modal_app.infer::fill_mask $(if $(TEXT),--text "$(TEXT)",)
-
-modal-llm: modal-llm-$(or $(TASK),baseline) ## Phase 11 on GPU. TASK=baseline
-
-modal-jugurtha: modal-jugurtha-$(or $(TASK),train) ## Phase 11 CPT. TASK=pack|train (spawned). EPOCHS STEPS RUN FORCE
-
-modal-jugurtha-pack:
-	modal run -m modal_app.jugurtha::pack $(if $(FORCE),--force,)
-
-modal-jugurtha-train:
-	$(call deploy,jugurtha)
-	$(PY) -m modal_app.launch --function jugurtha_train $(if $(FORCE),--force,) \
-		$(if $(EPOCHS),--epochs $(EPOCHS),) $(if $(STEPS),--steps $(STEPS),) \
-		$(if $(RUN),--run-name $(RUN),)
-
-modal-llm-baseline:
-	modal run -m modal_app.llm::run_baseline $(if $(MODEL),--model $(MODEL),) \
-		$(if $(DIRECTIONS),--directions $(DIRECTIONS),) \
-		$(if $(SHOTS),--shot-count $(SHOTS),) $(if $(SENTENCES),--sentences $(SENTENCES),)
 
 modal-asr-train: ## Phase 5 — deploy, spawn Fadhma, tail it. RUN EPOCHS STEPS FLOOR FORCE. FETCH=1 fetches and repacks first
 	$(call deploy,asr)
