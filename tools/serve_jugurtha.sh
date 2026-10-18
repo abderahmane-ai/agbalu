@@ -24,8 +24,8 @@ LOG_FILE="${RUN_DIR}/serve.log"
 HOST="${HOST:-0.0.0.0}"
 PORT="${PORT:-8000}"
 MODEL_NAME="${MODEL_NAME:-jugurtha-4b}"
-GPU_UTIL="${GPU_UTIL:-0.6}"
-MAX_LEN="${MAX_LEN:-4096}"
+GPU_UTIL="${GPU_UTIL:-0.85}"
+MAX_LEN="${MAX_LEN:-32768}"
 
 # Environment variables for optimal H100 vLLM execution
 export VLLM_USE_FLASHINFER_SAMPLER=0
