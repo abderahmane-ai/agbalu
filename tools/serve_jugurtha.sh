@@ -45,8 +45,8 @@ get_pid() {
             return 0
         fi
     fi
-    # Fallback: check ps for active vllm serve process for this model
-    pgrep -f "vllm.entrypoints.openai.api_server.*jugurtha" || true
+    # Fallback: check ps for any active vllm serve process for Jugurtha
+    pgrep -f "vllm.*jugurtha" | head -n 1 || true
 }
 
 start_server() {
@@ -69,15 +69,19 @@ start_server() {
     fi
 
     echo "=================================================================="
-    echo " Starting Jugurtha-4B Continuous vLLM Server"
-    echo " Model:    ${MODEL_DIR}"
-    echo " Endpoint: http://${HOST}:${PORT}"
-    echo " Alias:    ${MODEL_NAME}"
-    echo " Logs:     ${LOG_FILE}"
+    echo " Starting Jugurtha-4B Production vLLM Server"
+    echo " Model:     ${MODEL_DIR}"
+    echo " Template:  ${MODEL_DIR}/chat_template.jinja"
+    echo " Aliases:   Jugurtha-4B, agbalu/Jugurtha-4B, jugurtha-4b"
+    echo " Endpoint:  http://${HOST}:${PORT}"
+    echo " Context:   ${MAX_LEN} tokens"
+    echo " GPU Util:  ${GPU_UTIL}"
+    echo " Logs:      ${LOG_FILE}"
     echo "=================================================================="
 
     nohup "${VENV_VLLM}" serve "${MODEL_DIR}" \
-        --served-model-name "${MODEL_NAME}" \
+        --served-model-name "Jugurtha-4B" "agbalu/Jugurtha-4B" "jugurtha-4b" \
+        --chat-template "${MODEL_DIR}/chat_template.jinja" \
         --host "${HOST}" \
         --port "${PORT}" \
         --gpu-memory-utilization "${GPU_UTIL}" \
@@ -148,6 +152,8 @@ stop_server() {
         fi
     done
 
+    # Clean up any residual child/worker processes
+    pkill -f "vllm.*jugurtha" 2>/dev/null || true
     rm -f "${PID_FILE}"
     echo "[Jugurtha-4B] Server stopped cleanly."
 }
@@ -159,10 +165,11 @@ check_status() {
         echo "[Jugurtha-4B] Status: RUNNING (PID: ${pid})"
         if curl -s -f "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
             echo "[Jugurtha-4B] Health: OK (HTTP 200)"
-            echo "[Jugurtha-4B] Model:  ${MODEL_NAME}"
+            echo "[Jugurtha-4B] Models: Jugurtha-4B | agbalu/Jugurtha-4B | jugurtha-4b"
             echo "[Jugurtha-4B] API:    http://${HOST}:${PORT}/v1"
+            echo "[Jugurtha-4B] Chat:   http://${HOST}:${PORT}/v1/chat/completions"
         else
-            echo "[Jugurtha-4B] Health: INITIALIZING / UNHEALTHY (check logs)"
+            echo "[Jugurtha-4B] Health: INITIALIZING / UNHEALTHY (check logs: ${LOG_FILE})"
         fi
     else
         echo "[Jugurtha-4B] Status: STOPPED"
