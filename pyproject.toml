@@ -199,10 +199,6 @@ ignore = [
 #          factory takes one keyword per field it varies, and bundling them into a config
 #          object would hide which measurement a case is actually about.
 "tests/unit/test_tts_corpus.py" = ["PLR0913"]
-# PLR0913: the profile builder takes one keyword per measurement a clip can fail on, which is
-#          what lets each case name the single field it varies.
-# N802:    `test_it_reads_text_and_not_the_ASR_target` names the field it is about.
-"tests/unit/test_tts_corpus_pro.py" = ["N802", "PLR0913"]
 # PLC0415: `transformers` is the optional `models` extra and `write_config` imports it
 #          lazily, so the module must stay importable on an install without it. A
 #          top-level import here would break collection of the whole unit suite.
@@ -334,11 +330,6 @@ ignore = [
 # PLR0911: `verdict` returns one named reason per way a clip can fail, and the count *is* the
 #          contract: a corpus build that absorbs a drop instead of naming it is how 12,122
 #          clips went missing under one label. Collapsing the returns would collapse the
-#          report with them.
-# PLR0913: `verdict` and `report` each take what a decision needs to be auditable — the clip,
-#          its profile, its error rate, the inherited held-out set and the threshold. Bundling
-#          any two hides which of them a dropped clip was dropped by.
-"src/agbalu/tts/corpus_pro.py" = ["PLR0911", "PLR0913", "S311"]
 # PLC0415: `torch`, `torchaudio`, `librosa` and `huggingface_hub` are the container's
 #          stack. At module scope the constants this file exists to state — the traced
 #          checkpoints, their licence, and the filterbank parameterisation the feature
@@ -468,10 +459,6 @@ ignore = [
 # N806: `F0_pred` and `N_pred` are StyleTTS2's own names for the pitch and energy the
 #       predictor returns, and the recipe's checkpoints key on them.
 "modal_app/matoub.py" = ["N806", "PLR0912", "PLR0915"]
-# PLR0915: `matoub_pro_corpus` is one container by design — every clip is profiled once and
-#          restored once, and both corpora are cut from the same decisions. Splitting it
-#          would mean two passes over the same audio or a second copy of the decisions.
-"modal_app/matoub_pro.py" = ["PLR0915"]
 # T20:     Modal local entrypoints report to the operator's terminal; that is their job.
 # PLC0415: the training imports must happen inside the container, not at local import
 #          time — `modal run` imports this file on a laptop that need not have torch.

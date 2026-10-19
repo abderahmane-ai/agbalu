@@ -236,11 +236,7 @@ def _ceiling(ceiling_dbfs: float) -> float:
 def level_gain(
     speech_dbfs: float, peak: float, target_dbfs: float, *, ceiling_dbfs: float = PEAK_CEILING_DBFS
 ) -> float:
-    """Linear gain onto `target_dbfs`, attenuated further if the peak would pass the ceiling.
-
-    Taken on the raw clip and shared with `agbalu.tts.corpus_pro`, which levels the same
-    clips before joining them: a seam between two differently levelled pieces is audible.
-    """
+    """Linear gain onto `target_dbfs`, attenuated further if the peak would pass the ceiling."""
     wanted = float(10.0 ** ((target_dbfs - speech_dbfs) / 20.0))
     if peak <= 0.0:
         return wanted

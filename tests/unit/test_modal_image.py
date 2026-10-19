@@ -49,7 +49,6 @@ IMAGES: Final[tuple[tuple[str, str, tuple[str, ...]], ...]] = (
     ("asr", "modal_app.asr", ASR_PIP_PACKAGES),
     ("tts", "modal_app.tts", TTS_PIP_PACKAGES),
     ("matoub", "modal_app.matoub", (*TTS_PIP_PACKAGES, *MATOUB_PIP_PACKAGES)),
-    ("matoub_pro", "modal_app.matoub_pro", (*TTS_PIP_PACKAGES, *MATOUB_PIP_PACKAGES)),
     ("tifinagh", "modal_app.tifinagh", TIFINAGH_PIP_PACKAGES),
     ("sentiment", "modal_app.sentiment", BENCH_PIP_PACKAGES),
     ("punctuation", "modal_app.punctuation", PIP_PACKAGES),
@@ -124,28 +123,6 @@ RUNTIME_ONLY: Final[dict[str, frozenset[str]]] = {
             "monotonic-align @ git+https://github.com/resemble-ai/monotonic_align.git",
             "numpy",
             "torchaudio",
-            "transformers",
-            "pandas",
-            "click",
-        }
-    ),
-    # Pro's launcher reaches the same recipe the same way, and its corpus build adds nothing
-    # to the image: `librosa`, `soundfile` and `torchaudio` are the restoration front end and
-    # already arrive with the TTS layer. `pyctcdecode` and kenlm belong to the ASR module it
-    # borrows `index_audio` and the clip decoder from, not to anything it calls.
-    "matoub_pro": frozenset(
-        {
-            "accelerate",
-            "https://github.com/kpu/kenlm/archive/master.zip",
-            "pyctcdecode",
-            "munch",
-            "pydub",
-            "nltk",
-            "matplotlib",
-            "einops",
-            "einops-exts",
-            "tensorboard",
-            "monotonic-align @ git+https://github.com/resemble-ai/monotonic_align.git",
             "transformers",
             "pandas",
             "click",
@@ -340,8 +317,8 @@ def test_the_deploy_module_registers_every_function_without_a_name_collision() -
     logs a warning and *overrides* the first, so the deployed app silently loses one. The
     assertion is therefore equality, not containment: an override shrinks the set.
 
-    `ocr_pro` and `matoub_pro` are absent because each owns its own app;
-    `test_a_dedicated_app_owns_the_functions_the_launcher_addresses_to_it` covers those."""
+    `ocr_pro` is absent because it owns its own app;
+    `test_a_dedicated_app_owns_the_functions_the_launcher_addresses_to_it` covers it."""
     deploy = importlib.import_module("modal_app.deploy")
     assert set(deploy.app.registered_functions) == {
         "pretrain",
@@ -403,10 +380,9 @@ def test_a_dedicated_app_owns_the_functions_the_launcher_addresses_to_it() -> No
     deploy is paid for. Every spawnable function is checked against the app it resolves to."""
     launch = importlib.import_module("modal_app.launch")
     ocr_pro = importlib.import_module("modal_app.ocr_pro")
-    matoub_pro = importlib.import_module("modal_app.matoub_pro")
     shared = importlib.import_module("modal_app.deploy").app
 
-    dedicated = {ocr_pro.APP_NAME: ocr_pro.app, matoub_pro.APP_NAME: matoub_pro.app}
+    dedicated = {ocr_pro.APP_NAME: ocr_pro.app}
     for function, app_name in launch.FUNCTION_APP_NAME.items():
         assert app_name in dedicated, f"{function} is addressed to {app_name}, which no module has"
 
@@ -442,7 +418,6 @@ def test_every_entrypoint_carries_type_hints_the_modal_cli_can_resolve() -> None
     apps = [
         importlib.import_module("modal_app.deploy").app,
         importlib.import_module("modal_app.ocr_pro").app,
-        importlib.import_module("modal_app.matoub_pro").app,
     ]
     unresolved: dict[str, str] = {}
     for app in apps:
