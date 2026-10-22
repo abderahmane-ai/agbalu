@@ -89,7 +89,7 @@ class TrainingConfig:
     vocab_file: str
     output_dir: str
     backbone_name: str = "facebook/w2v-bert-2.0"
-    max_steps: int = 20000
+    max_steps: int = 6400  # 2 full epochs over 424.6h corpus (6,368 steps at accumulation=8)
     warmup_steps: int = DEFAULT_WARMUP_STEPS
     gradient_accumulation_steps: int = DEFAULT_ACCUMULATION_STEPS
     peak_lr: float = DEFAULT_PEAK_LR
@@ -249,13 +249,17 @@ def evaluate_dev(
     hypotheses: list[str] = []
 
     id_to_char = {v: k for k, v in vocab_map.items()}
+    use_autocast = device.type == "cuda"
 
-    with torch.no_grad():
+    with (
+        torch.no_grad(),
+        torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=use_autocast),
+    ):
         for batch in dev_loader:
-            v_in = batch["input_features"].to(device)
-            v_mask = batch["attention_mask"].to(device)
-            v_lbl = batch["labels"].to(device)
-            v_pres = batch["presence_labels"].to(device)
+            v_in = batch["input_features"].to(device, non_blocking=True)
+            v_mask = batch["attention_mask"].to(device, non_blocking=True)
+            v_lbl = batch["labels"].to(device, non_blocking=True)
+            v_pres = batch["presence_labels"].to(device, non_blocking=True)
             v_out = model(v_in, attention_mask=v_mask, labels=v_lbl, presence_labels=v_pres)
 
             if v_out.loss is not None:
@@ -295,10 +299,13 @@ def train(config: TrainingConfig) -> None:
     random.seed(config.seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(config.seed)
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        torch.backends.cudnn.benchmark = True
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     gpu_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"
-    _log(f"[Training] Using device: {device} ({gpu_name})")
+    _log(f"[Training] Using device: {device} ({gpu_name}) | TF32: True | BF16 Autocast: True")
 
     vocab_path = Path(config.vocab_file)
     vocab_map: dict[str, int] = json.loads(vocab_path.read_text(encoding="utf-8"))
@@ -321,19 +328,23 @@ def train(config: TrainingConfig) -> None:
     dev_dataset = SpeechDataset(dev_records, vocab_map)
 
     train_sampler = DynamicAudioBatchSampler(train_records, shuffle=True)
+    num_train_workers = 4 if torch.cuda.is_available() else 0
     train_loader = DataLoader(
         train_dataset,
         batch_sampler=train_sampler,
         collate_fn=collate_speech_batch,
-        num_workers=0,
+        num_workers=num_train_workers,
         pin_memory=bool(torch.cuda.is_available()),
+        persistent_workers=bool(num_train_workers > 0),
+        prefetch_factor=2 if num_train_workers > 0 else None,
     )
 
     dev_loader = DataLoader(
         dev_dataset,
-        batch_size=4,
+        batch_size=8,
         collate_fn=collate_speech_batch,
-        num_workers=0,
+        num_workers=2 if torch.cuda.is_available() else 0,
+        pin_memory=bool(torch.cuda.is_available()),
     )
 
     model.freeze_backbone()
@@ -429,23 +440,26 @@ def train(config: TrainingConfig) -> None:
                     weight_decay=config.weight_decay,
                 )
 
-            input_features = batch["input_features"].to(device)
-            attention_mask = batch["attention_mask"].to(device)
-            labels = batch["labels"].to(device)
-            presence_labels = batch["presence_labels"].to(device)
+            input_features = batch["input_features"].to(device, non_blocking=True)
+            attention_mask = batch["attention_mask"].to(device, non_blocking=True)
+            labels = batch["labels"].to(device, non_blocking=True)
+            presence_labels = batch["presence_labels"].to(device, non_blocking=True)
 
-            output = model(
-                input_features=input_features,
-                attention_mask=attention_mask,
-                labels=labels,
-                presence_labels=presence_labels,
-            )
+            use_bf16 = device.type == "cuda"
+            with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=use_bf16):
+                output = model(
+                    input_features=input_features,
+                    attention_mask=attention_mask,
+                    labels=labels,
+                    presence_labels=presence_labels,
+                )
 
-            loss = output.loss
-            if loss is None or not math.isfinite(loss.item()):
-                raise ValueError(f"Non-finite loss encountered at step {global_step}: {loss}")
+                loss = output.loss
+                if loss is None or not math.isfinite(loss.item()):
+                    raise ValueError(f"Non-finite loss encountered at step {global_step}: {loss}")
 
-            scaled_loss = loss / config.gradient_accumulation_steps
+                scaled_loss = loss / config.gradient_accumulation_steps
+
             scaled_loss.backward()
 
             accumulated_loss += loss.item()

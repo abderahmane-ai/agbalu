@@ -366,7 +366,7 @@ def build_parser() -> argparse.ArgumentParser:
     t_cmd.add_argument("--dev-manifest", type=Path, default=PROCESSED_DIR / "dev.jsonl")
     t_cmd.add_argument("--vocab", type=Path, default=DEFAULT_VOCAB)
     t_cmd.add_argument("--output-dir", type=Path, default=DEFAULT_RUN_DIR)
-    t_cmd.add_argument("--max-steps", type=int, default=20000)
+    t_cmd.add_argument("--max-steps", type=int, default=6400)
     t_cmd.add_argument("--seed", type=int, default=42)
 
     # Evaluate
