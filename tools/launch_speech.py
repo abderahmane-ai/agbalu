@@ -38,6 +38,7 @@ RUN_DIR: Final = "artifacts/runs/fadhma-v2"
 PREAMBLE: Final = (
     ". ~/hpc-env.sh"
     f" && export PYTHONUNBUFFERED=1 HF_HOME={REMOTE_ROOT}/artifacts/hf PYTHONPATH=src"
+    f" && export LD_LIBRARY_PATH={ENVIRONMENT}/lib:$LD_LIBRARY_PATH"
     f" && cd {REMOTE_ROOT}"
 )
 
@@ -75,6 +76,11 @@ STAGE_CONFIGS: Final = {
         "session": "agbalu-speech-train",
         "log": f"{RUN_DIR}/train.log",
         "title": "Stage 4: Sovereign Fadhma 2 Training (300M Omnilingual CTC)",
+    },
+    "eval": {
+        "session": "agbalu-speech-eval",
+        "log": f"{RUN_DIR}/evaluate.log",
+        "title": "Stage 5: Sovereign Benchmark Evaluation & LM Fusion",
     },
 }
 
@@ -273,11 +279,22 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "action",
-        choices=("sync", "data", "augment", "smoke", "train", "status", "logs", "stop", "pull"),
+        choices=(
+            "sync",
+            "data",
+            "augment",
+            "smoke",
+            "train",
+            "eval",
+            "status",
+            "logs",
+            "stop",
+            "pull",
+        ),
     )
     parser.add_argument(
         "--task",
-        choices=("data", "augment", "smoke", "train"),
+        choices=("data", "augment", "smoke", "train", "eval"),
         default=None,
         help="Pipeline task stage (default: auto-detected)",
     )
@@ -332,6 +349,19 @@ def main() -> int:
             f" --output-dir {RUN_DIR}"
         )
         log = STAGE_CONFIGS["train"]["log"]
+        start_session(session, script, log)
+    elif action == "eval":
+        session = args.session or STAGE_CONFIGS["eval"]["session"]
+        script = (
+            f"{PYTHON} -m agbalu.speech.cli evaluate"
+            f" --model-dir {RUN_DIR}/best_model"
+            f" --vocab artifacts/asr/vocab.json"
+            f" --test-manifest data/processed/speech/test.jsonl"
+            f" --phrase-manifest data/processed/speech/test_phrase_disjoint.jsonl"
+            f" --lm artifacts/asr/5gram.klm"
+            f" --device cuda:0"
+        )
+        log = STAGE_CONFIGS["eval"]["log"]
         start_session(session, script, log)
     elif action == "status":
         show_status(args.task, raw=args.raw)

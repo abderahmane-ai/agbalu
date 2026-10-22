@@ -180,6 +180,9 @@ speech-smoke: ## Mandatory 20-step smoke validation drill on H100 GPU slice (ope
 speech-train: ## Full Fadhma 2 training (300 warmup steps + 5 epochs) on H100 GPU (operator, hpc)
 	$(call speech-launch,train)
 
+speech-eval: ## Run full test split, phrase-disjoint, and silence evaluation on H100 GPU (operator, hpc)
+	$(call speech-launch,eval)
+
 speech-status: ## Check Fadhma 2 training/smoke/data status and logs on HPC (operator, hpc)
 	$(call speech-launch,status)
 

@@ -22,7 +22,6 @@ from agbalu.speech.dataset import load_audio_file
 from agbalu.speech.model import ConformerSpeechModel
 from agbalu.speech.vocabulary import (
     PAD_TOKEN,
-    WORD_DELIMITER,
 )
 from agbalu.speech.vocabulary import (
     decode as greedy_decode_tokens,
@@ -73,16 +72,19 @@ class SpeechDecoder:
         self.beam_decoder = None
         if lm_path and lm_path.is_file():
             try:
-                import pyctcdecode
+                import kenlm  # type: ignore[import-not-found]  # noqa: F401
 
-                tokens = [self.index_to_token[i] for i in range(len(self.vocab_map))]
-                # Convert delimiter token for pyctcdecode convention
-                labels = [
-                    " " if t == WORD_DELIMITER else ("" if t == PAD_TOKEN else t) for t in tokens
-                ]
-                self.beam_decoder = pyctcdecode.build_ctcdecoder(  # type: ignore[attr-defined]
-                    labels=labels,
-                    kenlm_model_path=str(lm_path),
+                from agbalu.speech.lm import build_ctc_decoder
+
+                unigram_list: list[str] | None = None
+                unigrams_file = lm_path.parent / "unigrams.txt"
+                if unigrams_file.is_file():
+                    unigram_list = unigrams_file.read_text(encoding="utf-8").splitlines()
+
+                self.beam_decoder = build_ctc_decoder(
+                    self.vocab_map,
+                    unigrams=unigram_list,
+                    kenlm_path=lm_path,
                     alpha=DEFAULT_LM_WEIGHT,
                     beta=DEFAULT_WORD_BONUS,
                 )
@@ -147,27 +149,35 @@ class SpeechDecoder:
         if waveform.numel() == 0:
             return ""
 
-        features = self.feature_extractor(
-            waveform.cpu().numpy(), sampling_rate=sample_rate, return_tensors="pt"
-        ).input_features.to(self.device)
+        if getattr(self.model, "is_wav2vec2", False):
+            std_val = float(waveform.std().item())
+            norm_audio = (waveform - waveform.mean()) / (std_val + 1e-7)
+            input_values = norm_audio.unsqueeze(0).to(self.device)
+            with torch.no_grad():
+                output = self.model(input_values=input_values)
+                masked_logits = output.logits
+        else:
+            features = self.feature_extractor(
+                waveform.cpu().numpy(), sampling_rate=sample_rate, return_tensors="pt"
+            ).input_features.to(self.device)
 
-        with torch.no_grad():
-            output = self.model(input_features=features)
-            logits = output.logits
-            presence_logits = output.presence_logits
+            with torch.no_grad():
+                output = self.model(input_features=features)
+                logits = output.logits
+                presence_logits = output.presence_logits
 
-            # Apply hard silence blank masking
-            masked_logits = self.mask_silence_frames(logits, presence_logits)
+                # Apply hard silence blank masking
+                masked_logits = self.mask_silence_frames(logits, presence_logits)
 
-            if use_lm and self.beam_decoder is not None:
-                # KenLM shallow fusion beam search
-                log_probs = f.log_softmax(masked_logits.squeeze(0), dim=-1).cpu().numpy()
-                text: str = self.beam_decoder.decode(log_probs, beam_width=DEFAULT_BEAM_WIDTH)
-                return " ".join(text.split())
+        if use_lm and self.beam_decoder is not None:
+            # KenLM shallow fusion beam search
+            log_probs = f.log_softmax(masked_logits.squeeze(0), dim=-1).cpu().numpy()
+            text: str = self.beam_decoder.decode(log_probs, beam_width=DEFAULT_BEAM_WIDTH)
+            return " ".join(text.split())
 
-            # Fallback to deterministic greedy CTC decode
-            pred_ids = torch.argmax(masked_logits.squeeze(0), dim=-1).cpu().tolist()
-            return greedy_decode_tokens(pred_ids, self.vocab_map)
+        # Fallback to deterministic greedy CTC decode
+        pred_ids = torch.argmax(masked_logits.squeeze(0), dim=-1).cpu().tolist()
+        return greedy_decode_tokens(pred_ids, self.vocab_map)
 
     def transcribe_file(
         self,

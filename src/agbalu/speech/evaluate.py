@@ -9,6 +9,7 @@ Evaluates against:
 from __future__ import annotations
 
 import json
+import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Final
@@ -81,7 +82,7 @@ def evaluate_manifest(
     hypotheses: list[str] = []
     total_dur = 0.0
 
-    for record in records:
+    for idx, record in enumerate(records):
         audio_path = (
             (base_audio_dir / record.audio_path) if base_audio_dir else Path(record.audio_path)
         )
@@ -94,6 +95,13 @@ def evaluate_manifest(
 
         references.append(record.target_text)
         total_dur += record.duration
+
+        if (idx + 1) % 500 == 0 or (idx + 1) == len(records):
+            sys.stdout.write(
+                f"[Evaluation] Processed {idx + 1}/{len(records)} clips "
+                f"({total_dur / 3600.0:.2f}h audio)...\n"
+            )
+            sys.stdout.flush()
 
     cer_score = cer(references, hypotheses)
     wer_score = wer(references, hypotheses)
