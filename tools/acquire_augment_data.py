@@ -24,11 +24,12 @@ import sys
 import threading
 import time
 import urllib.request
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Final
 
-MIN_ARCHIVE_BYTES: Final[int] = 1000
+MUSAN_EXPECTED_BYTES: Final[int] = 11086114085
+REVERB_EXPECTED_BYTES: Final[int] = 9308593693
 DEFAULT_CHUNK_SIZE: Final[int] = 8 * 1024 * 1024  # 8 MB per chunk
 DEFAULT_WORKERS: Final[int] = 16
 PROGRESS_INTERVAL_SECS: Final[float] = 2.0
@@ -70,6 +71,28 @@ def parse_args() -> argparse.Namespace:
         help="Skip BUT ReverbDB download",
     )
     return parser.parse_args()
+
+
+def is_musan_extracted(musan_dir: Path) -> bool:
+    """Check if all three MUSAN categories are already extracted."""
+    target = musan_dir / "musan"
+    return (
+        target.is_dir()
+        and (target / "noise").is_dir()
+        and (target / "speech").is_dir()
+        and (target / "music").is_dir()
+    )
+
+
+def is_reverb_extracted(reverb_dir: Path) -> bool:
+    """Check if BUT ReverbDB RIR wav files are already extracted."""
+    target = reverb_dir / "RIR_19_06"
+    return target.is_dir() and any(target.rglob("*.wav"))
+
+
+def is_archive_complete(archive_path: Path, expected_size: int) -> bool:
+    """Check if archive file exists on disk and matches expected exact byte count."""
+    return archive_path.is_file() and archive_path.stat().st_size == expected_size
 
 
 def get_remote_file_size(url: str) -> int:
@@ -194,7 +217,9 @@ def native_multi_stream_download(
     sys.stdout.write(f"--> Multi-stream download complete: {output_path} ({size_str} bytes)\n")
 
 
-def _try_aria2c_download(url: str, dest_dir: Path, archive_name: str, workers: int) -> bool:
+def _try_aria2c_download(
+    url: str, dest_dir: Path, archive_name: str, workers: int, expected_size: int
+) -> bool:
     """Attempt download using aria2c if available on system."""
     cmd = shutil.which("aria2c")
     if not cmd:
@@ -220,50 +245,55 @@ def _try_aria2c_download(url: str, dest_dir: Path, archive_name: str, workers: i
     ]
     res = subprocess.run(cmd_args, check=False)
     archive_path = dest_dir / archive_name
-    return (
-        res.returncode == 0
-        and archive_path.is_file()
-        and archive_path.stat().st_size > MIN_ARCHIVE_BYTES
-    )
+    return res.returncode == 0 and is_archive_complete(archive_path, expected_size)
 
 
 def download_and_extract(
     urls: Sequence[str],
-    dest_dir: Path,
-    archive_name: str,
+    archive_path: Path,
     *,
-    extracted_check: Path | None = None,
+    expected_size: int,
+    is_extracted_fn: Callable[[Path], bool] | None = None,
     workers: int = DEFAULT_WORKERS,
 ) -> None:
+    dest_dir = archive_path.parent
+    archive_name = archive_path.name
     dest_dir.mkdir(parents=True, exist_ok=True)
-    archive_path = dest_dir / archive_name
 
-    if extracted_check and extracted_check.exists():
-        sys.stdout.write(f"--> Assets already extracted at {extracted_check}, skipping.\n")
+    if is_extracted_fn and is_extracted_fn(dest_dir):
+        sys.stdout.write(f"--> Assets already fully extracted in {dest_dir}, skipping.\n")
         return
 
-    if not archive_path.is_file() or archive_path.stat().st_size < MIN_ARCHIVE_BYTES:
+    if not is_archive_complete(archive_path, expected_size):
+        if archive_path.is_file():
+            sys.stdout.write(
+                f"--> Existing archive is incomplete "
+                f"({archive_path.stat().st_size:,} / {expected_size:,} bytes). Re-downloading...\n"
+            )
+            archive_path.unlink()
+
         download_succeeded = False
         for url in urls:
             try:
-                if _try_aria2c_download(url, dest_dir, archive_name, workers):
+                if _try_aria2c_download(url, dest_dir, archive_name, workers, expected_size):
                     download_succeeded = True
                     break
                 # Fallback to high-speed native multi-stream downloader
                 sys.stdout.write(f"--> Launching native multi-stream downloader from {url}...\n")
                 native_multi_stream_download(url, archive_path, num_workers=workers)
-                if archive_path.is_file() and archive_path.stat().st_size > MIN_ARCHIVE_BYTES:
+                if is_archive_complete(archive_path, expected_size):
                     download_succeeded = True
                     break
             except Exception as exc:
                 sys.stderr.write(f"Warning: download attempt failed from {url}: {exc}\n")
 
-        if not download_succeeded:
-            msg = f"Failed to download {archive_name} from all available mirror URLs."
+        if not download_succeeded or not is_archive_complete(archive_path, expected_size):
+            msg = f"Failed to download complete {archive_name} ({expected_size:,} bytes expected)."
             raise RuntimeError(msg)
     else:
+        size_str = f"{archive_path.stat().st_size:,}"
         sys.stdout.write(
-            f"--> Archive already present ({archive_path.stat().st_size:,} bytes): {archive_path}\n"
+            f"--> Complete archive already present ({size_str} bytes): {archive_path}\n"
         )
 
     sys.stdout.write(f"--> Extracting {archive_name} into {dest_dir}...\n")
@@ -277,22 +307,22 @@ def main() -> int:
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
     if not args.skip_musan:
-        musan_dir = args.out_dir / "musan"
+        musan_path = args.out_dir / "musan" / "musan.tar.gz"
         download_and_extract(
             MUSAN_URLS,
-            musan_dir,
-            "musan.tar.gz",
-            extracted_check=musan_dir / "musan",
+            musan_path,
+            expected_size=MUSAN_EXPECTED_BYTES,
+            is_extracted_fn=is_musan_extracted,
             workers=args.workers,
         )
 
     if not args.skip_reverb:
-        reverb_dir = args.out_dir / "reverb"
+        reverb_path = args.out_dir / "reverb" / "BUT_ReverbDB_RIR.tgz"
         download_and_extract(
             REVERB_URLS,
-            reverb_dir,
-            "BUT_ReverbDB_RIR.tgz",
-            extracted_check=reverb_dir / "RIR_19_06",
+            reverb_path,
+            expected_size=REVERB_EXPECTED_BYTES,
+            is_extracted_fn=is_reverb_extracted,
             workers=args.workers,
         )
 
