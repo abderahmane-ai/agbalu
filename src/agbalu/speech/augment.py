@@ -16,6 +16,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Final
 
+import soundfile as sf
 import torch
 import torch.nn.functional as f
 
@@ -174,10 +175,56 @@ class AcousticAugmenter:
         noise_dir: Path | None = None,
         *,
         sample_rate: int = DEFAULT_SAMPLE_RATE,
+        max_rirs: int = 150,
+        max_noises: int = 150,
     ) -> AcousticAugmenter:
         """Create augmenter scanning RIR and noise audio files if available."""
-        _ = (rir_dir, noise_dir)
-        return cls(sample_rate=sample_rate)
+        rirs: list[torch.Tensor] = []
+        noises: list[torch.Tensor] = []
+
+        if rir_dir and rir_dir.is_dir():
+            wav_paths = sorted(rir_dir.rglob("*.wav"))
+            stride = max(1, len(wav_paths) // max_rirs)
+            for path in wav_paths[::stride][:max_rirs]:
+                try:
+                    data, sr = sf.read(str(path), dtype="float32")
+                    tensor = torch.from_numpy(data)
+                    if tensor.ndim > 1:
+                        tensor = torch.mean(tensor, dim=-1)
+                    if sr != sample_rate:
+                        num_samples = int(tensor.size(0) * (sample_rate / sr))
+                        tensor = f.interpolate(
+                            tensor.view(1, 1, -1),
+                            size=num_samples,
+                            mode="linear",
+                            align_corners=False,
+                        ).view(-1)
+                    rirs.append(tensor)
+                except (OSError, RuntimeError):
+                    pass
+
+        if noise_dir and noise_dir.is_dir():
+            wav_paths = sorted(noise_dir.rglob("*.wav"))
+            stride = max(1, len(wav_paths) // max_noises)
+            for path in wav_paths[::stride][:max_noises]:
+                try:
+                    data, sr = sf.read(str(path), dtype="float32")
+                    tensor = torch.from_numpy(data)
+                    if tensor.ndim > 1:
+                        tensor = torch.mean(tensor, dim=-1)
+                    if sr != sample_rate:
+                        num_samples = int(tensor.size(0) * (sample_rate / sr))
+                        tensor = f.interpolate(
+                            tensor.view(1, 1, -1),
+                            size=num_samples,
+                            mode="linear",
+                            align_corners=False,
+                        ).view(-1)
+                    noises.append(tensor)
+                except (OSError, RuntimeError):
+                    pass
+
+        return cls(rir_tensors=rirs, noise_tensors=noises, sample_rate=sample_rate)
 
     def augment(self, waveform: torch.Tensor) -> torch.Tensor:
         """Apply a randomly sampled acoustic condition to the audio waveform."""
