@@ -1,11 +1,13 @@
 """Training loop for Fadhma 2 on NVIDIA H100 MIG slice.
 
 Features:
-- Two-stage schedule: 300-step head warmup (backbone frozen), then full fine-tuning
+- Sliced Omnilingual CTC head initialization (zero-shot alignment on step 0)
+- Differential learning rate schedule: 3e-5 for backbone, 1e-4 for projection head
+- Two-stage schedule: 300-step head warmup (backbone frozen), then seamless unfreezing
 - Dynamic micro-batching with gradient accumulation (480s audio per optimizer step)
-- AdamW optimizer with cosine learning rate schedule
 - Resumable layered atomic checkpointing (model, optimizer, scheduler, RNG, step counters)
 - Automatic validation on dev partition with gold CER-based best model tracking
+- Correct whitespace delimiter evaluation in greedy decode vs gold reference
 - Pruning of older checkpoints with strict retention (`keep=2`)
 - Signal-driven graceful exit (SIGINT/SIGTERM) saving clean atomic checkpoints
 - Online multi-condition acoustic augmentation (MUSAN noise + BUT ReverbDB RIRs)
@@ -44,9 +46,11 @@ from agbalu.speech.vocabulary import decode as greedy_decode_tokens
 
 DEFAULT_WARMUP_STEPS: Final[int] = 300
 DEFAULT_ACCUMULATION_STEPS: Final[int] = 8
-DEFAULT_PEAK_LR: Final[float] = 3e-4
+DEFAULT_BACKBONE_LR: Final[float] = 3e-5
+DEFAULT_HEAD_LR: Final[float] = 1e-4
 DEFAULT_MIN_LR: Final[float] = 1e-6
 DEFAULT_KEEP_CHECKPOINTS: Final[int] = 2
+DEFAULT_BACKBONE: Final[str] = "aadel4/omniASR-CTC-300M-v2"
 
 
 def _log(msg: str) -> None:
@@ -88,11 +92,13 @@ class TrainingConfig:
     dev_manifest: str
     vocab_file: str
     output_dir: str
-    backbone_name: str = "facebook/w2v-bert-2.0"
+    backbone_name: str = DEFAULT_BACKBONE
     max_steps: int = 6400  # 2 full epochs over 424.6h corpus (6,368 steps at accumulation=8)
     warmup_steps: int = DEFAULT_WARMUP_STEPS
     gradient_accumulation_steps: int = DEFAULT_ACCUMULATION_STEPS
-    peak_lr: float = DEFAULT_PEAK_LR
+    peak_lr: float = DEFAULT_HEAD_LR
+    backbone_lr: float = DEFAULT_BACKBONE_LR
+    head_lr: float = DEFAULT_HEAD_LR
     min_lr: float = DEFAULT_MIN_LR
     weight_decay: float = 0.01
     val_interval_steps: int = 500
@@ -249,6 +255,7 @@ def evaluate_dev(
     hypotheses: list[str] = []
 
     id_to_char = {v: k for k, v in vocab_map.items()}
+    delimiter_id = vocab_map.get("|", 2)
     use_autocast = device.type == "cuda"
 
     with (
@@ -256,11 +263,25 @@ def evaluate_dev(
         torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=use_autocast),
     ):
         for batch in dev_loader:
-            v_in = batch["input_features"].to(device, non_blocking=True)
             v_mask = batch["attention_mask"].to(device, non_blocking=True)
             v_lbl = batch["labels"].to(device, non_blocking=True)
-            v_pres = batch["presence_labels"].to(device, non_blocking=True)
-            v_out = model(v_in, attention_mask=v_mask, labels=v_lbl, presence_labels=v_pres)
+
+            if "input_values" in batch:
+                v_in = batch["input_values"].to(device, non_blocking=True)
+                v_out = model(input_values=v_in, attention_mask=v_mask, labels=v_lbl)
+            else:
+                v_feat = batch["input_features"].to(device, non_blocking=True)
+                v_pres = (
+                    batch["presence_labels"].to(device, non_blocking=True)
+                    if "presence_labels" in batch
+                    else None
+                )
+                v_out = model(
+                    input_features=v_feat,
+                    attention_mask=v_mask,
+                    labels=v_lbl,
+                    presence_labels=v_pres,
+                )
 
             if v_out.loss is not None:
                 val_loss += v_out.loss.item()
@@ -275,7 +296,11 @@ def evaluate_dev(
                 hypotheses.append(hyp_text)
 
                 gold_ids = [int(i.item()) for i in v_lbl[b] if i.item() != -100]
-                ref_text = "".join(id_to_char.get(i, "") for i in gold_ids)
+                # Reconstruct reference text with proper spaces matching hypothesis formatting
+                ref_chars = [
+                    (" " if i == delimiter_id else id_to_char.get(i, "")) for i in gold_ids
+                ]
+                ref_text = " ".join("".join(ref_chars).split())
                 references.append(ref_text)
 
             if val_steps >= max_eval_batches:
@@ -312,7 +337,11 @@ def train(config: TrainingConfig) -> None:
     vocab_size = len(vocab_map)
 
     _log(f"[Training] Initializing model from {config.backbone_name} (vocab_size={vocab_size})...")
-    model = ConformerSpeechModel.from_pretrained(config.backbone_name, vocab_size=vocab_size)
+    model = ConformerSpeechModel.from_pretrained(
+        config.backbone_name,
+        vocab_size=vocab_size,
+        vocab_path=vocab_path,
+    )
     model.to(device)
 
     train_records = load_manifest(Path(config.train_manifest))
@@ -347,11 +376,29 @@ def train(config: TrainingConfig) -> None:
         pin_memory=bool(torch.cuda.is_available()),
     )
 
-    model.freeze_backbone()
+    # Differential learning rate parameter groups:
+    # 3e-5 for pretrained acoustic backbone, 1e-4 for projection head
+    backbone_params: list[torch.nn.Parameter] = []
+    head_params: list[torch.nn.Parameter] = []
+    for name, param in model.named_parameters():
+        if "lm_head" in name:
+            head_params.append(param)
+        else:
+            backbone_params.append(param)
+
     optimizer = AdamW(
-        filter(lambda p: p.requires_grad, model.parameters()),
-        lr=config.peak_lr,
-        weight_decay=config.weight_decay,
+        [
+            {
+                "params": backbone_params,
+                "lr": config.backbone_lr,
+                "weight_decay": config.weight_decay,
+            },
+            {
+                "params": head_params,
+                "lr": config.head_lr,
+                "weight_decay": config.weight_decay,
+            },
+        ]
     )
 
     warmup_sched = LinearLR(
@@ -391,8 +438,14 @@ def train(config: TrainingConfig) -> None:
             if isinstance(cuda_rng, list) and torch.cuda.is_available():
                 torch.cuda.set_rng_state_all(cuda_rng)
 
-        if start_step >= config.warmup_steps:
-            model.unfreeze_backbone()
+    # Initial head warmup freezing if starting from step < warmup_steps
+    if config.warmup_steps > 0 and start_step < config.warmup_steps:
+        _log(f"[Training] Freezing backbone for initial {config.warmup_steps}-step head warmup.")
+        model.freeze_backbone()
+        backbone_unfrozen = False
+    else:
+        model.unfreeze_backbone()
+        backbone_unfrozen = True
 
     if start_step >= config.max_steps:
         _log(
@@ -414,7 +467,6 @@ def train(config: TrainingConfig) -> None:
     global_step = start_step
     epoch = 0
     micro_step = 0  # counts micro-batches within current optimizer step
-    backbone_unfrozen = start_step >= config.warmup_steps
 
     accumulated_loss = 0.0
     accumulated_ctc = 0.0
@@ -434,25 +486,32 @@ def train(config: TrainingConfig) -> None:
                 backbone_unfrozen = True
                 _log(f"[Training] Step {global_step}: Warmup complete. Unfreezing backbone.")
                 model.unfreeze_backbone()
-                optimizer = AdamW(
-                    model.parameters(),
-                    lr=config.peak_lr,
-                    weight_decay=config.weight_decay,
-                )
 
-            input_features = batch["input_features"].to(device, non_blocking=True)
             attention_mask = batch["attention_mask"].to(device, non_blocking=True)
             labels = batch["labels"].to(device, non_blocking=True)
-            presence_labels = batch["presence_labels"].to(device, non_blocking=True)
 
             use_bf16 = device.type == "cuda"
             with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=use_bf16):
-                output = model(
-                    input_features=input_features,
-                    attention_mask=attention_mask,
-                    labels=labels,
-                    presence_labels=presence_labels,
-                )
+                if "input_values" in batch:
+                    input_values = batch["input_values"].to(device, non_blocking=True)
+                    output = model(
+                        input_values=input_values,
+                        attention_mask=attention_mask,
+                        labels=labels,
+                    )
+                else:
+                    input_features = batch["input_features"].to(device, non_blocking=True)
+                    presence_labels = (
+                        batch["presence_labels"].to(device, non_blocking=True)
+                        if "presence_labels" in batch
+                        else None
+                    )
+                    output = model(
+                        input_features=input_features,
+                        attention_mask=attention_mask,
+                        labels=labels,
+                        presence_labels=presence_labels,
+                    )
 
                 loss = output.loss
                 if loss is None or not math.isfinite(loss.item()):

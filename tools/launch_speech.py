@@ -74,7 +74,7 @@ STAGE_CONFIGS: Final = {
     "train": {
         "session": "agbalu-speech-train",
         "log": f"{RUN_DIR}/train.log",
-        "title": "Stage 4: Sovereign Fadhma 2 Training (600M Conformer CTC)",
+        "title": "Stage 4: Sovereign Fadhma 2 Training (300M Omnilingual CTC)",
     },
 }
 
@@ -183,9 +183,7 @@ def show_status(target_stage: str | None = None, *, raw: bool = False) -> None:
 
     sys.stdout.write(f"Session State : {status_header}\n")
     if sessions_text:
-        active_list = [
-            s.split(":")[0] for s in sessions_text.splitlines() if "agbalu-speech" in s
-        ]
+        active_list = [s.split(":")[0] for s in sessions_text.splitlines() if "agbalu-speech" in s]
         sys.stdout.write(f"Active Speech Sessions: {', '.join(active_list) or 'none'}\n")
 
     if disk_text:
@@ -202,9 +200,7 @@ def show_status(target_stage: str | None = None, *, raw: bool = False) -> None:
         sys.stdout.write(f"Audio Footage : {cnt_val} clips extracted ({disk_sz})\n")
 
     if chk_text and chk_text != "none":
-        chk_lines = [
-            line.split()[-1] for line in chk_text.splitlines() if ".pt" in line
-        ]
+        chk_lines = [line.split()[-1] for line in chk_text.splitlines() if ".pt" in line]
         sys.stdout.write(f"Checkpoints   : {', '.join(Path(p).name for p in chk_lines)}\n")
 
     sys.stdout.write("\n--- Log Tail (" + log + ") ---\n")

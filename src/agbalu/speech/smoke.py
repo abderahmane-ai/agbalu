@@ -28,6 +28,7 @@ from agbalu.speech.dataset import (
 from agbalu.speech.manifest import load_manifest
 from agbalu.speech.model import ConformerSpeechModel
 from agbalu.speech.train import (
+    DEFAULT_BACKBONE,
     load_atomic_checkpoint,
     save_atomic_checkpoint,
 )
@@ -66,12 +67,46 @@ class SmokeReport:
         return asdict(self)
 
 
+def _forward_batch(
+    model: ConformerSpeechModel,
+    batch: dict[str, torch.Tensor],
+    device: torch.device,
+) -> tuple[torch.Tensor, float]:
+    """Execute forward pass and return (loss, audio_duration_seconds)."""
+    mask = batch["attention_mask"].to(device)
+    labels = batch["labels"].to(device)
+
+    if "input_values" in batch:
+        in_val = batch["input_values"].to(device)
+        out = model(input_values=in_val, attention_mask=mask, labels=labels)
+        batch_secs = (in_val.size(1) / 16000.0) * in_val.size(0)
+    else:
+        in_feat = batch["input_features"].to(device)
+        presence = batch.get("presence_labels")
+        if presence is not None:
+            presence = presence.to(device)
+        out = model(
+            input_features=in_feat,
+            attention_mask=mask,
+            labels=labels,
+            presence_labels=presence,
+        )
+        batch_secs = in_feat.size(1) * 0.04 * in_feat.size(0)
+
+    loss = out.loss
+    if loss is None or not math.isfinite(loss.item()):
+        msg = f"Smoke encountered non-finite loss: {loss}"
+        raise ValueError(msg)
+
+    return loss, batch_secs
+
+
 def run_smoke_drill(
     train_manifest: Path,
     vocab_file: Path,
     output_dir: Path,
     *,
-    backbone_name: str = "facebook/w2v-bert-2.0",
+    backbone_name: str = DEFAULT_BACKBONE,
     device_str: str | None = None,
 ) -> SmokeReport:
     """Execute the strict 20-step measurement and checkpoint resume test."""
@@ -84,7 +119,11 @@ def run_smoke_drill(
     vocab_size = len(vocab_map)
 
     _log(f"[Smoke Drill] Instantiating {backbone_name} (vocab_size={vocab_size})...")
-    model = ConformerSpeechModel.from_pretrained(backbone_name, vocab_size=vocab_size)
+    model = ConformerSpeechModel.from_pretrained(
+        backbone_name,
+        vocab_size=vocab_size,
+        vocab_path=vocab_file,
+    )
     model.to(device)
 
     records = load_manifest(train_manifest)[:100]
@@ -108,8 +147,8 @@ def run_smoke_drill(
 
     chk_path = output_dir / "smoke_checkpoint.pt"
     step = 0
-
     loader_iter = iter(loader)
+
     while step < DRILL_CHECKPOINT_STEP:
         try:
             batch = next(loader_iter)
@@ -118,18 +157,9 @@ def run_smoke_drill(
             batch = next(loader_iter)
 
         t0 = time.time()
-        in_feat = batch["input_features"].to(device)
-        mask = batch["attention_mask"].to(device)
-        labels = batch["labels"].to(device)
-        presence = batch["presence_labels"].to(device)
-
         optimizer.zero_grad()
-        out = model(in_feat, attention_mask=mask, labels=labels, presence_labels=presence)
-        loss = out.loss
-        if loss is None or not math.isfinite(loss.item()):
-            raise ValueError(f"Smoke encountered non-finite loss: {loss}")
-
-        loss.backward()
+        loss, batch_secs = _forward_batch(model, batch, device)
+        loss.backward()  # type: ignore[no-untyped-call]
         optimizer.step()
 
         elapsed = time.time() - t0
@@ -138,9 +168,7 @@ def run_smoke_drill(
         if initial_loss == 0.0:
             initial_loss = last_loss
 
-        batch_secs = in_feat.size(1) * 0.04 * in_feat.size(0)
         total_audio_secs += batch_secs
-
         step += 1
         _log(f"  Step {step:2d}/20 | Loss: {last_loss:.4f} | Time: {elapsed:.2f}s")
         _emit_event(
@@ -170,16 +198,15 @@ def run_smoke_drill(
         },
         chk_path,
     )
-    _emit_event(
-        {
-            "event": "checkpoint",
-            "path": str(chk_path.name),
-        }
-    )
+    _emit_event({"event": "checkpoint", "path": str(chk_path.name)})
     _log(f"[Smoke Drill] Saved intermediate checkpoint at step {step}: {chk_path}")
 
     _log("[Smoke Drill] Executing checkpoint reload test...")
-    fresh_model = ConformerSpeechModel.from_pretrained(backbone_name, vocab_size=vocab_size)
+    fresh_model = ConformerSpeechModel.from_pretrained(
+        backbone_name,
+        vocab_size=vocab_size,
+        vocab_path=vocab_file,
+    )
     fresh_model.to(device)
     fresh_optimizer = AdamW(fresh_model.parameters(), lr=1e-4)
 
@@ -199,27 +226,16 @@ def run_smoke_drill(
             batch = next(loader_iter)
 
         t0 = time.time()
-        in_feat = batch["input_features"].to(device)
-        mask = batch["attention_mask"].to(device)
-        labels = batch["labels"].to(device)
-        presence = batch["presence_labels"].to(device)
-
         fresh_optimizer.zero_grad()
-        out = fresh_model(in_feat, attention_mask=mask, labels=labels, presence_labels=presence)
-        loss = out.loss
-        if loss is None or not math.isfinite(loss.item()):
-            raise ValueError(f"Smoke encountered non-finite loss after resume: {loss}")
-
-        loss.backward()
+        loss, batch_secs = _forward_batch(fresh_model, batch, device)
+        loss.backward()  # type: ignore[no-untyped-call]
         fresh_optimizer.step()
 
         elapsed = time.time() - t0
         step_times.append(elapsed)
         last_loss = loss.item()
 
-        batch_secs = in_feat.size(1) * 0.04 * in_feat.size(0)
         total_audio_secs += batch_secs
-
         step += 1
         _log(f"  Step {step:2d}/20 (Resumed) | Loss: {last_loss:.4f} | Time: {elapsed:.2f}s")
         _emit_event(

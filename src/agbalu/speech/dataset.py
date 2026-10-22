@@ -2,7 +2,7 @@
 
 Handles:
 - Audio loading and resampling to 16 kHz
-- 160-dimensional mel-filterbank feature extraction
+- Per-utterance zero-mean, unit-variance standardization for acoustic backbone
 - Dynamic length-sorted micro-batching (targeting ~60 seconds of audio per micro-batch)
 - Online acoustic augmentation (clean, reverb, noise, telephony)
 - Target label tokenization and attention mask collation
@@ -18,7 +18,6 @@ from typing import Final
 import soundfile as sf
 import torch
 from torch.utils.data import Dataset, Sampler
-from transformers import SeamlessM4TFeatureExtractor
 
 from agbalu.speech.augment import AcousticAugmenter
 from agbalu.speech.manifest import AudioRecord
@@ -44,7 +43,6 @@ def load_audio_file(
         tensor = torch.mean(tensor, dim=-1)
 
     if sr != target_sr:
-        # Resample using linear interpolation or FFT if needed
         num_target_samples = int(tensor.size(0) * (target_sr / sr))
         tensor = torch.nn.functional.interpolate(
             tensor.view(1, 1, -1), size=num_target_samples, mode="linear", align_corners=False
@@ -55,7 +53,7 @@ def load_audio_file(
 
 
 class SpeechDataset(Dataset[dict[str, torch.Tensor]]):
-    """PyTorch Dataset loading audio features and transcripts."""
+    """PyTorch Dataset loading standardized audio waveforms and transcripts."""
 
     def __init__(
         self,
@@ -63,15 +61,11 @@ class SpeechDataset(Dataset[dict[str, torch.Tensor]]):
         vocab_mapping: dict[str, int],
         *,
         augmenter: AcousticAugmenter | None = None,
-        feature_extractor: SeamlessM4TFeatureExtractor | None = None,
         base_audio_dir: Path | None = None,
     ) -> None:
         self.records = list(records)
         self.char_to_id = encoder(vocab_mapping)
         self.augmenter = augmenter
-        self.feature_extractor = (
-            feature_extractor or SeamlessM4TFeatureExtractor()  # type: ignore[no-untyped-call]
-        )
         self.base_audio_dir = base_audio_dir
 
     def __len__(self) -> int:
@@ -86,19 +80,17 @@ class SpeechDataset(Dataset[dict[str, torch.Tensor]]):
         )
 
         try:
-            waveform, sr = load_audio_file(audio_path, target_sr=TARGET_SAMPLE_RATE)
+            waveform, _sr = load_audio_file(audio_path, target_sr=TARGET_SAMPLE_RATE)
         except Exception:
             # Fallback for synthetic/missing audio during unit tests
             waveform = torch.zeros(int(max(record.duration, 0.5) * TARGET_SAMPLE_RATE))
-            sr = TARGET_SAMPLE_RATE
 
         if self.augmenter is not None:
             waveform = self.augmenter.augment(waveform)
 
-        # Extract 160-dimensional mel-filterbank features with deltas
-        features = self.feature_extractor(
-            waveform.numpy(), sampling_rate=sr, return_tensors="pt"
-        ).input_features.squeeze(0)
+        # Standardize 16kHz audio: zero-mean, unit-variance
+        std_val = float(waveform.std().item())
+        norm_audio = (waveform - waveform.mean()) / (std_val + 1e-7)
 
         # Encode target transcript
         label_ids = [self.char_to_id[ch] for ch in record.target_text if ch in self.char_to_id]
@@ -106,11 +98,10 @@ class SpeechDataset(Dataset[dict[str, torch.Tensor]]):
             label_ids = [0]
         labels = torch.tensor(label_ids, dtype=torch.long)
 
-        # Approximate frame-level speech presence (1.0 for entire active utterance)
-        presence = torch.ones(features.size(0), dtype=torch.float32)
+        presence = torch.ones(norm_audio.size(0), dtype=torch.float32)
 
         return {
-            "input_features": features,
+            "input_values": norm_audio,
             "labels": labels,
             "presence_labels": presence,
         }
@@ -165,22 +156,54 @@ class DynamicAudioBatchSampler(Sampler[list[int]]):
 
 
 def collate_speech_batch(batch: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
-    """Pad variable-length feature frames and label sequences."""
+    """Pad variable-length audio waveforms or feature frames and label sequences."""
     batch_size = len(batch)
-    feature_lengths = [b["input_features"].size(0) for b in batch]
-    max_feat_len = max(feature_lengths)
-    feat_dim = batch[0]["input_features"].size(-1)
 
-    padded_features = torch.zeros(batch_size, max_feat_len, feat_dim, dtype=torch.float32)
-    attention_mask = torch.zeros(batch_size, max_feat_len, dtype=torch.long)
-    padded_presence = torch.zeros(batch_size, max_feat_len, dtype=torch.float32)
+    # 1. Handle raw audio waveforms (input_values)
+    if "input_values" in batch[0]:
+        audio_lengths = [b["input_values"].size(0) for b in batch]
+        max_audio_len = max(audio_lengths)
 
-    for i, b in enumerate(batch):
-        f_len = b["input_features"].size(0)
-        padded_features[i, :f_len, :] = b["input_features"]
-        attention_mask[i, :f_len] = 1
-        padded_presence[i, :f_len] = b["presence_labels"]
+        padded_audio = torch.zeros(batch_size, max_audio_len, dtype=torch.float32)
+        attention_mask = torch.zeros(batch_size, max_audio_len, dtype=torch.long)
+        padded_presence = torch.zeros(batch_size, max_audio_len, dtype=torch.float32)
 
+        for i, b in enumerate(batch):
+            a_len = b["input_values"].size(0)
+            padded_audio[i, :a_len] = b["input_values"]
+            attention_mask[i, :a_len] = 1
+            if "presence_labels" in b:
+                padded_presence[i, :a_len] = b["presence_labels"]
+
+        res = {
+            "input_values": padded_audio,
+            "attention_mask": attention_mask,
+            "presence_labels": padded_presence,
+        }
+    else:
+        # 2. Backward-compatible filterbank features (input_features)
+        feature_lengths = [b["input_features"].size(0) for b in batch]
+        max_feat_len = max(feature_lengths)
+        feat_dim = batch[0]["input_features"].size(-1)
+
+        padded_features = torch.zeros(batch_size, max_feat_len, feat_dim, dtype=torch.float32)
+        attention_mask = torch.zeros(batch_size, max_feat_len, dtype=torch.long)
+        padded_presence = torch.zeros(batch_size, max_feat_len, dtype=torch.float32)
+
+        for i, b in enumerate(batch):
+            f_len = b["input_features"].size(0)
+            padded_features[i, :f_len, :] = b["input_features"]
+            attention_mask[i, :f_len] = 1
+            if "presence_labels" in b:
+                padded_presence[i, :f_len] = b["presence_labels"]
+
+        res = {
+            "input_features": padded_features,
+            "attention_mask": attention_mask,
+            "presence_labels": padded_presence,
+        }
+
+    # Label padding with -100 (ignored by CTC loss)
     label_lengths = [b["labels"].size(0) for b in batch]
     max_label_len = max(label_lengths)
     padded_labels = torch.full((batch_size, max_label_len), fill_value=-100, dtype=torch.long)
@@ -189,9 +212,5 @@ def collate_speech_batch(batch: list[dict[str, torch.Tensor]]) -> dict[str, torc
         l_len = b["labels"].size(0)
         padded_labels[i, :l_len] = b["labels"]
 
-    return {
-        "input_features": padded_features,
-        "attention_mask": attention_mask,
-        "labels": padded_labels,
-        "presence_labels": padded_presence,
-    }
+    res["labels"] = padded_labels
+    return res
