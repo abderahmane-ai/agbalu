@@ -325,7 +325,7 @@ def train(config: TrainingConfig) -> None:
         train_dataset,
         batch_sampler=train_sampler,
         collate_fn=collate_speech_batch,
-        num_workers=4 if torch.cuda.is_available() else 0,
+        num_workers=0,
         pin_memory=bool(torch.cuda.is_available()),
     )
 
@@ -333,7 +333,7 @@ def train(config: TrainingConfig) -> None:
         dev_dataset,
         batch_size=4,
         collate_fn=collate_speech_batch,
-        num_workers=2 if torch.cuda.is_available() else 0,
+        num_workers=0,
     )
 
     model.freeze_backbone()
