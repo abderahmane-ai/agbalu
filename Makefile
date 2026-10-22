@@ -2,6 +2,10 @@
 PY ?= python3
 SRC := src tests tools modal_app
 
+export PYDANTIC_DISABLE_PLUGINS := 1
+export PYTEST_DISABLE_PLUGIN_AUTOLOAD := 1
+export MODAL_CONFIG_PATH := /tmp/modal.toml
+
 # Every build target below is one package's CLI plus a subcommand, so the invocation is
 # written once here. A family of subcommands is one target with a variable, never one target
 # per subcommand: `make bench TASK=pos`, not `make bench-pos`. Where the members of a family
@@ -33,7 +37,7 @@ typecheck: ## mypy, strict
 	mypy
 
 test: ## Full pytest suite. UNIT=1 skips integration, COV=1 adds the coverage report
-	$(PY) -m pytest $(if $(UNIT),-m "not integration",) $(if $(COV),--cov --cov-report=term-missing,)
+	$(PY) -m pytest $(if $(UNIT),-m "not integration",) $(if $(COV),--cov --cov-report=term-missing,) $(if $(TESTS),$(TESTS),)
 
 check: lint typecheck test ## The gate: lint + typecheck + test
 	@echo "All checks passed."
@@ -157,6 +161,36 @@ logs: ## Follow RUN's log read plainly; Ctrl-C stops only the stream. RAW=1 for 
 
 pull: ## Fetch RUN's directory into artifacts/runs; weights only with WEIGHTS=1 (operator, hpc)
 	$(call launch,pull) $(if $(WEIGHTS),--weights,)
+
+# Fadhma 2 Sovereign Speech Recognition on School HPC
+speech-launch = $(PY) -m tools.launch_speech $(1) $(if $(TASK),--task $(TASK),) $(if $(SESSION),--session $(SESSION),) $(if $(RAW),--raw,)
+
+speech-sync: ## Push speech codebase and scripts to HPC pod (operator, hpc)
+	$(call speech-launch,sync)
+
+speech-data: ## Ingest multi-source corpora (CV, Tutlayt, Tatoeba) & filter with Dihya on HPC (operator, hpc)
+	$(call speech-launch,data)
+
+speech-augment: ## Download MUSAN and BUT ReverbDB assets for multi-condition training on HPC (operator, hpc)
+	$(call speech-launch,augment)
+
+speech-smoke: ## Mandatory 20-step smoke validation drill on H100 GPU slice (operator, hpc)
+	$(call speech-launch,smoke)
+
+speech-train: ## Full Fadhma 2 training (300 warmup steps + 5 epochs) on H100 GPU (operator, hpc)
+	$(call speech-launch,train)
+
+speech-status: ## Check Fadhma 2 training/smoke/data status and logs on HPC (operator, hpc)
+	$(call speech-launch,status)
+
+speech-logs: ## Stream live Fadhma 2 logs from HPC pod (operator, hpc)
+	$(call speech-launch,logs)
+
+speech-stop: ## Gracefully stop Fadhma 2 training and save atomic checkpoint (operator, hpc)
+	$(call speech-launch,stop)
+
+speech-pull: ## Pull Fadhma 2 checkpoints and reports from HPC to local artifacts (operator, hpc)
+	$(call speech-launch,pull)
 
 speech: ## Phase 5. TASK=corpus|vocabulary|lm (needs lmplz)|release|transcribe (AUDIO=path, needs the speech extra)
 	$(call cli,speech) $(or $(TASK),corpus) $(if $(AUDIO),$(AUDIO),) \

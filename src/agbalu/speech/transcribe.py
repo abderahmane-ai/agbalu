@@ -78,7 +78,14 @@ def load_audio(path: Path) -> NDArray[np.float32]:
     if audio.ndim > 1:
         audio = audio.mean(axis=1)
     if rate != SAMPLE_RATE:
-        audio = librosa.resample(audio, orig_sr=rate, target_sr=SAMPLE_RATE)
+        try:
+            audio = librosa.resample(audio, orig_sr=rate, target_sr=SAMPLE_RATE)
+        except Exception:
+            import torch
+            import torchaudio.functional as taf
+
+            tensor = torch.from_numpy(audio)
+            audio = taf.resample(tensor, orig_freq=rate, new_freq=SAMPLE_RATE).numpy()
     return np.asarray(audio, dtype=np.float32)
 
 

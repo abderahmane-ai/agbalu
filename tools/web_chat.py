@@ -15,7 +15,9 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import functools
 import http.server
+import socket
 import socketserver
 import sys
 import urllib.error
@@ -31,9 +33,16 @@ STATIC_DIR = Path(__file__).resolve().parent / "chat_ui"
 class JugurthaHTTPHandler(http.server.SimpleHTTPRequestHandler):
     """HTTP handler serving the static UI and proxying /v1/* endpoints to vLLM."""
 
-    def __init__(self, *args: object, vllm_url: str = DEFAULT_VLLM_URL, **kwargs: object) -> None:
+    def __init__(
+        self,
+        request: socket.socket | tuple[bytes, socket.socket],
+        client_address: tuple[str, int] | str,
+        server: socketserver.BaseServer,
+        directory: str | None = None,
+        vllm_url: str = DEFAULT_VLLM_URL,
+    ) -> None:
         self.vllm_url = vllm_url.rstrip("/")
-        super().__init__(*args, directory=str(STATIC_DIR), **kwargs)
+        super().__init__(request, client_address, server, directory=directory)
 
     def log_message(self, format: str, *args: object) -> None:  # noqa: A002
         sys.stderr.write(f"[WebChat] {self.address_string()} - {format % args}\n")
@@ -76,9 +85,7 @@ class JugurthaHTTPHandler(http.server.SimpleHTTPRequestHandler):
         body = self.rfile.read(content_length) if content_length > 0 else None
 
         headers = {
-            k: v
-            for k, v in self.headers.items()
-            if k.lower() not in ("host", "content-length")
+            k: v for k, v in self.headers.items() if k.lower() not in ("host", "content-length")
         }
 
         req = urllib.request.Request(  # noqa: S310
@@ -148,11 +155,11 @@ def main() -> None:
     class CustomServer(socketserver.TCPServer):
         allow_reuse_address = True
 
-    class CustomHandler(JugurthaHTTPHandler):
-        def __init__(self, *h_args: object, **h_kwargs: object) -> None:
-            super().__init__(*h_args, vllm_url=args.vllm_url, **h_kwargs)
+    handler = functools.partial(
+        JugurthaHTTPHandler, directory=str(STATIC_DIR), vllm_url=args.vllm_url
+    )
 
-    with CustomServer((args.host, args.port), CustomHandler) as httpd:
+    with CustomServer((args.host, args.port), handler) as httpd:
         sys.stdout.write("=" * 66 + "\n")
         sys.stdout.write("  AƔBALU: Jugurtha-4B Web Chat Interface & Proxy\n")
         sys.stdout.write("=" * 66 + "\n")
