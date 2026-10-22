@@ -71,26 +71,34 @@ def add_noise(waveform: torch.Tensor, noise: torch.Tensor, snr_db: float) -> tor
     return mixed.view(orig_shape)
 
 
-def convolve_rir(waveform: torch.Tensor, rir: torch.Tensor) -> torch.Tensor:
-    """Convolve waveform with a room impulse response (RIR).
+def convolve_rir(
+    waveform: torch.Tensor, rir: torch.Tensor, max_rir_len: int = 16000
+) -> torch.Tensor:
+    """Convolve waveform with a room impulse response (RIR) using FFT.
 
-    Normalizes RIR energy and preserves original waveform length.
+    Normalizes RIR energy and preserves original waveform length. Trims RIR to
+    max_rir_len (default 1.0s at 16kHz) and performs O(N log N) FFT convolution,
+    avoiding catastrophic O(N * K) direct time-domain convolution latency.
     """
     if waveform.numel() == 0 or rir.numel() == 0:
         return waveform
 
     orig_shape = waveform.shape
-    wav = waveform.view(1, 1, -1)
-    rir_norm = rir.view(1, 1, -1) / (torch.norm(rir.view(-1), p=2) + 1e-9)
+    wav = waveform.view(-1)
+    rir_trim = rir.view(-1)[:max_rir_len]
+    rir_norm = rir_trim / (torch.norm(rir_trim, p=2) + 1e-9)
 
-    padding = rir_norm.size(-1) - 1
-    convolved = f.conv1d(wav, rir_norm, padding=padding)
-    result = convolved[:, :, : wav.size(-1)].view(orig_shape)
+    n = wav.size(0) + rir_norm.size(0) - 1
+    wav_fft = torch.fft.rfft(wav, n=n)
+    rir_fft = torch.fft.rfft(rir_norm, n=n)
+    convolved = torch.fft.irfft(wav_fft * rir_fft, n=n)
+    result = convolved[: wav.size(0)]
 
     max_val = torch.max(torch.abs(result))
     if max_val > 1.0:
         result = result / max_val
-    return result
+    res: torch.Tensor = result.view(orig_shape)
+    return res
 
 
 def apply_telephony_filter(
@@ -199,7 +207,8 @@ class AcousticAugmenter:
                             mode="linear",
                             align_corners=False,
                         ).view(-1)
-                    rirs.append(tensor)
+                    # Limit RIR to 1.0s (16,000 samples at 16kHz) to keep memory & convolution light
+                    rirs.append(tensor[:sample_rate])
                 except (OSError, RuntimeError):
                     pass
 

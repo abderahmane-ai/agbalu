@@ -402,6 +402,8 @@ def train(config: TrainingConfig) -> None:
     )
     global_step = start_step
     epoch = 0
+    micro_step = 0  # counts micro-batches within current optimizer step
+    backbone_unfrozen = start_step >= config.warmup_steps
 
     accumulated_loss = 0.0
     accumulated_ctc = 0.0
@@ -417,7 +419,8 @@ def train(config: TrainingConfig) -> None:
             if global_step >= config.max_steps:
                 break
 
-            if global_step == config.warmup_steps:
+            if not backbone_unfrozen and global_step >= config.warmup_steps:
+                backbone_unfrozen = True
                 _log(f"[Training] Step {global_step}: Warmup complete. Unfreezing backbone.")
                 model.unfreeze_backbone()
                 optimizer = AdamW(
@@ -451,7 +454,10 @@ def train(config: TrainingConfig) -> None:
             if output.presence_loss is not None:
                 accumulated_presence += output.presence_loss.item()
 
-            if (global_step + 1) % config.gradient_accumulation_steps == 0:
+            micro_step += 1
+
+            # Optimizer step only when accumulation complete
+            if micro_step == config.gradient_accumulation_steps:
                 grad_norm = float(torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0))
                 optimizer.step()
                 scheduler.step()
@@ -464,6 +470,7 @@ def train(config: TrainingConfig) -> None:
                 accumulated_loss = 0.0
                 accumulated_ctc = 0.0
                 accumulated_presence = 0.0
+                micro_step = 0
 
                 step_time = time.time() - start_time
                 start_time = time.time()
@@ -583,7 +590,7 @@ def train(config: TrainingConfig) -> None:
                     _log(f"[Training] Exiting cleanly at step {global_step}.")
                     return
 
-            global_step += 1
+                global_step += 1
 
     model.save_pretrained(out_dir / "final_model")
     summary_data = {
