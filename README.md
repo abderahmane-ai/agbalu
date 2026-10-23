@@ -37,7 +37,7 @@ without this repository.
 | [`Feraoun-Pro`](https://huggingface.co/agbalu/Feraoun-Pro) | document OCR (CTC), Latin and Tifinagh | CER 7.34% Latin / 0.91% Tifinagh, 81.77% line exact match |
 | [`Juba-27M`](https://huggingface.co/agbalu/Juba-27M) | Latin ↔ Tifinagh, with schwa restoration | 94.22% sentence exact match |
 | [`Mammeri-Tok`](https://huggingface.co/agbalu/Mammeri-Tok) | tokenizer | ten vocabularies, 8k–32k |
-| [`Matoub-82M`](https://huggingface.co/agbalu/Matoub-82M) | speech synthesis (preview) | First neural TTS for Kabyle — 24 kHz, StyleTTS2, 42-symbol IPA inventory, male voice |
+| [`Matoub-82M`](https://huggingface.co/agbalu/Matoub-82M) | speech synthesis | First neural TTS for Kabyle — 24 kHz, StyleTTS2, 42-symbol IPA inventory, male voice |
 | [`Dihya-5M`](https://huggingface.co/agbalu/Dihya-5M) | language identification, six Berber varieties plus rejection | 85.52% over seven classes; 84.44% on the six Berber classes against GlotLID's 41.78% and NLLB `lid218e`'s 28.33%, scored in one pass over the same rows |
 | [`Masinissa-Sentiment`](https://huggingface.co/agbalu/Masinissa-Sentiment) | sentiment, three classes | 90.27% accuracy and 0.9026 macro-F1, against 88.80% for an ordinary fine-tune of the same encoder and 77.53% for a frozen probe; unchanged under total homoglyph corruption |
 | [`Jugurtha-4B`](https://huggingface.co/agbalu/Jugurtha-4B) | foundation & reasoning LLM (4.2B) | First Kabyle LLM with native thinking mode; 100% NIAH (32k), 80.89% GSM8K, 62.86% MMLU-Pro, 73.74% SIB-200, eng→kab 28.77 / kab→eng 46.17 chrF++. Also available in [`Jugurtha-4B-GGUF`](https://huggingface.co/agbalu/Jugurtha-4B-GGUF) and [`Jugurtha-4B-MLX-4bit`](https://huggingface.co/agbalu/Jugurtha-4B-MLX-4bit) |
