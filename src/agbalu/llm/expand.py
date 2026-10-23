@@ -298,7 +298,15 @@ def fetch_all(
 
 
 def _needs_boulifa(text: str) -> bool:
-    """True when a Latin text has very few Kabyle diacritics and likely needs Boulifa."""
+    """True when a Latin text has very few Kabyle diacritics and likely needs Boulifa.
+
+    Only used in the audio pipeline.  PDF extraction disables Boulifa entirely
+    (modern Unicode theses already carry correct diacritics; legacy-font text is
+    handled by repair_legacy_font).  For ASR output this always returns True
+    because Fadhma produces bare Latin with no diacritics at all — the function
+    is kept so the caller remains explicit rather than unconditionally applying
+    Boulifa to every hypothetical future caller.
+    """
     alpha = sum(1 for c in text if c.isalpha())
     if alpha < 60:
         return False
@@ -419,6 +427,9 @@ def _extract_single_pdf(
             continue
 
         repaired = repair_legacy_font(raw_text)
+        # Boulifa is disabled for PDFs (use_boulifa=False default); this guard
+        # keeps _extract_single_pdf safe if it is ever re-enabled for a specific
+        # source where diacritic restoration is needed.
         if boulifa is not None and _needs_boulifa(repaired):
             repaired = boulifa.standardise_lines(repaired)
 
@@ -530,9 +541,15 @@ def extract_pdfs_and_text(
     out_path: Path = EXPANDED_DOCS_OUT,
     device: str = "cuda",
     use_ocr: bool = True,
-    use_boulifa: bool = True,
+    use_boulifa: bool = False,
 ) -> list[ExpandTally]:
-    """Extract PDFs, reconstructed theses, Quran Surahs, and new text corpora on the HPC."""
+    """Extract PDFs, reconstructed theses, Quran Surahs, and new text corpora on the HPC.
+
+    Boulifa is disabled by default for PDF extraction: modern Unicode theses from
+    taqbaylit repos already carry correct Kabyle diacritics; legacy-font text is
+    handled upstream by repair_legacy_font().  Boulifa is reserved for the audio
+    pipeline (expand-audio) where Fadhma ASR output is always diacritic-free.
+    """
     normaliser = Normaliser()
     ocr = (
         HubOcrEngine(models_root / "feraoun_pro", device)
@@ -889,7 +906,10 @@ def extract_audio_corpora(
                             )
                             if restored and restored[0]:
                                 raw_hyp = restored[0]
-                        if boulifa is not None and _needs_boulifa(raw_hyp):
+                        # ASR output is always bare Latin (no diacritics); always
+                        # apply Boulifa unconditionally rather than gating on a
+                        # threshold that is unreliable for zero-diacritic text.
+                        if boulifa is not None:
                             raw_hyp = boulifa.standardise_lines(raw_hyp)
                         normed = clean(raw_hyp, normaliser)
                         if is_kabyle_window(normed, scorer, min_prob=0.60):
