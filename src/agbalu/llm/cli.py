@@ -351,7 +351,7 @@ def command_expand_pdfs(args: argparse.Namespace) -> int:
         out_path=args.out,
         device=device,
         use_ocr=not args.no_ocr,
-        use_boulifa=not args.no_boulifa,
+        use_boulifa=args.boulifa,
     )
     write_stats(
         stats_path(args.out),
@@ -1124,7 +1124,7 @@ def add_expansion_commands(sub: argparse._SubParsersAction[argparse.ArgumentPars
     exp_pdfs.add_argument("--dihya", type=Path, default=DIHYA_RUN)
     exp_pdfs.add_argument("--device", help="CUDA when present, else CPU")
     exp_pdfs.add_argument("--no-ocr", action="store_true")
-    exp_pdfs.add_argument("--no-boulifa", action="store_true")
+    exp_pdfs.add_argument("--boulifa", action="store_true")
     exp_pdfs.add_argument("--out", type=Path, default=expand.EXPANDED_DOCS_OUT)
 
     exp_audio = sub.add_parser(
