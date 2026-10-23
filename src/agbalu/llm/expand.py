@@ -1384,6 +1384,7 @@ CHUNK_MIN_CHARS: Final = 150
 """Consecutive lines are grouped to at least this many characters before Dihya scores them."""
 
 _WORD_RE: Final = re.compile(r"[^\W\d_]+")
+_REPEAT_RE: Final = re.compile(r"(\b[^\W\d_]+(?:\s+[^\W\d_]+)?\b)(?:\s+\1){2,}")
 
 
 def line_chunks(text: str) -> list[str]:
@@ -1404,6 +1405,7 @@ def line_chunks(text: str) -> list[str]:
 
 def clean_document(text: str, scorer: LanguageScorer) -> str | None:
     """Keep only the chunks Dihya calls Kabyle; None if glued or too short afterwards."""
+    text = _REPEAT_RE.sub(r"\1", text)
     words = _WORD_RE.findall(text)
     if words and sum(len(w) > GLUED_TOKEN_CHARS for w in words) / len(words) > GLUED_DOCUMENT_SHARE:
         return None
