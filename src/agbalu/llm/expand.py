@@ -1360,80 +1360,48 @@ def merge_expanded_sentences(
                 )
 
 
-FRENCH_WORDS: Final[frozenset[str]] = frozenset(
-    [
-        "le",
-        "la",
-        "les",
-        "des",
-        "du",
-        "de",
-        "que",
-        "qui",
-        "est",
-        "je",
-        "tu",
-        "il",
-        "elle",
-        "nous",
-        "vous",
-        "ils",
-        "ne",
-        "pas",
-        "pour",
-        "dans",
-        "avec",
-        "sur",
-        "une",
-        "un",
-        "et",
-        "mais",
-        "ce",
-        "cette",
-        "sont",
-        "être",
-        "avoir",
-        "fait",
-        "comme",
-        "plus",
-        "très",
-        "aussi",
-    ]
-)
-"""French function words; Kabyle uses none of these as a word, so a line made of them is French."""
-
-FRENCH_LINE_SHARE: Final = 0.25
-"""A line whose share of French function words exceeds this is dropped."""
-
 GLUED_TOKEN_CHARS: Final = 25
 """A token this long is two or more words glued together by the PDF extractor."""
 
 GLUED_DOCUMENT_SHARE: Final = 0.01
 """A document whose share of glued tokens exceeds this is dropped."""
 
+CHUNK_MIN_CHARS: Final = 150
+"""Consecutive lines are grouped to at least this many characters before Dihya scores them."""
+
 _WORD_RE: Final = re.compile(r"[^\W\d_]+")
 
 
-def french_share(line: str) -> float:
-    """Fraction of a line's words that are French function words."""
-    words = _WORD_RE.findall(line.lower())
-    if not words:
-        return 0.0
-    return sum(word in FRENCH_WORDS for word in words) / len(words)
+def line_chunks(text: str) -> list[str]:
+    """Group consecutive lines into chunks of at least `CHUNK_MIN_CHARS` characters."""
+    chunks: list[str] = []
+    current: list[str] = []
+    size = 0
+    for line in text.split("\n"):
+        current.append(line)
+        size += len(line)
+        if size >= CHUNK_MIN_CHARS:
+            chunks.append("\n".join(current))
+            current, size = [], 0
+    if current:
+        chunks.append("\n".join(current))
+    return chunks
 
 
-def clean_document(text: str) -> str | None:
-    """Drop French lines; return None if the document is glued or too short afterwards."""
+def clean_document(text: str, scorer: LanguageScorer) -> str | None:
+    """Keep only the chunks Dihya calls Kabyle; None if glued or too short afterwards."""
     words = _WORD_RE.findall(text)
     if words and sum(len(w) > GLUED_TOKEN_CHARS for w in words) / len(words) > GLUED_DOCUMENT_SHARE:
         return None
-    lines = [ln for ln in text.split("\n") if french_share(ln) <= FRENCH_LINE_SHARE]
-    cleaned = "\n".join(lines).strip()
+    chunks = line_chunks(text)
+    rows = scorer.probabilities([c.strip()[:LID_WINDOW_CHARS] or " " for c in chunks])
+    kept = [c for c, row in zip(chunks, rows, strict=True) if verdict([row]) == KABYLE]
+    cleaned = "\n".join(kept).strip()
     return cleaned if len(cleaned) >= MIN_DOCUMENT_CHARS else None
 
 
 def clean_jsonl(path: Path, scorer: LanguageScorer) -> dict[str, dict[str, int]]:
-    """Rewrite `path` in place: French lines out, then the 4B document rule re-applied.
+    """Rewrite `path` in place: non-Kabyle chunks out by Dihya, then the 4B document rule.
 
     The original is kept as `<name>.raw`. Returns per-source counts of read, kept and the
     reason each rejected document was dropped.
@@ -1449,7 +1417,7 @@ def clean_jsonl(path: Path, scorer: LanguageScorer) -> dict[str, dict[str, int]]
                 row["source"], {"read": 0, "kept": 0, "glued_or_short": 0, "language": 0}
             )
             tally["read"] += 1
-            cleaned = clean_document(row["text"])
+            cleaned = clean_document(row["text"], scorer)
             if cleaned is None:
                 tally["glued_or_short"] += 1
                 continue
