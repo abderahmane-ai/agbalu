@@ -126,6 +126,8 @@ DATA_TASKS: Final = (
     "expand-aligned",
     "compile",
 )
+RESUMABLE_TASKS: Final = ("expand-pdfs",)
+"""Data tasks whose output a later run appends to instead of rebuilding (`--resume`)."""
 WEIGHT_EXCLUDES: Final = ("--exclude", "step-*", "--exclude", "best", "--exclude", "model")
 """What `pull` leaves on the pod unless `--weights`: checkpoints, the best model and a merge."""
 LOG_LINES: Final = 20
@@ -416,6 +418,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--run")
     parser.add_argument("--part", choices=SMOKE_PARTS)
     parser.add_argument("--task", choices=DATA_TASKS)
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="data: append to an earlier run's output instead of rebuilding it "
+        f"({', '.join(RESUMABLE_TASKS)})",
+    )
     parser.add_argument("--model")
     parser.add_argument("--steps", type=int)
     parser.add_argument("--stop", type=int, help="end the train invocation at this step")
@@ -494,7 +502,11 @@ def job(args: argparse.Namespace) -> Job:
             return f"{run}/{part}", arguments, f"{run}/{part}/log.txt", []
         case "data":
             task = require(args.task, "--task", "data")
-            return f"data-{task}", [task], f"data-{task}/log.txt", []
+            if args.resume and task not in RESUMABLE_TASKS:
+                message = f"--resume is for {' and '.join(RESUMABLE_TASKS)}, not {task}"
+                raise LaunchError(message)
+            flags = ["--resume"] if args.resume else []
+            return f"data-{task}", [task, *flags], f"data-{task}/log.txt", []
         case "merge":
             run = require(args.run, "--run", "merge")
             return run, merge_arguments(args), f"{run}/log.txt", []

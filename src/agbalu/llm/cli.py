@@ -352,6 +352,7 @@ def command_expand_pdfs(args: argparse.Namespace) -> int:
         device=device,
         use_ocr=not args.no_ocr,
         use_boulifa=args.boulifa,
+        resume=args.resume,
     )
     write_stats(
         stats_path(args.out),
@@ -362,7 +363,8 @@ def command_expand_pdfs(args: argparse.Namespace) -> int:
         },
     )
     for tally in tallies:
-        print(f"  {tally.source_id:36} read {tally.read:>7,} kept {tally.kept:>7,}")
+        marker = "  (resumed)" if tally.resumed else ""
+        print(f"  {tally.source_id:36} read {tally.read:>7,} kept {tally.kept:>7,}{marker}")
     print(f"-> {args.out}")
     return 0
 
@@ -1125,6 +1127,11 @@ def add_expansion_commands(sub: argparse._SubParsersAction[argparse.ArgumentPars
     exp_pdfs.add_argument("--device", help="CUDA when present, else CPU")
     exp_pdfs.add_argument("--no-ocr", action="store_true")
     exp_pdfs.add_argument("--boulifa", action="store_true")
+    exp_pdfs.add_argument(
+        "--resume",
+        action="store_true",
+        help="append to an existing --out, skipping the sources it already holds whole",
+    )
     exp_pdfs.add_argument("--out", type=Path, default=expand.EXPANDED_DOCS_OUT)
 
     exp_audio = sub.add_parser(

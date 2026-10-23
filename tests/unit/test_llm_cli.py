@@ -29,6 +29,12 @@ def test_the_launcher_data_tasks_are_subcommands() -> None:
         assert cli.build_parser().parse_args([task]).command == task
 
 
+def test_expand_pdfs_only_resumes_when_the_launcher_asks() -> None:
+    parser = cli.build_parser()
+    assert parser.parse_args(["expand-pdfs"]).resume is False
+    assert parser.parse_args(["expand-pdfs", "--resume"]).resume is True
+
+
 def test_the_launcher_merge_arguments_parse() -> None:
     argv = ["merge", "--run", "m", "--alpha", "0.25", "--cpt", "c"]
     args = cli.build_parser().parse_args(argv)

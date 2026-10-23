@@ -138,8 +138,8 @@ train: ## CPT, or SFT with OBJECTIVE=sft, resuming RUN if it exists. RUN= MODEL 
 	$(call launch,train) $(if $(MODEL),--model $(MODEL),) $(if $(STEPS),--steps $(STEPS),) \
 		$(if $(STOP),--stop $(STOP),) $(if $(OBJECTIVE),--objective $(OBJECTIVE),)
 
-data: ## Corpus stages that run on the pod. TASK=documents|aligned|replay|pack|sft|fluency|expand-fetch|expand-pdfs|expand-audio|expand-aligned|compile (operator, hpc)
-	$(call launch,data) $(if $(TASK),--task $(TASK),)
+data: ## Corpus stages that run on the pod. TASK=documents|aligned|replay|pack|sft|fluency|expand-fetch|expand-pdfs|expand-audio|expand-aligned|compile. RESUME=1 keeps the sources expand-pdfs already wrote (operator, hpc)
+	$(call launch,data) $(if $(TASK),--task $(TASK),) $(if $(RESUME),--resume,)
 
 evaluate: ## Evaluation suite on MODEL into artifacts/runs/RUN/. RUN= MODEL SUITE=exit|screen|guard|select|release (screen: translation only; guard: no-think IFEval and GSM8K; select and release add the chat suite; CHAT_ONLY=1 runs that alone) (operator, hpc)
 	$(call launch,evaluate) $(if $(MODEL),--model $(MODEL),) $(if $(SUITE),--suite $(SUITE),) $(if $(CHAT_ONLY),--chat-only,)

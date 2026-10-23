@@ -41,6 +41,23 @@ class TestCommands:
         arguments = launch.train_arguments(launch.build_parser().parse_args(argv))
         assert arguments == ["train", "--run", "s", "--model", "m", "--objective", "sft"]
 
+    def test_expand_pdfs_resumes_only_when_asked(self) -> None:
+        parser = launch.build_parser()
+        fresh = launch.job(parser.parse_args(["data", "--task", "expand-pdfs"]))
+        assert fresh == (
+            "data-expand-pdfs",
+            ["expand-pdfs"],
+            "data-expand-pdfs/log.txt",
+            [],
+        )
+        resumed = launch.job(parser.parse_args(["data", "--task", "expand-pdfs", "--resume"]))
+        assert resumed[1] == ["expand-pdfs", "--resume"]
+
+    def test_resume_is_refused_for_a_task_that_cannot_use_it(self) -> None:
+        argv = ["data", "--task", "compile", "--resume"]
+        with pytest.raises(launch.LaunchError):
+            launch.job(launch.build_parser().parse_args(argv))
+
     def test_a_detached_job_logs_inside_its_run(self) -> None:
         command = launch.detached(
             "smoke-1/parity", ["smoke", "--part", "parity"], "smoke-1/parity/log.txt"

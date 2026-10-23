@@ -144,6 +144,133 @@ class TestMergeExpandedSentences:
         assert "Full reconstructed thesis chapter." in merged[0].text
 
 
+class TestResume:
+    """A restart keeps what an earlier run wrote whole and repeats the source left over."""
+
+    @staticmethod
+    def row(source: str, text: str) -> str:
+        return (
+            json.dumps(
+                {
+                    "text": text,
+                    "source": source,
+                    "licence": "mit",
+                    "redistribution": "permissive",
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
+
+    def test_reads_the_source_order_with_document_and_character_counts(
+        self, tmp_path: Path
+    ) -> None:
+        corpus = tmp_path / "expanded.jsonl"
+        corpus.write_text(
+            self.row("bejaia", "tamurt")
+            + self.row("bejaia", "azul")
+            + self.row("bouira", "tamurt"),
+            encoding="utf-8",
+        )
+        order, counts = expand.sources_in_file(corpus)
+        assert order == ["bejaia", "bouira"]
+        assert counts == {"bejaia": (2, 10), "bouira": (1, 6)}
+
+    def test_without_a_sidecar_the_last_source_is_rebuilt_and_the_rest_kept(
+        self, tmp_path: Path
+    ) -> None:
+        corpus = tmp_path / "expanded.jsonl"
+        corpus.write_text(
+            self.row("bejaia", "tamurt") + self.row("bouira", "azul") + '{"text": "torn',
+            encoding="utf-8",
+        )
+        assert expand.resume_from_file(corpus) == {"bejaia": (1, 6)}
+        assert corpus.read_text(encoding="utf-8") == self.row("bejaia", "tamurt")
+        assert expand._read_progress(corpus) == ["bejaia"]
+
+    def test_a_sidecar_source_is_kept_even_when_the_file_ends_there(self, tmp_path: Path) -> None:
+        corpus = tmp_path / "expanded.jsonl"
+        corpus.write_text(
+            self.row("a", "x") + self.row("b", "y") + self.row("c", "z"), encoding="utf-8"
+        )
+        expand._write_progress(corpus, ["a", "b"])
+        assert list(expand.resume_from_file(corpus)) == ["a", "b"]
+        assert corpus.read_text(encoding="utf-8") == self.row("a", "x") + self.row("b", "y")
+
+    def test_a_sidecar_source_the_file_no_longer_holds_is_ignored(self, tmp_path: Path) -> None:
+        corpus = tmp_path / "expanded.jsonl"
+        corpus.write_text(self.row("a", "x"), encoding="utf-8")
+        expand._write_progress(corpus, ["a", "gone"])
+        assert list(expand.resume_from_file(corpus)) == ["a"]
+
+    def test_a_lone_source_without_a_sidecar_is_rebuilt_whole(self, tmp_path: Path) -> None:
+        corpus = tmp_path / "expanded.jsonl"
+        corpus.write_text(self.row("a", "x") + '{"text": "torn', encoding="utf-8")
+        assert expand.resume_from_file(corpus) == {}
+        assert corpus.read_text(encoding="utf-8") == ""
+
+    def test_a_missing_file_reports_nothing(self, tmp_path: Path) -> None:
+        assert expand.resume_from_file(tmp_path / "absent.jsonl") == {}
+
+    @staticmethod
+    def corpus_tree(root: Path) -> None:
+        """The two text sources the extractor reads without OCR: Quran surahs and kabyle-corpus."""
+        verse = "Tamurt n Leqbayel tella deg ugafa n Lezzayer, gar yidurar d yill."
+        quran = root / "abdelhaqueidali.quran-kab"
+        quran.mkdir(parents=True)
+        verses = "".join(f"1\t{verse}\n" for _ in range(4))
+        (quran / "quran_ascii_latin_amazigh_arabic_scripts.tsv").write_text(
+            f"surah_number\tlatin_script\n{verses}", encoding="utf-8"
+        )
+        corpus = root / "taqbaylit.kabyle-corpus"
+        corpus.mkdir(parents=True)
+        (corpus / "kabyle_corpus_clean.jsonl").write_text(
+            json.dumps({"text": " ".join([verse] * 5)}) + "\n", encoding="utf-8"
+        )
+
+    @staticmethod
+    def extract(raw_root: Path, out: Path, *, resume: bool = False) -> list[expand.ExpandTally]:
+        return expand.extract_pdfs_and_text(
+            FakeScorer(),
+            raw_root=raw_root,
+            raw_v1_root=raw_root.parent / "raw_v1",
+            models_root=raw_root.parent / "models",
+            out_path=out,
+            resume=resume,
+        )
+
+    def test_a_later_resume_leaves_a_finished_extraction_untouched(self, tmp_path: Path) -> None:
+        raw_root = tmp_path / "raw"
+        self.corpus_tree(raw_root)
+        out = tmp_path / "expanded.jsonl"
+        first = self.extract(raw_root, out)
+        assert sum(tally.kept for tally in first) == 2
+        written = out.read_text(encoding="utf-8")
+        again = self.extract(raw_root, out, resume=True)
+        assert out.read_text(encoding="utf-8") == written
+        assert [tally.resumed for tally in again] == [True, True]
+        assert sum(tally.kept for tally in again) == 2
+
+    def test_a_crash_boundary_rebuilds_only_the_source_it_cut_off(self, tmp_path: Path) -> None:
+        raw_root = tmp_path / "raw"
+        self.corpus_tree(raw_root)
+        out = tmp_path / "expanded.jsonl"
+        self.extract(raw_root, out)
+        kept = [
+            line
+            for line in out.read_text(encoding="utf-8").splitlines()
+            if json.loads(line)["source"] == "abdelhaqueidali.quran-kab"
+        ]
+        out.write_text("\n".join(kept) + "\n", encoding="utf-8")
+        expand._progress_path(out).unlink()
+        self.extract(raw_root, out, resume=True)
+        sources = [
+            json.loads(line)["source"] for line in out.read_text(encoding="utf-8").splitlines()
+        ]
+        assert sources.count("abdelhaqueidali.quran-kab") == len(kept)
+        assert sources.count("taqbaylit.kabyle-corpus") == 1
+
+
 class TestMultiFormatReplayParquet:
     def test_reads_problem_solution_and_messages_parquet_schemas(self, tmp_path: Path) -> None:
         ps_path = tmp_path / "math.parquet"

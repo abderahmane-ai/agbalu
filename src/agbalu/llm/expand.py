@@ -36,7 +36,7 @@ from agbalu.llm.documents import (
     verdict,
     windows,
 )
-from agbalu.llm.progress import Tracker, stage
+from agbalu.llm.progress import Tracker, progress, stage
 from agbalu.normalise import Normaliser
 
 if TYPE_CHECKING:
@@ -197,6 +197,9 @@ class ExpandTally:
     kept: int = 0
     characters: int = 0
     rejected: Tally[str] = field(default_factory=Tally)
+    # True when an earlier run wrote this source's rows: `kept` and `characters` are read back
+    # from the file, while `read` and `rejected` count this invocation alone.
+    resumed: bool = False
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -207,6 +210,7 @@ class ExpandTally:
             "kept": self.kept,
             "characters": self.characters,
             "rejected": dict(sorted(self.rejected.items())),
+            "resumed": self.resumed,
         }
 
 
@@ -532,6 +536,119 @@ def _read_quran_surahs(tsv_path: Path, normaliser: Normaliser) -> Iterator[str]:
             yield text
 
 
+def _progress_path(out_path: Path) -> Path:
+    """The sidecar naming the sources a run has written whole, beside the corpus itself."""
+    return out_path.with_name(f"{out_path.name}.progress.json")
+
+
+def _write_progress(out_path: Path, completed: list[str]) -> None:
+    """Record the finished sources, atomically, so a crash cannot tear the sidecar."""
+    path = _progress_path(out_path)
+    temporary = path.with_name(f"{path.name}.tmp")
+    temporary.write_text(json.dumps({"completed": completed}, indent=2) + "\n", encoding="utf-8")
+    temporary.replace(path)
+
+
+def _read_progress(out_path: Path) -> list[str]:
+    """The sources an earlier run finished, or an empty list when there is no sidecar."""
+    path = _progress_path(out_path)
+    if not path.is_file():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    completed = payload.get("completed") if isinstance(payload, dict) else None
+    if not isinstance(completed, list):
+        return []
+    return [source for source in completed if isinstance(source, str)]
+
+
+def sources_in_file(out_path: Path) -> tuple[list[str], dict[str, tuple[int, int]]]:
+    """A corpus file's source ids in order, each with its `(documents, characters)`.
+
+    A torn last line — what a crash leaves — is skipped rather than raised on.
+    """
+    order: list[str] = []
+    counts: dict[str, tuple[int, int]] = {}
+    if not out_path.is_file():
+        return order, counts
+    with out_path.open(encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(row, dict):
+                continue
+            source = row.get("source")
+            text = row.get("text")
+            if not isinstance(source, str) or not source:
+                continue
+            length = len(text) if isinstance(text, str) else 0
+            documents, characters = counts.get(source, (0, 0))
+            if source not in counts:
+                order.append(source)
+            counts[source] = (documents + 1, characters + length)
+    return order, counts
+
+
+def _truncate_to_sources(out_path: Path, keep: set[str]) -> None:
+    """Rewrite *out_path* with only the rows of *keep*, dropping every other and torn line."""
+    temporary = out_path.with_name(f"{out_path.name}.tmp")
+    with (
+        out_path.open(encoding="utf-8", errors="replace") as source,
+        temporary.open("w", encoding="utf-8") as target,
+    ):
+        for line in source:
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(row, dict) and row.get("source") in keep:
+                target.write(line if line.endswith("\n") else f"{line}\n")
+    temporary.replace(out_path)
+
+
+def resume_from_file(out_path: Path) -> dict[str, tuple[int, int]]:
+    """Keep the sources an earlier run finished, and report each one's document count.
+
+    The sidecar `<name>.progress.json` is authoritative when it exists. Without it — a file
+    written before the sidecar existed — every source but the last is trusted, because the
+    last is the one an interrupted run was writing. Rows of every other source are dropped,
+    which takes a torn final line with them, and the file is left ready to append to.
+    """
+    order, counts = sources_in_file(out_path)
+    if not order:
+        return {}
+    recorded = set(_read_progress(out_path))
+    finished = [source for source in order if source in recorded] if recorded else order[:-1]
+    _truncate_to_sources(out_path, set(finished))
+    _write_progress(out_path, finished)
+    progress(
+        "resume",
+        source=str(out_path),
+        finished=len(finished),
+        remaining=len(order) - len(finished),
+    )
+    return {source: counts[source] for source in finished}
+
+
+def _source_tally(
+    name: str,
+    licence: str,
+    redistribution: str,
+    earlier: tuple[int, int] | None,
+) -> ExpandTally:
+    """A source's tally: the earlier run's counts when it is finished, a fresh one otherwise."""
+    if earlier is None:
+        return ExpandTally(name, licence, redistribution)
+    documents, characters = earlier
+    return ExpandTally(
+        name, licence, redistribution, kept=documents, characters=characters, resumed=True
+    )
+
+
 def extract_pdfs_and_text(
     scorer: LanguageScorer,
     *,
@@ -542,6 +659,7 @@ def extract_pdfs_and_text(
     device: str = "cuda",
     use_ocr: bool = True,
     use_boulifa: bool = False,
+    resume: bool = False,
 ) -> list[ExpandTally]:
     """Extract PDFs, reconstructed theses, Quran Surahs, and new text corpora on the HPC.
 
@@ -549,6 +667,12 @@ def extract_pdfs_and_text(
     taqbaylit repos already carry correct Kabyle diacritics; legacy-font text is
     handled upstream by repair_legacy_font().  Boulifa is reserved for the audio
     pipeline (expand-audio) where Fadhma ASR output is always diacritic-free.
+
+    With *resume* the sources an earlier run wrote whole are read back, the file is
+    truncated to them — a source cut off mid-write is dropped, so no row is ever written
+    twice — and only the sources left over are extracted. Their progress sidecar is
+    rewritten as each one lands, so a later restart resumes from there too. Without it, or
+    without an existing *out_path*, the file is rebuilt from the first pdf.
     """
     normaliser = Normaliser()
     ocr = (
@@ -565,11 +689,31 @@ def extract_pdfs_and_text(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     tallies: list[ExpandTally] = []
 
-    with out_path.open("w", encoding="utf-8") as sink:
+    # Resume: the sources an earlier run wrote whole, each with its document count. Without
+    # them — no --resume, or no file — every source is extracted again from the first pdf.
+    finished: dict[str, tuple[int, int]] = {}
+    if resume and out_path.is_file():
+        finished = resume_from_file(out_path)
+    if not finished:
+        # Nothing is reused, so a sidecar left by an earlier run would be stale.
+        _progress_path(out_path).unlink(missing_ok=True)
+
+    completed = list(finished)
+    with out_path.open("a" if finished else "w", encoding="utf-8") as sink:
+
+        def mark(source: str) -> None:
+            """A source is whole once its rows are flushed, so a restart never repeats it."""
+            completed.append(source)
+            sink.flush()
+            _write_progress(out_path, completed)
+
         # 1. All 4 taqbaylit PDF repositories (1,560 PDFs)
         for source_id, _, licence, redist in PDF_REPOS:
             folder = raw_root / source_id
             if not folder.is_dir():
+                continue
+            if source_id in finished:
+                tallies.append(_source_tally(source_id, licence, redist, finished[source_id]))
                 continue
             pdfs = sorted(p for p in folder.rglob("*") if p.suffix.lower() == ".pdf")
             tally = ExpandTally(source_id, licence, redist)
@@ -596,6 +740,7 @@ def extract_pdfs_and_text(
                         + "\n"
                     )
                 tracker.advance()
+            mark(source_id)
 
         # 2. Reconstructed continuous documents from UMMTO, UBouira, HCA, and adlis-hca.txt
         imsidag_sources = (
@@ -606,6 +751,11 @@ def extract_pdfs_and_text(
         for source_id, licence, redist in imsidag_sources:
             folder = raw_v1_root / source_id
             if not folder.is_dir():
+                continue
+            if source_id in finished:
+                tallies.append(
+                    _source_tally(f"{source_id}.docs", licence, redist, finished[source_id])
+                )
                 continue
             tally = ExpandTally(f"{source_id}.docs", licence, redist)
             tallies.append(tally)
@@ -628,103 +778,117 @@ def extract_pdfs_and_text(
                     )
                     + "\n"
                 )
+            mark(source_id)
 
         # 3. Quran 114 Surahs (`abdelhaqueidali/Quran-kabyle-ayt-mensour`)
+        quran_source = "abdelhaqueidali.quran-kab"
         quran_tsv = (
             raw_root / "abdelhaqueidali.quran-kab" / "quran_ascii_latin_amazigh_arabic_scripts.tsv"
         )
         if quran_tsv.is_file():
-            tally = ExpandTally("abdelhaqueidali.quran-kab", "cc-by-4.0", "permissive")
+            tally = _source_tally(
+                quran_source, "cc-by-4.0", "permissive", finished.get(quran_source)
+            )
             tallies.append(tally)
-            for surah_text in _read_quran_surahs(quran_tsv, normaliser):
-                tally.read += 1
-                if not is_kabyle_window(surah_text, scorer, min_prob=0.60):
-                    tally.rejected["language"] += 1
-                    continue
-                tally.kept += 1
-                tally.characters += len(surah_text)
-                sink.write(
-                    json.dumps(
-                        {
-                            "text": surah_text,
-                            "source": tally.source_id,
-                            "licence": tally.licence,
-                            "redistribution": tally.redistribution,
-                        },
-                        ensure_ascii=False,
+            if not tally.resumed:
+                for surah_text in _read_quran_surahs(quran_tsv, normaliser):
+                    tally.read += 1
+                    if not is_kabyle_window(surah_text, scorer, min_prob=0.60):
+                        tally.rejected["language"] += 1
+                        continue
+                    tally.kept += 1
+                    tally.characters += len(surah_text)
+                    sink.write(
+                        json.dumps(
+                            {
+                                "text": surah_text,
+                                "source": tally.source_id,
+                                "licence": tally.licence,
+                                "redistribution": tally.redistribution,
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
                     )
-                    + "\n"
-                )
+                mark(quran_source)
 
         # 4. `taqbaylit/kabyle-corpus` JSONL
+        kab_source = "taqbaylit.kabyle-corpus"
         kab_corpus_jsonl = raw_root / "taqbaylit.kabyle-corpus" / "kabyle_corpus_clean.jsonl"
         if kab_corpus_jsonl.is_file():
-            tally = ExpandTally("taqbaylit.kabyle-corpus", "mit", "permissive")
+            tally = _source_tally(kab_source, "mit", "permissive", finished.get(kab_source))
             tallies.append(tally)
-            with kab_corpus_jsonl.open(encoding="utf-8", errors="replace") as handle:
-                for line in handle:
-                    if not line.strip():
-                        continue
-                    tally.read += 1
-                    try:
-                        raw_txt = str(json.loads(line).get("text", "") or "")
-                    except json.JSONDecodeError:
-                        tally.rejected["invalid_json"] += 1
-                        continue
-                    cleaned = clean(repair_legacy_font(raw_txt), normaliser)
-                    if len(cleaned) < MIN_DOCUMENT_CHARS:
-                        tally.rejected["too_short"] += 1
-                        continue
-                    if not is_kabyle_window(cleaned, scorer, min_prob=0.65):
-                        tally.rejected["language"] += 1
-                        continue
-                    tally.kept += 1
-                    tally.characters += len(cleaned)
-                    sink.write(
-                        json.dumps(
-                            {
-                                "text": cleaned,
-                                "source": tally.source_id,
-                                "licence": tally.licence,
-                                "redistribution": tally.redistribution,
-                            },
-                            ensure_ascii=False,
+            if not tally.resumed:
+                with kab_corpus_jsonl.open(encoding="utf-8", errors="replace") as handle:
+                    for line in handle:
+                        if not line.strip():
+                            continue
+                        tally.read += 1
+                        try:
+                            raw_txt = str(json.loads(line).get("text", "") or "")
+                        except json.JSONDecodeError:
+                            tally.rejected["invalid_json"] += 1
+                            continue
+                        cleaned = clean(repair_legacy_font(raw_txt), normaliser)
+                        if len(cleaned) < MIN_DOCUMENT_CHARS:
+                            tally.rejected["too_short"] += 1
+                            continue
+                        if not is_kabyle_window(cleaned, scorer, min_prob=0.65):
+                            tally.rejected["language"] += 1
+                            continue
+                        tally.kept += 1
+                        tally.characters += len(cleaned)
+                        sink.write(
+                            json.dumps(
+                                {
+                                    "text": cleaned,
+                                    "source": tally.source_id,
+                                    "licence": tally.licence,
+                                    "redistribution": tally.redistribution,
+                                },
+                                ensure_ascii=False,
+                            )
+                            + "\n"
                         )
-                        + "\n"
-                    )
+                mark(kab_source)
 
         # 5. `Sifal/KabyleWikipedia` (`WIKABV1.zip`)
+        wiki_source = "sifal.kabyle-wikipedia"
         wikab_zip = raw_root / "sifal.kabyle-wikipedia" / "WIKABV1.zip"
         if wikab_zip.is_file():
-            tally = ExpandTally("sifal.kabyle-wikipedia", "cc-by-sa-3.0", "share-alike")
+            tally = _source_tally(
+                wiki_source, "cc-by-sa-3.0", "share-alike", finished.get(wiki_source)
+            )
             tallies.append(tally)
-            with zipfile.ZipFile(wikab_zip) as archive:
-                for member in sorted(archive.namelist()):
-                    if not member.endswith(".txt"):
-                        continue
-                    tally.read += 1
-                    raw_txt = archive.read(member).decode("utf-8", errors="replace")
-                    cleaned = clean(repair_legacy_font(raw_txt), normaliser)
-                    if len(cleaned) < MIN_DOCUMENT_CHARS:
-                        tally.rejected["too_short"] += 1
-                        continue
-                    if not is_kabyle_window(cleaned, scorer, min_prob=0.65):
-                        tally.rejected["language"] += 1
-                        continue
-                    tally.kept += 1
-                    tally.characters += len(cleaned)
-                    sink.write(
-                        json.dumps(
-                            {
-                                "text": cleaned,
-                                "source": tally.source_id,
-                                "licence": tally.licence,
-                                "redistribution": tally.redistribution,
-                            },
-                            ensure_ascii=False,
+            if not tally.resumed:
+                with zipfile.ZipFile(wikab_zip) as archive:
+                    for member in sorted(archive.namelist()):
+                        if not member.endswith(".txt"):
+                            continue
+                        tally.read += 1
+                        raw_txt = archive.read(member).decode("utf-8", errors="replace")
+                        cleaned = clean(repair_legacy_font(raw_txt), normaliser)
+                        if len(cleaned) < MIN_DOCUMENT_CHARS:
+                            tally.rejected["too_short"] += 1
+                            continue
+                        if not is_kabyle_window(cleaned, scorer, min_prob=0.65):
+                            tally.rejected["language"] += 1
+                            continue
+                        tally.kept += 1
+                        tally.characters += len(cleaned)
+                        sink.write(
+                            json.dumps(
+                                {
+                                    "text": cleaned,
+                                    "source": tally.source_id,
+                                    "licence": tally.licence,
+                                    "redistribution": tally.redistribution,
+                                },
+                                ensure_ascii=False,
+                            )
+                            + "\n"
                         )
-                        + "\n"
-                    )
+                mark(wiki_source)
 
     return tallies
 
