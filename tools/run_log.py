@@ -185,14 +185,6 @@ class View:
         )
 
     def on_eval(self, event: dict[str, object]) -> Rendered:
-        if "dev_cer" in event:
-            cer_val = float(str(event["dev_cer"]))
-            val_loss = float(str(event.get("validation_loss", 0.0)))
-            eval_msg = (
-                f"== eval at step {event.get('step')}: "
-                f"Dev CER {cer_val:.2f}% | Dev Loss {val_loss:.4f}"
-            )
-            return Rendered(eval_msg, live=False)
         scores = event.get("bpc")
         if not isinstance(scores, dict):
             return Rendered(f"eval at step {event.get('step')}: {scores}", live=False)
@@ -228,16 +220,12 @@ class View:
         )
 
     def on_best(self, event: dict[str, object]) -> Rendered:
-        if "dev_cer" in event:
-            cer_val = float(str(event["dev_cer"]))
-            loss_val = float(str(event.get("dev_loss", 0.0)))
-            chosen_on = f"Dev CER {cer_val:.2f}% (Loss {loss_val:.4f})"
-        elif "validation_loss" in event and event["validation_loss"] is not None:
-            chosen_on = f"validation loss {float(str(event['validation_loss'])):.4f}"
-        elif "kab_bpc" in event and event["kab_bpc"] is not None:
-            chosen_on = f"Kabyle bpc {float(str(event['kab_bpc'])):.3f}"
-        else:
-            chosen_on = str(event.get("criterion", "best metric"))
+        loss = event.get("validation_loss")
+        chosen_on = (
+            f"validation loss {float(str(loss)):.4f}"
+            if loss is not None
+            else f"Kabyle bpc {float(str(event['kab_bpc'])):.3f}"
+        )
         return Rendered(
             f"   new best checkpoint: {chosen_on} at step {event.get('step')}",
             live=False,

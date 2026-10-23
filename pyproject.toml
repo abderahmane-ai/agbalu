@@ -145,8 +145,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # T20: a command-line entry point reports to stdout; that is the whole of its job. The
 #      library modules it calls stay print-free, and the rule still applies to them.
-# PLR0915: an argument parser with subcommands naturally has many statement lines.
-"src/agbalu/**/cli.py" = ["T20", "PLR0915"]
+"src/agbalu/**/cli.py" = ["T20"]
 # `src/agbalu/hub/**` is copied verbatim into the published repositories and loaded there
 # by `transformers` with `trust_remote_code=True`, so its shape is that library's contract
 # rather than this project's.
@@ -311,9 +310,6 @@ ignore = [
 # S603, S607: `ssh`, `rsync` and `tmux` with arguments this module builds and quotes; the
 #             only user values are run ids and model paths, passed through `shlex.quote`.
 "tools/launch.py" = ["S603", "S607"]
-"tools/launch_speech.py" = ["S603", "S607"]
-"tools/acquire_augment_data.py" = ["S603", "S607"]
-"tools/build_speech_data.py" = ["PLR0912", "PLR0915"]
 # PLR0913: `select` takes the pool, the two exclusion sets, the size and the three
 #          constants that define the set's shape — length floor, speaker cap and seed.
 #          Each is a separate decision a reviewer has to be able to see and a test has to
@@ -443,20 +439,6 @@ ignore = [
 #          Bundling the splits into a wrapper type would satisfy the counter and carry
 #          no meaning.
 "src/agbalu/model/trainer.py" = ["PLR0913"]
-# Speech acoustic augmentation and remote training loops on HPC:
-# S311: pseudo-random generators sample acoustic perturbations and RIRs for data augmentation.
-# PLR0911: augment dispatches among the mutually exclusive acoustic condition branches.
-# PLR0912, PLR0915, PLR2004: train and smoke loops manage checkpointing, warmup transitions, validation and logging.
-# PLC0415: pyctcdecode and Dihya are optional extras loaded at inference/manifest time.
-# SLF001: transformers Wav2Vec2BertModel declares `_get_feat_extract_output_lengths` as a protected helper.
-"src/agbalu/speech/augment.py" = ["S311", "PLR0911", "PLR2004"]
-"src/agbalu/speech/decode.py" = ["PLR0913", "PLC0415"]
-"src/agbalu/speech/evaluate.py" = ["PLR0913"]
-"src/agbalu/speech/manifest.py" = ["PLR0912", "PLR0913", "PLR0915", "PLC0415", "PLR2004"]
-"src/agbalu/speech/model.py" = ["SLF001", "PLR2004"]
-"src/agbalu/speech/partition.py" = ["S311"]
-"src/agbalu/speech/train.py" = ["PLR0912", "PLR0915", "PLR2004", "TRY003", "EM102", "PTH105"]
-"src/agbalu/speech/smoke.py" = ["PLR0915", "PLR2004", "TRY003", "EM102"]
 # S603:    `follow` runs the `modal` CLI resolved through `shutil.which`, with a fixed
 #          argument list, no shell, and no value from outside this module. The app name is
 #          a module constant.
