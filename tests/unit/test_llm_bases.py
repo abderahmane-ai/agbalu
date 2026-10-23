@@ -7,7 +7,15 @@ from pathlib import Path
 
 import pytest
 
-from agbalu.llm.bases import BASE, INSTRUCT, PILOT, REVISIONS, TEXT_TOWER_PARAMETERS
+from agbalu.llm.bases import (
+    BASE,
+    BASE_9B,
+    INSTRUCT,
+    INSTRUCT_9B,
+    PILOT,
+    REVISIONS,
+    TEXT_TOWER_PARAMETERS,
+)
 
 CONSUMERS = (
     Path("src/agbalu/llm/cli.py"),
@@ -22,6 +30,7 @@ class TestNames:
 
     def test_the_merge_target_is_the_base_without_its_suffix(self) -> None:
         assert BASE.removesuffix("-Base") == INSTRUCT
+        assert BASE_9B.removesuffix("-Base") == INSTRUCT_9B
 
     def test_the_pilot_is_a_base_checkpoint_of_the_same_family(self) -> None:
         assert PILOT.startswith("Qwen/Qwen3.5-")
@@ -30,16 +39,17 @@ class TestNames:
 
 class TestRevisions:
     def test_both_merged_checkpoints_are_pinned_to_a_full_commit(self) -> None:
-        assert set(REVISIONS) == {BASE, INSTRUCT}
+        assert set(REVISIONS) == {BASE, INSTRUCT, BASE_9B, INSTRUCT_9B}
         assert all(re.fullmatch(r"[0-9a-f]{40}", sha) for sha in REVISIONS.values())
 
 
 class TestTextTower:
     def test_every_checkpoint_has_a_count(self) -> None:
-        assert set(TEXT_TOWER_PARAMETERS) == {BASE, INSTRUCT, PILOT}
+        assert set(TEXT_TOWER_PARAMETERS) == {BASE, INSTRUCT, BASE_9B, INSTRUCT_9B, PILOT}
 
     def test_the_twin_shares_the_base_count_tensor_for_tensor(self) -> None:
         assert TEXT_TOWER_PARAMETERS[BASE] == TEXT_TOWER_PARAMETERS[INSTRUCT]
+        assert TEXT_TOWER_PARAMETERS[BASE_9B] == TEXT_TOWER_PARAMETERS[INSTRUCT_9B]
 
     def test_the_pilot_is_about_a_fifth_of_the_base(self) -> None:
         ratio = TEXT_TOWER_PARAMETERS[PILOT] / TEXT_TOWER_PARAMETERS[BASE]

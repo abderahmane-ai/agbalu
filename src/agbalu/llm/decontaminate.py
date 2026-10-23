@@ -25,7 +25,8 @@ MIN_WORDS: Final = 8
 MIN_WHOLE_WORDS: Final = 4
 """8 of 2,000 held-out Kabyle sentences, all under `MIN_WORDS`, were found inside kept
 documents on 2026-10-14; a held-out sentence is indexed whole from this length."""
-WORD: Final = re.compile(r"\w+")
+WORD: Final = re.compile(r"\d+(?=[^\W\d_])|[^\W_]+")
+"""Leading verse digits split from letters (`STATE.md` 2026-10-14: `21lameɛna` hid a verse)."""
 
 HELDOUT_DIR: Final = Path("data/processed/llm")
 FLORES_ROOT: Final = Path("data/raw/hf.flores-plus-kab")

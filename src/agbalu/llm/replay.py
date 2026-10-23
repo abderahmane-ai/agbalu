@@ -60,7 +60,17 @@ REPLAY_SOURCES: Final = (
         "parquet",
         "text",
         "odc-by",
-        0.45,
+        0.25,
+        0.25,
+    ),
+    ReplaySource(
+        "cosmopedia-v2",
+        "HuggingFaceTB/smollm-corpus",
+        "cosmopedia-v2/",
+        "parquet",
+        "text",
+        "apache-2.0",
+        0.10,
         0.25,
     ),
     ReplaySource(
@@ -70,8 +80,18 @@ REPLAY_SOURCES: Final = (
         "parquet",
         "text",
         "odc-by",
-        0.30,
+        0.15,
         0.25,
+    ),
+    ReplaySource(
+        "wikipedia-fra",
+        "wikimedia/wikipedia",
+        "20231101.fr/",
+        "parquet",
+        "title+text",
+        "cc-by-sa-3.0",
+        0.10,
+        0.35,
     ),
     ReplaySource(
         "finemath-4plus",
@@ -80,8 +100,48 @@ REPLAY_SOURCES: Final = (
         "parquet",
         "text",
         "odc-by",
-        0.125,
-        0.25,
+        0.10,
+        0.35,
+    ),
+    ReplaySource(
+        "infiwebmath-4plus",
+        "HuggingFaceTB/finemath",
+        "infiwebmath-4plus/",
+        "parquet",
+        "text",
+        "odc-by",
+        0.05,
+        0.35,
+    ),
+    ReplaySource(
+        "openmath-cot",
+        "nvidia/OpenMathReasoning",
+        "data/cot-",
+        "parquet",
+        "problem+solution",
+        "cc-by-4.0",
+        0.075,
+        0.35,
+    ),
+    ReplaySource(
+        "openthoughts-stem",
+        "open-thoughts/OpenThoughts-114k",
+        "metadata/",
+        "parquet",
+        "openthoughts",
+        "apache-2.0",
+        0.075,
+        0.50,
+    ),
+    ReplaySource(
+        "tulu3-ifeval",
+        "allenai/tulu-3-sft-personas-instruction-following",
+        "data/",
+        "parquet",
+        "messages",
+        "odc-by",
+        0.05,
+        0.95,
     ),
     ReplaySource(
         "opc-algorithmic-code",
@@ -90,10 +150,76 @@ REPLAY_SOURCES: Final = (
         "jsonl",
         "text",
         "odc-by",
-        0.125,
+        0.05,
         0.25,
     ),
 )
+
+
+def _format_messages(messages: object) -> str:
+    if not isinstance(messages, list):
+        return ""
+    parts: list[str] = []
+    for turn in messages:
+        if not isinstance(turn, dict):
+            continue
+        role = str(turn.get("role", "")).strip().capitalize()
+        content = str(turn.get("content", "")).strip()
+        if role and content:
+            parts.append(f"{role}:\n{content}")
+    return "\n\n".join(parts)
+
+
+def _parquet_columns(name: str, available: set[str]) -> list[str]:
+    if name == "title+text":
+        return ["title", "text"]
+    if name == "problem+solution":
+        sol_col = "generated_solution" if "generated_solution" in available else "solution"
+        return ["problem", sol_col]
+    if name == "openthoughts":
+        return ["problem", "deepseek_reasoning", "deepseek_solution"]
+    if name == "messages":
+        return ["messages"]
+    return [name]
+
+
+def _parquet_rows(path: Path, name: str) -> Iterator[object]:
+    import pyarrow.parquet as pq
+
+    handle = pq.ParquetFile(path)
+    available = set(handle.schema_arrow.names)
+    needed = _parquet_columns(name, available)
+    if any(col not in available for col in needed):
+        message = f"{path}: no column {name!r}; has {handle.schema_arrow.names}"
+        raise ReplayError(message)
+
+    for batch in handle.iter_batches(columns=needed, batch_size=2048):
+        cols = [batch.column(c).to_pylist() for c in needed]
+        if name == "title+text":
+            for title, text in zip(cols[0], cols[1], strict=True):
+                t_str, b_str = str(title or "").strip(), str(text or "").strip()
+                yield f"{t_str}\n\n{b_str}".strip() if b_str else ""
+        elif name == "problem+solution":
+            for prob, sol in zip(cols[0], cols[1], strict=True):
+                p_str, s_str = str(prob or "").strip(), str(sol or "").strip()
+                yield f"Problem:\n{p_str}\n\nSolution:\n{s_str}" if p_str and s_str else ""
+        elif name == "openthoughts":
+            for prob, rea, sol in zip(cols[0], cols[1], cols[2], strict=True):
+                p_s, r_s, s_s = (
+                    str(prob or "").strip(),
+                    str(rea or "").strip(),
+                    str(sol or "").strip(),
+                )
+                yield (
+                    f"Problem:\n{p_s}\n\n<think>\n{r_s}\n</think>\n\n{s_s}"
+                    if p_s and r_s and s_s
+                    else ""
+                )
+        elif name == "messages":
+            for msgs in cols[0]:
+                yield _format_messages(msgs)
+        else:
+            yield from cols[0]
 
 
 def budgets(total: int, sources: Sequence[ReplaySource] = REPLAY_SOURCES) -> dict[str, int]:
@@ -116,14 +242,7 @@ def shard_order(files: Sequence[str], seed: int) -> list[str]:
 
 def _rows(path: Path, layout: Format, name: str) -> Iterator[object]:
     if layout == "parquet":
-        import pyarrow.parquet as pq
-
-        handle = pq.ParquetFile(path)
-        if name not in handle.schema_arrow.names:
-            message = f"{path}: no column {name!r}; has {handle.schema_arrow.names}"
-            raise ReplayError(message)
-        for batch in handle.iter_batches(columns=[name], batch_size=2048):
-            yield from batch.column(name).to_pylist()
+        yield from _parquet_rows(path, name)
         return
     with path.open(encoding="utf-8") as stream:
         for number, line in enumerate(stream, start=1):

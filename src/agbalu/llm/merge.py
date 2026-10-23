@@ -155,23 +155,29 @@ def recastable(cpt: TensorInfo, base: TensorInfo) -> bool:
 
 def text_tower(base: Checkpoint, cpt: Checkpoint, instruct: Checkpoint) -> list[str]:
     """The tensors to merge, after proving the three checkpoints agree on them exactly."""
-    for label, checkpoint in (("base", base), ("cpt", cpt), ("instruct", instruct)):
-        if not is_tied(checkpoint.config):
-            message = f"{label} {checkpoint.root}: tie_word_embeddings is not true"
-            raise MergeError(message)
-        if "lm_head.weight" in checkpoint.shards:
-            message = f"{label} {checkpoint.root}: an lm_head.weight beside tied embeddings"
-            raise MergeError(message)
-    outside = cpt.names() - cpt.names(TEXT_PREFIX)
+    tied_flags = [is_tied(c.config) for c in (base, cpt, instruct)]
+    all_untied_with_head = not any(tied_flags) and all(
+        "lm_head.weight" in c.shards for c in (base, cpt, instruct)
+    )
+    if not all_untied_with_head:
+        for label, checkpoint in (("base", base), ("cpt", cpt), ("instruct", instruct)):
+            if not is_tied(checkpoint.config):
+                message = f"{label} {checkpoint.root}: tie_word_embeddings is not true"
+                raise MergeError(message)
+            if "lm_head.weight" in checkpoint.shards:
+                message = f"{label} {checkpoint.root}: an lm_head.weight beside tied embeddings"
+                raise MergeError(message)
+    extra_text = {"lm_head.weight"} if all_untied_with_head else set()
+    outside = cpt.names() - (cpt.names(TEXT_PREFIX) | extra_text)
     if outside:
         message = f"cpt {cpt.root} holds tensors outside the text tower: {listed(outside)}"
         raise MergeError(message)
-    names = base.names(TEXT_PREFIX)
+    names = base.names(TEXT_PREFIX) | ({"lm_head.weight"} & set(base.shards))
     if not names:
         message = f"base {base.root}: no tensor under {TEXT_PREFIX!r}"
         raise MergeError(message)
     for label, other in (("cpt", cpt), ("instruct", instruct)):
-        theirs = other.names(TEXT_PREFIX)
+        theirs = other.names(TEXT_PREFIX) | ({"lm_head.weight"} & set(other.shards))
         if theirs != names:
             message = (
                 f"{label} {other.root} text tower differs from base: "

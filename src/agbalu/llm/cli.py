@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Final, TextIO
 
 from agbalu.llm import (
     documents,
+    expand,
     holdout,
     mixture,
     pack,
@@ -38,6 +39,7 @@ from agbalu.llm.decontaminate import (
 )
 from agbalu.llm.documents import DocumentError
 from agbalu.llm.evaluate import PARTS, EvaluationError, HubTokenizer, Scorer, exit_criterion
+from agbalu.llm.expand import ExpandError
 from agbalu.llm.fertility import Encoder, FertilityError, report, sample
 from agbalu.llm.merge import ALPHAS, MergeError
 from agbalu.llm.mixture import MixtureError
@@ -279,11 +281,10 @@ def command_documents(args: argparse.Namespace) -> int:
     index, control = decontaminator()
     scorer = DihyaScorer(args.dihya, args.device or identifier_device())
     rejects = args.out.with_suffix(".rejects.jsonl")
+    sentences = expand.merge_expanded_sentences(documents.read_sentences(args.corpus))
     with atomic(args.out) as sink, atomic(rejects) as dropped:
         builder = documents.Builder(scorer, index, HubCounter(args.base), sink, dropped)
-        tallies = documents.build(
-            documents.DOCUMENT_SOURCES, documents.read_sentences(args.corpus), builder, registry
-        )
+        tallies = documents.build(documents.DOCUMENT_SOURCES, sentences, builder, registry)
     rows = [t.as_dict() for t in tallies]
     write_stats(
         stats_path(args.out),
@@ -307,10 +308,13 @@ def command_documents(args: argparse.Namespace) -> int:
 
 
 def command_aligned(args: argparse.Namespace) -> int:
+    from itertools import chain
+
     index, control = decontaminator()
+    records = chain(mixture.translation_records(), expand.read_expanded_aligned())
     with atomic(args.out) as sink:
         writer = mixture.AlignedWriter(index, HubCounter(args.base), sink, rate=args.rate)
-        tallies = mixture.build(ALIGNED_SOURCES, mixture.translation_records(), writer)
+        tallies = mixture.build(ALIGNED_SOURCES, records, writer)
     write_stats(
         stats_path(args.out),
         {
@@ -327,6 +331,124 @@ def command_aligned(args: argparse.Namespace) -> int:
             f"  {tally.name:22} read {tally.read:>9,} kept {tally.kept:>9,} {tally.tokens:>12,} tok"
         )
     print(f"-> {args.out}")
+    return 0
+
+
+def command_expand_fetch(args: argparse.Namespace) -> int:
+    manifest = expand.fetch_all(raw_root=args.raw_root, models_root=args.models_root)
+    write_stats(LLM_DIR / "expand-fetch.stats.json", manifest)
+    print(json.dumps(manifest, indent=2, ensure_ascii=False))
+    return 0
+
+
+def command_expand_pdfs(args: argparse.Namespace) -> int:
+    device = args.device or identifier_device()
+    scorer = DihyaScorer(args.dihya, device)
+    tallies = expand.extract_pdfs_and_text(
+        scorer,
+        raw_root=args.raw_root,
+        models_root=args.models_root,
+        out_path=args.out,
+        device=device,
+        use_ocr=not args.no_ocr,
+        use_boulifa=not args.no_boulifa,
+    )
+    write_stats(
+        stats_path(args.out),
+        {
+            "documents": sum(t.kept for t in tallies),
+            "characters": sum(t.characters for t in tallies),
+            "sources": [t.as_dict() for t in tallies],
+        },
+    )
+    for tally in tallies:
+        print(f"  {tally.source_id:36} read {tally.read:>7,} kept {tally.kept:>7,}")
+    print(f"-> {args.out}")
+    return 0
+
+
+def command_expand_audio(args: argparse.Namespace) -> int:
+    device = args.device or identifier_device()
+    scorer = DihyaScorer(args.dihya, device)
+    tallies = expand.extract_audio_corpora(
+        scorer,
+        raw_root=args.raw_root,
+        models_root=args.models_root,
+        out_path=args.out,
+        device=device,
+    )
+    write_stats(
+        stats_path(args.out),
+        {
+            "documents": sum(t.kept for t in tallies),
+            "characters": sum(t.characters for t in tallies),
+            "sources": [t.as_dict() for t in tallies],
+        },
+    )
+    for tally in tallies:
+        print(f"  {tally.source_id:36} read {tally.read:>7,} kept {tally.kept:>7,}")
+    print(f"-> {args.out}")
+    return 0
+
+
+def command_expand_aligned(args: argparse.Namespace) -> int:
+    device = args.device or identifier_device()
+    scorer = DihyaScorer(args.dihya, device)
+    counts = expand.extract_aligned_records(
+        scorer,
+        raw_root=args.raw_root,
+        out_path=args.out,
+    )
+    write_stats(
+        stats_path(args.out),
+        {"pairs": sum(counts.values()), "sources": counts},
+    )
+    for source_name, count in counts.items():
+        print(f"  {source_name:36} {count:>9,} pairs")
+    print(f"-> {args.out}")
+    return 0
+
+
+def command_compile(args: argparse.Namespace) -> int:
+    """Run documents -> aligned -> replay -> pack end-to-end on the HPC."""
+    doc_args = argparse.Namespace(
+        base=args.base,
+        registry=REGISTRY,
+        corpus=CORPUS,
+        dihya=DIHYA_RUN,
+        device=args.device,
+        out=DOCUMENTS_OUT,
+    )
+    aligned_args = argparse.Namespace(
+        base=args.base,
+        rate=HOLDOUT_RATE,
+        out=ALIGNED_OUT,
+    )
+    replay_args = argparse.Namespace(
+        base=args.base,
+        kabyle=DOCUMENTS_OUT,
+        aligned=ALIGNED_OUT,
+        cache=REPLAY_CACHE,
+        out=REPLAY_OUT,
+    )
+    pack_args = argparse.Namespace(
+        base=args.base,
+        kabyle=DOCUMENTS_OUT,
+        aligned=ALIGNED_OUT,
+        replay=REPLAY_OUT,
+        workers=PACK_WORKERS,
+        out=BLOCKS_OUT,
+    )
+    for step_name, fn, ns in (
+        ("documents", command_documents, doc_args),
+        ("aligned", command_aligned, aligned_args),
+        ("replay", command_replay, replay_args),
+        ("pack", command_pack, pack_args),
+    ):
+        with stage(f"compile:{step_name}"):
+            code = fn(ns)
+            if code != 0:
+                return code
     return 0
 
 
@@ -986,6 +1108,50 @@ def add_corpus_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser]
     sft.add_argument("--validation", type=Path, default=SFT_VALIDATION)
 
 
+def add_expansion_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    exp_fetch = sub.add_parser(
+        "expand-fetch", help="download new PDF, audio, text and parallel datasets on the HPC"
+    )
+    exp_fetch.add_argument("--raw-root", type=Path, default=expand.RAW_V2_ROOT)
+    exp_fetch.add_argument("--models-root", type=Path, default=expand.HUB_MODELS_ROOT)
+
+    exp_pdfs = sub.add_parser(
+        "expand-pdfs",
+        help="extract PDFs (PyMuPDF + Feraoun-Pro OCR + Boulifa + Dihya) and theses on the HPC",
+    )
+    exp_pdfs.add_argument("--raw-root", type=Path, default=expand.RAW_V2_ROOT)
+    exp_pdfs.add_argument("--models-root", type=Path, default=expand.HUB_MODELS_ROOT)
+    exp_pdfs.add_argument("--dihya", type=Path, default=DIHYA_RUN)
+    exp_pdfs.add_argument("--device", help="CUDA when present, else CPU")
+    exp_pdfs.add_argument("--no-ocr", action="store_true")
+    exp_pdfs.add_argument("--no-boulifa", action="store_true")
+    exp_pdfs.add_argument("--out", type=Path, default=expand.EXPANDED_DOCS_OUT)
+
+    exp_audio = sub.add_parser(
+        "expand-audio",
+        help="transcribe Chaine 2 and Tughalin with Fadhma-300M + Belaid + Boulifa + Dihya",
+    )
+    exp_audio.add_argument("--raw-root", type=Path, default=expand.RAW_V2_ROOT)
+    exp_audio.add_argument("--models-root", type=Path, default=expand.HUB_MODELS_ROOT)
+    exp_audio.add_argument("--dihya", type=Path, default=DIHYA_RUN)
+    exp_audio.add_argument("--device", help="CUDA when present, else CPU")
+    exp_audio.add_argument("--out", type=Path, default=expand.EXPANDED_AUDIO_OUT)
+
+    exp_aligned = sub.add_parser(
+        "expand-aligned", help="extract and Dihya-filter expanded parallel pairs"
+    )
+    exp_aligned.add_argument("--raw-root", type=Path, default=expand.RAW_V2_ROOT)
+    exp_aligned.add_argument("--dihya", type=Path, default=DIHYA_RUN)
+    exp_aligned.add_argument("--device", help="CUDA when present, else CPU")
+    exp_aligned.add_argument("--out", type=Path, default=expand.EXPANDED_ALIGNED_OUT)
+
+    comp = sub.add_parser(
+        "compile", help="compile documents, aligned, 10-source replay and packed blocks"
+    )
+    comp.add_argument("--base", default=BASE)
+    comp.add_argument("--device", help="CUDA when present, else CPU")
+
+
 def add_model_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     trainer = sub.add_parser("train", help="continued pretraining, resuming the run if it exists")
     trainer.add_argument("--run", required=True)
@@ -1055,6 +1221,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="agbalu-llm", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     add_corpus_commands(sub)
+    add_expansion_commands(sub)
     add_model_commands(sub)
     add_checkpoint_commands(sub)
     return parser
@@ -1068,6 +1235,11 @@ COMMANDS: Final[dict[str, Callable[[argparse.Namespace], int]]] = {
     "replay": command_replay,
     "pack": command_pack,
     "sft": command_sft,
+    "expand-fetch": command_expand_fetch,
+    "expand-pdfs": command_expand_pdfs,
+    "expand-audio": command_expand_audio,
+    "expand-aligned": command_expand_aligned,
+    "compile": command_compile,
     "train": command_train,
     "smoke": command_smoke,
     "evaluate": command_evaluate,
@@ -1089,6 +1261,7 @@ COMMANDS: Final[dict[str, Callable[[argparse.Namespace], int]]] = {
 
 ERRORS: Final = (
     DataError,
+    ExpandError,
     FilesError,
     TranslationError,
     SeedError,

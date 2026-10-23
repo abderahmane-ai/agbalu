@@ -426,7 +426,8 @@ def build(
                 stats.read += 1
                 builder.reject(stats, f"sentences:{row.line}", "superseded")
                 continue
-            builder.offer(row.text, f"sentences:{row.line}", stats, is_document=False)
+            is_doc = len(row.text) >= MIN_DOCUMENT_CHARS and "\n" in row.text
+            builder.offer(row.text, f"sentences:{row.line}", stats, is_document=is_doc)
         builder.flush()
 
     for stats in builder.stats.values():

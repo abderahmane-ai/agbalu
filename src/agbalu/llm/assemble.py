@@ -37,7 +37,7 @@ REPORT_FILE: Final = "assembly.json"
 
 def check_tower(template: Checkpoint, tower: Checkpoint) -> set[str]:
     """The text-tower names, after proving the tower holds exactly those tensors."""
-    expected = template.names(TEXT_PREFIX)
+    expected = template.names(TEXT_PREFIX) | ({"lm_head.weight"} & set(template.shards))
     held = tower.names()
     if held != expected:
         message = (

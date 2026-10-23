@@ -273,6 +273,7 @@ ignore = [
 "src/agbalu/llm/merge.py" = ["PLC0415"]
 "src/agbalu/llm/assemble.py" = ["PLC0415"]
 "src/agbalu/llm/dedupe.py" = ["PLC0415"]
+"src/agbalu/llm/expand.py" = ["PLC0415", "PLR0912", "PLR0913", "PLR0915", "PLR2004", "S112"]
 # S311: `random.Random(SEED)` draws the evaluation subset, seeded so every model compared is
 #       scored on the same examples. lm-eval and vLLM exist only in the pod's vLLM env.
 "src/agbalu/llm/chat_eval.py" = ["PLC0415", "S311"]
@@ -560,9 +561,9 @@ module = [
 ]
 disallow_untyped_calls = false
 
-# `pyarrow` ships no py.typed marker and no stubs on PyPI.
+# `pyarrow` and `fitz` (PyMuPDF) ship no py.typed marker and no stubs on PyPI.
 [[tool.mypy.overrides]]
-module = ["pyarrow.*"]
+module = ["pyarrow.*", "fitz.*"]
 ignore_missing_imports = true
 
 # `editdistance` is a C extension with no stubs. It is one call returning an int, and the
@@ -629,10 +630,12 @@ module = [
     "agbalu.llm.decontaminate",
     "agbalu.llm.documents",
     "agbalu.llm.evaluate",
+    "agbalu.llm.expand",
     "agbalu.llm.mixture",
     "agbalu.llm.replay",
     "tests.unit.test_llm_documents",
     "tests.unit.test_llm_evaluate",
+    "tests.unit.test_llm_expand",
     "tests.unit.test_llm_mixture",
 ]
 disallow_untyped_calls = false

@@ -48,6 +48,11 @@ class TestMatches:
         assert greek != sentence
         assert Decontaminator.build([sentence]).matches(greek)
 
+    def test_leading_verse_number_glued_to_word_still_matches(self) -> None:
+        sentence = "lameɛna netta yenna-yasen ur ttagadet ara ahat ad d-yas uzekka"
+        numbered = "21lameɛna netta yenna-yasen ur ttagadet ara ahat ad d-yas uzekka"
+        assert Decontaminator.build([sentence]).matches(numbered)
+
 
 class TestWhole:
     def test_a_short_held_out_sentence_is_found_inside_a_document(self) -> None:

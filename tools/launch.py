@@ -53,7 +53,7 @@ disabled bar reports as 0, and the chat evaluation died on it."""
 COMPILER: Final = f"{ENVIRONMENT}/bin/x86_64-conda-linux-gnu"
 PREAMBLE: Final = (
     ". ~/hpc-env.sh"
-    f" && export CC={COMPILER}-gcc CXX={COMPILER}-g++"
+    f" && export CC={COMPILER}-gcc CXX={COMPILER}-g++ LD_LIBRARY_PATH={ENVIRONMENT}/lib"
     f" HF_HOME={REMOTE_ROOT}/artifacts/hf PYTHONPATH=src {' '.join(QUIET)}"
     f" && cd {REMOTE_ROOT}"
 )
@@ -101,6 +101,9 @@ DATA_FILES: Final = (
     "data/raw/hf.finepdfs-kab",
     "data/raw/hf.dcad2000-kab",
     "data/raw/hf.imsidag.kabyle-datasets-mono",
+    "data/raw/hf.imsidag.kabyle-corpus-ummto",
+    "data/raw/hf.imsidag.kabyle-corpus-ubouira",
+    "data/raw/hf.imsidag.kabyle-corpus-hca",
     "data/raw/wikimedia.kabwiki",
     "artifacts/runs/dihya",
     "data/processed/llm/sft/sft-v1.jsonl",
@@ -110,7 +113,19 @@ DATA_FILES: Final = (
 document and aligned builds, and Dihya. The decontaminator refuses to run unless every
 evaluation set is present."""
 
-DATA_TASKS: Final = ("documents", "aligned", "replay", "pack", "sft", "fluency")
+DATA_TASKS: Final = (
+    "documents",
+    "aligned",
+    "replay",
+    "pack",
+    "sft",
+    "fluency",
+    "expand-fetch",
+    "expand-pdfs",
+    "expand-audio",
+    "expand-aligned",
+    "compile",
+)
 WEIGHT_EXCLUDES: Final = ("--exclude", "step-*", "--exclude", "best", "--exclude", "model")
 """What `pull` leaves on the pod unless `--weights`: checkpoints, the best model and a merge."""
 LOG_LINES: Final = 20

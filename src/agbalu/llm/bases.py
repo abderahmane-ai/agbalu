@@ -22,9 +22,17 @@ counted in the vocabulary the run is trained and scored in."""
 INSTRUCT: Final = "Qwen/Qwen3.5-4B"
 """The post-trained twin of `BASE`, the target the CPT delta is merged into."""
 
+BASE_9B: Final = "Qwen/Qwen3.5-9B-Base"
+"""The 9B base checkpoint for Jugurtha-9B."""
+
+INSTRUCT_9B: Final = "Qwen/Qwen3.5-9B"
+"""The post-trained twin of `BASE_9B`."""
+
 REVISIONS: Final[dict[str, str]] = {
     BASE: "1001bb4d826a52d1f399e183466143f4da7b741b",
     INSTRUCT: "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+    BASE_9B: "68c46c4b3498877f3ef123c856ecfde50c39f404",
+    INSTRUCT_9B: "c202236235762e1c871ad0ccb60c8ee5ba337b9a",
 }
 """Pinned commits. `BASE`'s is the snapshot `jugurtha-4b-v1` started from (the only one in the
 pod's cache, 2026-10-16), so the CPT delta is taken against the weights it was trained from."""
@@ -36,6 +44,8 @@ runs on it, where an fp32 AdamW reference fits beside the 8-bit arm."""
 TEXT_TOWER_PARAMETERS: Final[dict[str, int]] = {
     BASE: 4_205_751_296,
     INSTRUCT: 4_205_751_296,
+    BASE_9B: 8_953_803_264,
+    INSTRUCT_9B: 8_953_803_264,
     PILOT: 752_393_024,
 }
 """`N` in the `6 * N * D` that sizes a run and in the model-FLOP utilisation it reports."""
