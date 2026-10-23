@@ -167,7 +167,11 @@ class FeraounProForCTC(PreTrainedModel):
         seq_len = features.size(1)
         # `get_buffer` rather than the attribute: `nn.Module.__getattr__` is typed as
         # `Tensor | Module`, and a registered buffer is always the former.
-        pe = self.get_buffer("pos_encoding")[:seq_len, :].unsqueeze(0).to(features.device)
+        pe = (
+            self.get_buffer("pos_encoding")[:seq_len, :]
+            .unsqueeze(0)
+            .to(device=features.device, dtype=features.dtype)
+        )
         encoded = self.encoder(features + pe)
         logits: Tensor = self.ctc_head(encoded)
         return logits
@@ -195,13 +199,62 @@ class FeraounProForCTC(PreTrainedModel):
         """Read one line crop. Preprocessing included, because it is half of this model."""
         self.eval()
         pixel_values = prepare_line_image(image).to(self.device)
-        logits = self(pixel_values=pixel_values)
+        device_type = self.device.type if hasattr(self.device, "type") else "cuda"
+        with torch.autocast(device_type, dtype=torch.float16, enabled=True):
+            logits = self(pixel_values=pixel_values)
         return self.decode_ctc(torch.argmax(logits, dim=-1)[0].tolist())
 
     @torch.no_grad()
+    def transcribe_batch(self, images: list[Image.Image]) -> list[str]:
+        """Read a batch of line crops in a single forward pass (batched + padded).
+
+        All crops are padded to the longest width in the batch.  A key-padding mask
+        is passed to the TransformerEncoder so padding frames are ignored.
+        """
+        import torch.nn.functional as F  # noqa: N812
+
+        if not images:
+            return []
+        if len(images) == 1:
+            return [self.transcribe(images[0])]
+
+        # Prepare all tensors: shape (1, 3, 64, W_i)
+        tensors = [prepare_line_image(img) for img in images]
+        # Width after CNN stem: ÷4 due to strides (2,2) × (2,2)
+        max_w = max(t.shape[3] for t in tensors)
+        # Pad right to uniform width
+        padded = torch.cat([F.pad(t, (0, max_w - t.shape[3])) for t in tensors], dim=0).to(
+            self.device
+        )  # (B, 3, 64, max_w)
+
+        device_type = self.device.type if hasattr(self.device, "type") else "cuda"
+        with torch.autocast(device_type, dtype=torch.float16, enabled=True):
+            features = self.stem(padded)  # (B, T, d_model)  T = max_w // 4
+            seq_len = features.size(1)
+            pe = self.get_buffer("pos_encoding")[:seq_len, :].unsqueeze(0).to(features.device)
+
+            # Build key-padding mask: True = position should be *ignored*
+            frame_widths = [max(1, t.shape[3] // 4) for t in tensors]
+            mask = torch.ones(len(images), seq_len, dtype=torch.bool, device=self.device)
+            for i, fw in enumerate(frame_widths):
+                mask[i, :fw] = False  # valid frames are NOT masked
+
+            encoded = self.encoder(features + pe, src_key_padding_mask=mask)
+            logits = self.ctc_head(encoded)  # (B, T, vocab)
+
+        results: list[str] = []
+        for i, fw in enumerate(frame_widths):
+            token_ids = torch.argmax(logits[i, :fw], dim=-1).tolist()
+            results.append(self.decode_ctc(token_ids))
+        return results
+
+    @torch.no_grad()
     def transcribe_page(self, page: Image.Image) -> list[str]:
-        """Segment a page into lines and read each one."""
-        return [self.transcribe(line) for line in segment_page_into_lines(page)]
+        """Segment a page into lines and read all lines in one batched forward pass."""
+        lines = segment_page_into_lines(page)
+        if not lines:
+            return []
+        return self.transcribe_batch(lines)
 
 
 __all__ = ["FeraounProForCTC", "prepare_line_image", "segment_page_into_lines"]
