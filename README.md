@@ -27,20 +27,20 @@ without this repository.
 
 | Model | | |
 |---|---|---|
-| [`Masinissa-31M`](https://huggingface.co/agbalu/Masinissa-31M) | encoder | 90.51% on gold POS, against a most-frequent-tag baseline of 83.42% |
-| [`SiMohand-278M`](https://huggingface.co/agbalu/SiMohand-278M) | sentence embeddings and retrieval | 97.0% Recall@1 against the backbone's 63.8, and the same 97.0 at a 12× compression |
+| [`Jugurtha-4B`](https://huggingface.co/agbalu/Jugurtha-4B) | foundation & reasoning LLM (4.2B) | First Kabyle LLM with native thinking mode; 100% NIAH (32k), 80.89% GSM8K, 62.86% MMLU-Pro, 73.74% SIB-200, eng→kab 28.77 / kab→eng 46.17 chrF++. Also available in [`Jugurtha-4B-GGUF`](https://huggingface.co/agbalu/Jugurtha-4B-GGUF) and [`Jugurtha-4B-MLX-4bit`](https://huggingface.co/agbalu/Jugurtha-4B-MLX-4bit) |
 | [`Amrouche-1.3B`](https://huggingface.co/agbalu/Amrouche-1.3B) | translation | beats NLLB-1.3B in all four directions; eng→kab 36.34 chrF++ |
 | [`Fadhma-300M`](https://huggingface.co/agbalu/Fadhma-300M) | speech recognition | CER 8.01 / WER 25.65 over 888 unseen speakers |
 | [`Belaid-31M`](https://huggingface.co/agbalu/Belaid-31M) | punctuation and casing | macro-F1 0.793 |
-| [`Boulifa-48M`](https://huggingface.co/agbalu/Boulifa-48M) | orthography standardisation | informal → canonical Kabyle Latin; 97.39% character accuracy against 89.70% for leaving the input alone |
-| [`Feraoun-36M`](https://huggingface.co/agbalu/Feraoun-36M) | document OCR, Latin and Tifinagh | CER 2.85% and 70.20% line exact match over 1,000 held-out lines |
-| [`Feraoun-Pro`](https://huggingface.co/agbalu/Feraoun-Pro) | document OCR (CTC), Latin and Tifinagh | CER 7.34% Latin / 0.91% Tifinagh, 81.77% line exact match |
-| [`Juba-27M`](https://huggingface.co/agbalu/Juba-27M) | Latin ↔ Tifinagh, with schwa restoration | 94.22% sentence exact match |
-| [`Mammeri-Tok`](https://huggingface.co/agbalu/Mammeri-Tok) | tokenizer | ten vocabularies, 8k–32k |
 | [`Matoub-82M`](https://huggingface.co/agbalu/Matoub-82M) | speech synthesis | First neural TTS for Kabyle — 24 kHz, StyleTTS2, 42-symbol IPA inventory, male voice |
-| [`Dihya-5M`](https://huggingface.co/agbalu/Dihya-5M) | language identification, six Berber varieties plus rejection | 85.52% over seven classes; 84.44% on the six Berber classes against GlotLID's 41.78% and NLLB `lid218e`'s 28.33%, scored in one pass over the same rows |
+| [`Boulifa-48M`](https://huggingface.co/agbalu/Boulifa-48M) | orthography standardisation | informal → canonical Kabyle Latin; 97.39% character accuracy against 89.70% for leaving the input alone |
+| [`Juba-27M`](https://huggingface.co/agbalu/Juba-27M) | Latin ↔ Tifinagh, with schwa restoration | 94.22% sentence exact match |
+| [`Feraoun-Pro`](https://huggingface.co/agbalu/Feraoun-Pro) | document OCR (CTC), Latin and Tifinagh | CER 7.34% Latin / 0.91% Tifinagh, 81.77% line exact match |
+| [`Feraoun-36M`](https://huggingface.co/agbalu/Feraoun-36M) | document OCR, Latin and Tifinagh | CER 2.85% and 70.20% line exact match over 1,000 held-out lines |
+| [`SiMohand-278M`](https://huggingface.co/agbalu/SiMohand-278M) | sentence embeddings and retrieval | 97.0% Recall@1 against the backbone's 63.8, and the same 97.0 at a 12× compression |
+| [`Masinissa-31M`](https://huggingface.co/agbalu/Masinissa-31M) | encoder | 90.51% on gold POS, against a most-frequent-tag baseline of 83.42% |
 | [`Masinissa-Sentiment`](https://huggingface.co/agbalu/Masinissa-Sentiment) | sentiment, three classes | 90.27% accuracy and 0.9026 macro-F1, against 88.80% for an ordinary fine-tune of the same encoder and 77.53% for a frozen probe; unchanged under total homoglyph corruption |
-| [`Jugurtha-4B`](https://huggingface.co/agbalu/Jugurtha-4B) | foundation & reasoning LLM (4.2B) | First Kabyle LLM with native thinking mode; 100% NIAH (32k), 80.89% GSM8K, 62.86% MMLU-Pro, 73.74% SIB-200, eng→kab 28.77 / kab→eng 46.17 chrF++. Also available in [`Jugurtha-4B-GGUF`](https://huggingface.co/agbalu/Jugurtha-4B-GGUF) and [`Jugurtha-4B-MLX-4bit`](https://huggingface.co/agbalu/Jugurtha-4B-MLX-4bit) |
+| [`Dihya-5M`](https://huggingface.co/agbalu/Dihya-5M) | language identification, six Berber varieties plus rejection | 85.52% over seven classes; 84.44% on the six Berber classes against GlotLID's 41.78% and NLLB `lid218e`'s 28.33%, scored in one pass over the same rows |
+| [`Mammeri-Tok`](https://huggingface.co/agbalu/Mammeri-Tok) | tokenizer | ten vocabularies, 8k–32k |
 
 | Dataset | |
 |---|---|
@@ -48,10 +48,10 @@ without this repository.
 | [`KabLex`](https://huggingface.co/datasets/agbalu/KabLex) | 366,892 lexicon entries and 25,642 pronunciations |
 | [`KabInflect`](https://huggingface.co/datasets/agbalu/KabInflect) | 336,151 inflected forms over 6,198 paradigms |
 | [`KabTifinagh`](https://huggingface.co/datasets/agbalu/KabTifinagh) | 497,944 script-conversion pairs |
-| [`KabSentiment`](https://huggingface.co/datasets/agbalu/KabSentiment) | 15,000 rows, three balanced classes |
+| [`KabStandard`](https://huggingface.co/datasets/agbalu/KabStandard) | 497,944 pairs, informal → canonical Kabyle Latin (training data for Boulifa-48M) |
 | [`KabPunct`](https://huggingface.co/datasets/agbalu/KabPunct) | 1,318,707 word-labelled sentences for punctuation and casing restoration |
 | [`KabG2P`](https://huggingface.co/datasets/agbalu/KabG2P) | 25,634 word forms with IPA transcriptions |
-| [`KabStandard`](https://huggingface.co/datasets/agbalu/KabStandard) | 497,944 pairs, informal → canonical Kabyle Latin (training data for Boulifa-48M) |
+| [`KabSentiment`](https://huggingface.co/datasets/agbalu/KabSentiment) | 15,000 rows, three balanced classes |
 | [`KabLiterary`](https://huggingface.co/datasets/agbalu/KabLiterary) | 28,907 paragraphs / 657,713 words of classical world literature in canonical Kabyle Latin |
 
 Weights are Apache-2.0. Text keeps its upstream licences, so each card carries the licence
