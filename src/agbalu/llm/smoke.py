@@ -26,7 +26,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, Literal
 
-from agbalu.llm.bases import BASE, PILOT
+from agbalu.llm.bases import PILOT, TEXT_TOWER_PARAMETERS
 from agbalu.llm.evaluate import (
     PARTS,
     Tokenizer,
@@ -37,7 +37,7 @@ from agbalu.llm.evaluate import (
     translation_prompt,
 )
 from agbalu.llm.prompting import SHOTS, shots
-from agbalu.llm.recipe import BLOCKS_PER_STEP, MICRO_BLOCKS
+from agbalu.llm.recipe import BLOCKS_PER_STEP, MICRO_BLOCKS, default_micro_blocks
 
 if TYPE_CHECKING:
     import torch
@@ -139,11 +139,15 @@ def throughput(
 ) -> dict[str, object]:
     from agbalu.llm.train import RunConfig, block_shape, train
 
+    model = tokenizer.repo
+    model_params = TEXT_TOWER_PARAMETERS.get(model)
+    micro_blocks = default_micro_blocks(model_params)
     config = RunConfig(
         run=f"{run_id}/throughput",
-        model=BASE,
+        model=model,
         blocks=blocks,
-        blocks_per_step=MICRO_BLOCKS,
+        blocks_per_step=micro_blocks,
+        micro_blocks=micro_blocks,
         total_steps=THROUGHPUT_STEPS,
         eval_every=THROUGHPUT_STEPS // 2,
         heldout_limit=HELDOUT_LIMIT,
@@ -153,7 +157,7 @@ def throughput(
     full_steps = block_shape(blocks)[0] // BLOCKS_PER_STEP
     median = result["step_seconds_median"]
     projected = (
-        full_steps * median * (BLOCKS_PER_STEP // MICRO_BLOCKS) / 3600
+        full_steps * median * (BLOCKS_PER_STEP // micro_blocks) / 3600
         if isinstance(median, float)
         else None
     )
@@ -244,7 +248,7 @@ def generation_parity(
 def evaluation(load: Loader, tokenizer: Tokenizer, device: torch.device) -> dict[str, object]:
     import torch
 
-    model = load(BASE, torch.bfloat16)
-    report = run(model, tokenizer, PARTS, device=device, limit=EVALUATION_LIMIT)
-    report["generation_parity"] = generation_parity(model, tokenizer, device)
+    loaded_model = load(tokenizer.repo, torch.bfloat16)
+    report = run(loaded_model, tokenizer, PARTS, device=device, limit=EVALUATION_LIMIT)
+    report["generation_parity"] = generation_parity(loaded_model, tokenizer, device)
     return report

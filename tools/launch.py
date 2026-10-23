@@ -500,6 +500,8 @@ def job(args: argparse.Namespace) -> Job:
             run = require(args.run, "--run", "smoke")
             part = require(args.part, "--part", "smoke")
             arguments = ["smoke", "--part", part, "--run", run]
+            if args.model:
+                arguments += ["--model", args.model]
             return f"{run}/{part}", arguments, f"{run}/{part}/log.txt", []
         case "data":
             task = require(args.task, "--task", "data")

@@ -131,8 +131,8 @@ setup: ## Build the pod environment from requirements/hpc.lock; report GPU, vers
 sync: ## Push code, corpus inputs, Dihya and every evaluation set to the pod (operator, hpc)
 	$(call launch,sync)
 
-smoke: ## One part of the 11.19 smoke. RUN= PART=throughput|parity|resume|evaluate (operator, hpc)
-	$(call launch,smoke) $(if $(PART),--part $(PART),)
+smoke: ## One part of the 11.19 smoke. RUN= MODEL= PART=throughput|parity|resume|evaluate (operator, hpc)
+	$(call launch,smoke) $(if $(PART),--part $(PART),) $(if $(MODEL),--model $(MODEL),)
 
 train: ## CPT, or SFT with OBJECTIVE=sft, resuming RUN if it exists. RUN= MODEL STEPS STOP OBJECTIVE (operator, hpc)
 	$(call launch,train) $(if $(MODEL),--model $(MODEL),) $(if $(STEPS),--steps $(STEPS),) \

@@ -320,3 +320,9 @@ class TestPieces:
         np.save(tmp_path / "x.npy", np.zeros((2, 4), dtype=np.int64))
         with pytest.raises(train.TrainError, match="uint32"):
             train.block_shape(tmp_path / "x.npy")
+
+    def test_build_optimizer_constructs_adamw(self, model_dir: Path, tmp_path: Path) -> None:
+        loaded = tiny_lm.load(model_dir, torch.float32)
+        cfg = config(tmp_path, model_dir)
+        opt = train.build_optimizer(loaded, cfg)
+        assert isinstance(opt, torch.optim.AdamW)

@@ -105,6 +105,9 @@ class Tokenizer(Protocol):
     def eos(self) -> int: ...
 
     @property
+    def repo(self) -> str: ...
+
+    @property
     def backend(self) -> object: ...
 
     def encode_batch(self, texts: Sequence[str]) -> list[list[int]]: ...
@@ -118,6 +121,7 @@ class HubTokenizer:
     def __init__(self, repo: str | Path) -> None:
         from transformers import AutoTokenizer
 
+        self.repo = str(repo)
         self.backend = AutoTokenizer.from_pretrained(str(repo))
         eos = self.backend.eos_token_id
         if not isinstance(eos, int):

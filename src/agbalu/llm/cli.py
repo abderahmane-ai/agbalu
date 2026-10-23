@@ -27,7 +27,7 @@ from agbalu.llm import (
     sft_files,
     teacher,
 )
-from agbalu.llm.bases import BASE, INSTRUCT, REVISIONS, TEXT_TOWER_PARAMETERS
+from agbalu.llm.bases import BASE, BASE_9B, INSTRUCT, INSTRUCT_9B, REVISIONS, TEXT_TOWER_PARAMETERS
 from agbalu.llm.chat import ChatError
 from agbalu.llm.corpus import HOLDOUT_RATE, CorpusError, Source, is_held_out
 from agbalu.llm.decontaminate import (
@@ -595,17 +595,28 @@ def cuda() -> torch.device:
 
 
 def command_train(args: argparse.Namespace) -> int:
+    from agbalu.llm import recipe
     from agbalu.llm.train import RunConfig, StopRequest, train
 
+    model_params = TEXT_TOWER_PARAMETERS.get(args.model)
+    micro_blocks = getattr(args, "micro_blocks", None) or recipe.default_micro_blocks(model_params)
+    peak_lr = getattr(args, "peak_lr", None) or recipe.default_peak_lr(model_params)
     config = RunConfig(
         run=args.run,
         model=args.model,
         blocks=args.blocks,
         optimizer=args.optimizer,
+        peak_lr=peak_lr,
+        micro_blocks=micro_blocks,
         total_steps=args.total_steps,
         stop_after=args.stop_after,
     )
     if args.objective == "sft":
+        is_9b = "9B" in args.model or "9b" in args.model
+        instruct_model = INSTRUCT_9B if is_9b else INSTRUCT
+        expected_params = TEXT_TOWER_PARAMETERS.get(
+            args.model, TEXT_TOWER_PARAMETERS[instruct_model]
+        )
         config = replace(
             config,
             objective="sft",
@@ -617,7 +628,7 @@ def command_train(args: argparse.Namespace) -> int:
             checkpoint_every=SFT_EVERY,
             eval_every=SFT_EVERY,
             probe=False,
-            expected_parameters=TEXT_TOWER_PARAMETERS[INSTRUCT],
+            expected_parameters=expected_params,
         )
     if args.checkpoint_every is not None:
         config = replace(config, checkpoint_every=args.checkpoint_every)
@@ -638,7 +649,8 @@ def command_smoke(args: argparse.Namespace) -> int:
 
     device = cuda()
     load = loader(device)
-    tokenizer = HubTokenizer(BASE)
+    model = getattr(args, "model", None) or BASE
+    tokenizer = HubTokenizer(model)
     match args.part:
         case "throughput":
             result = smoke.throughput(args.run, args.blocks, load, tokenizer, device)
@@ -649,7 +661,7 @@ def command_smoke(args: argparse.Namespace) -> int:
         case _:
             result = smoke.evaluation(load, tokenizer, device)
     out = Path("artifacts/runs") / args.run / f"smoke-{args.part}.json"
-    write_stats(out, {"part": args.part, **result})
+    write_stats(out, {"part": args.part, "model": model, **result})
     print(json.dumps(result, indent=2, ensure_ascii=False))
     print(f"-> {out}")
     return 0
@@ -684,15 +696,20 @@ def snapshot(repo: str) -> Path:
 def command_merge(args: argparse.Namespace) -> int:
     from agbalu.llm import merge
 
+    is_9b = "9B" in (str(args.cpt) + str(args.base or "") + str(args.instruct or ""))
+    base_model = BASE_9B if is_9b else BASE
+    instruct_model = INSTRUCT_9B if is_9b else INSTRUCT
+    base_path = args.base or snapshot(base_model)
+    instruct_path = args.instruct or snapshot(instruct_model)
     sources = {
-        "base": f"{BASE}@{REVISIONS[BASE]}",
-        "instruct": f"{INSTRUCT}@{REVISIONS[INSTRUCT]}",
+        "base": f"{base_model}@{REVISIONS[base_model]}",
+        "instruct": f"{instruct_model}@{REVISIONS[instruct_model]}",
         "cpt": str(args.cpt),
     }
     inputs = merge.Inputs(
-        base=args.base or snapshot(BASE),
+        base=base_path,
         cpt=args.cpt,
-        instruct=args.instruct or snapshot(INSTRUCT),
+        instruct=instruct_path,
         sources=sources,
     )
     out = RUNS / args.run / "model"
@@ -1204,6 +1221,7 @@ def add_model_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser])
     smoke = sub.add_parser("smoke", help="one part of the HPC smoke (task 11.19)")
     smoke.add_argument("--part", choices=SMOKE_PARTS, required=True)
     smoke.add_argument("--run", required=True)
+    smoke.add_argument("--model", default=BASE)
     smoke.add_argument("--blocks", type=Path, default=BLOCKS_OUT)
 
     evaluate = sub.add_parser("evaluate", help="the evaluation suite on one model")

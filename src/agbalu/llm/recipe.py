@@ -19,12 +19,20 @@ here are mostly short, so a block holds many and attention is masked at each bou
 MICRO_BLOCKS: Final = 2
 """Blocks per forward pass, flattened into one variable-length row of 16,384 tokens."""
 
+MICRO_BLOCKS_9B: Final = 1
+"""Blocks per forward pass on 9B (8,192 tokens) to fit activation memory on 47GB GPUs."""
+
 BLOCKS_PER_STEP: Final = 64
 """524,288 tokens an optimizer step."""
 
 TOKENS_PER_STEP: Final = SEQUENCE_LENGTH * BLOCKS_PER_STEP
 
 PEAK_LR: Final = 2e-5
+PEAK_LR_9B: Final = 1.6e-5
+"""Peak rate for 9B, scaled from 4B by ~1/sqrt(d_model) (4,096 vs 2,560 hidden width)."""
+
+LARGE_MODEL_PARAMETERS: Final = 5_000_000_000
+"""Models above this parameter count (e.g. 9B) require 1-block micro-batches and LR scaling."""
 WARMUP_FRACTION: Final = 0.01
 FINAL_LR_FRACTION: Final = 0.1
 WEIGHT_DECAY: Final = 0.1
@@ -105,3 +113,18 @@ def learning_rate(
     progress = (step - warmup) / max(1, total - warmup)
     cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
     return peak * (FINAL_LR_FRACTION + (1.0 - FINAL_LR_FRACTION) * cosine)
+
+
+def default_micro_blocks(model_parameters: int | None = None) -> int:
+    """Blocks per forward pass: 1 block (8,192 tokens) for 9B models to fit activation memory
+    on 47GB GPUs, 2 blocks (16,384 tokens) for 4B and smaller."""
+    if model_parameters is not None and model_parameters > LARGE_MODEL_PARAMETERS:
+        return MICRO_BLOCKS_9B
+    return MICRO_BLOCKS
+
+
+def default_peak_lr(model_parameters: int | None = None) -> float:
+    """Scaled peak learning rate: 1.6e-5 for 9B (~1/sqrt(d_model)), 2.0e-5 for 4B."""
+    if model_parameters is not None and model_parameters > LARGE_MODEL_PARAMETERS:
+        return PEAK_LR_9B
+    return PEAK_LR

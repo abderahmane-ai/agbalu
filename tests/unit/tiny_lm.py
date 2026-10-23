@@ -57,6 +57,7 @@ class CharTokenizer:
     """One id per character, never the separator."""
 
     eos = EOS
+    repo = "tiny"
     backend = None
 
     def encode_batch(self, texts: Sequence[str]) -> list[list[int]]:

@@ -1168,25 +1168,39 @@ def extract_aligned_records(
             index += 1
             counts[source_name] = counts.get(source_name, 0) + 1
 
-        # 1. `taqbaylit/tatoeba-en-kab` (244,954 en-kab pairs)
+        # 1. `taqbaylit/tatoeba-en-kab` (Dihya argmax Kabyle filter)
         tatoeba_dir = raw_root / "taqbaylit.tatoeba-en-kab"
         for pq_file in sorted(tatoeba_dir.rglob("*.parquet")):
             table = pq.read_table(pq_file, columns=["translation"])
+            t_candidates: list[tuple[str, str]] = []
             for item in table["translation"].to_pylist():
                 if isinstance(item, dict):
                     kab = normaliser.normalise(str(item.get("kab", "") or "")).strip()
                     eng = str(item.get("en", "") or "").strip()
-                    if kab and eng:
-                        write_record(kab, eng, LANGUAGE_TAG["eng"], "taqbaylit.tatoeba-en-kab")
+                    if kab and eng and kab.casefold() != eng.casefold():
+                        t_candidates.append((kab, eng))
+            for start in range(0, len(t_candidates), 1024):
+                chunk = t_candidates[start : start + 1024]
+                probs = scorer.probabilities([c[0][:LID_WINDOW_CHARS] for c in chunk])
+                for (k, e), row_prob in zip(chunk, probs, strict=True):
+                    if verdict([row_prob]) == KABYLE:
+                        write_record(k, e, LANGUAGE_TAG["eng"], "taqbaylit.tatoeba-en-kab")
 
-        # 2. `taqbaylit/weblate-kabyle` (`en-kab.tmx`)
+        # 2. `taqbaylit/weblate-kabyle` (`en-kab.tmx`, Dihya argmax Kabyle filter)
         tmx_path = raw_root / "taqbaylit.weblate-kabyle" / "en-kab.tmx"
         if tmx_path.is_file():
+            w_candidates: list[tuple[str, str]] = []
             for kab_raw, eng_raw in _read_tmx_pairs(tmx_path):
                 kab = normaliser.normalise(kab_raw).strip()
                 eng = eng_raw.strip()
-                if len(kab) >= 10 and len(eng) >= 10 and kab != eng:
-                    write_record(kab, eng, LANGUAGE_TAG["eng"], "taqbaylit.weblate-kabyle")
+                if len(kab) >= 10 and len(eng) >= 10 and kab.casefold() != eng.casefold():
+                    w_candidates.append((kab, eng))
+            for start in range(0, len(w_candidates), 1024):
+                chunk = w_candidates[start : start + 1024]
+                probs = scorer.probabilities([c[0][:LID_WINDOW_CHARS] for c in chunk])
+                for (k, e), row_prob in zip(chunk, probs, strict=True):
+                    if verdict([row_prob]) == KABYLE:
+                        write_record(k, e, LANGUAGE_TAG["eng"], "taqbaylit.weblate-kabyle")
 
         # 3. `TutlaytAI/Multilang-to-Berber-Translation` (filtered by Dihya-5M!)
         tut_dir = raw_root / "tutlaytai.multilang-berber" / "data"

@@ -32,7 +32,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from types import FrameType, TracebackType
-from typing import Final, Literal, Self
+from typing import Final, Literal, Self, cast
 
 import numpy as np
 import torch
@@ -57,6 +57,7 @@ from agbalu.llm.recipe import (
     BETAS,
     BLOCKS_PER_STEP,
     GRADIENT_CLIP,
+    LARGE_MODEL_PARAMETERS,
     MICRO_BLOCKS,
     PEAK_LR,
     SFT_EPOCHS,
@@ -398,6 +399,22 @@ def build_optimizer(model: LanguageModel, config: RunConfig) -> torch.optim.Opti
     groups = parameter_groups(model, config.weight_decay)
     if config.optimizer == "adamw8bit":
         from torchao.optim import AdamW8bit
+
+        total_params = sum(p.numel() for _, p in model.named_parameters() if p.requires_grad)
+        if total_params > LARGE_MODEL_PARAMETERS:
+            from torchao.optim import CPUOffloadOptimizer
+
+            offloaded: torch.optim.Optimizer = cast(
+                torch.optim.Optimizer,
+                CPUOffloadOptimizer(
+                    groups,
+                    AdamW8bit,
+                    lr=config.peak_lr,
+                    betas=BETAS,
+                    bf16_stochastic_round=True,
+                ),
+            )
+            return offloaded
 
         optimizer: torch.optim.Optimizer = AdamW8bit(
             groups, lr=config.peak_lr, betas=BETAS, bf16_stochastic_round=True
