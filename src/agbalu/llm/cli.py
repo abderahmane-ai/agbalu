@@ -369,6 +369,21 @@ def command_expand_pdfs(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_expand_clean(args: argparse.Namespace) -> int:
+    """French-line and glued-token cleanup over every expanded document file."""
+    device = args.device or identifier_device()
+    scorer = DihyaScorer(args.dihya, device)
+    for path in args.files:
+        if not path.is_file():
+            print(f"  {path}: absent, skipped")
+            continue
+        counts = expand.clean_jsonl(path, scorer)
+        for source_id, tally in counts.items():
+            print(f"  {source_id:40} {tally}")
+        write_stats(stats_path(path), {"sources": counts})
+    return 0
+
+
 def command_expand_audio(args: argparse.Namespace) -> int:
     device = args.device or identifier_device()
     scorer = DihyaScorer(args.dihya, device)
@@ -1117,6 +1132,18 @@ def add_expansion_commands(sub: argparse._SubParsersAction[argparse.ArgumentPars
     exp_fetch.add_argument("--raw-root", type=Path, default=expand.RAW_V2_ROOT)
     exp_fetch.add_argument("--models-root", type=Path, default=expand.HUB_MODELS_ROOT)
 
+    exp_clean = sub.add_parser(
+        "expand-clean",
+        help="drop French lines and glued documents from the expanded files, re-check with Dihya",
+    )
+    exp_clean.add_argument("--dihya", type=Path, default=DIHYA_RUN)
+    exp_clean.add_argument("--device", help="CUDA when present, else CPU")
+    exp_clean.add_argument(
+        "--files",
+        type=Path,
+        nargs="+",
+        default=[expand.EXPANDED_DOCS_OUT, expand.EXPANDED_AUDIO_OUT],
+    )
     exp_pdfs = sub.add_parser(
         "expand-pdfs",
         help="extract PDFs (PyMuPDF + Feraoun-Pro OCR + Boulifa + Dihya) and theses on the HPC",
@@ -1245,6 +1272,7 @@ COMMANDS: Final[dict[str, Callable[[argparse.Namespace], int]]] = {
     "expand-fetch": command_expand_fetch,
     "expand-pdfs": command_expand_pdfs,
     "expand-audio": command_expand_audio,
+    "expand-clean": command_expand_clean,
     "expand-aligned": command_expand_aligned,
     "compile": command_compile,
     "train": command_train,

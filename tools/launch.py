@@ -123,6 +123,7 @@ DATA_TASKS: Final = (
     "expand-fetch",
     "expand-pdfs",
     "expand-audio",
+    "expand-clean",
     "expand-aligned",
     "compile",
 )

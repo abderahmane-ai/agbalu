@@ -232,7 +232,7 @@ def is_kabyle_window(
     text: str,
     scorer: LanguageScorer,
     *,
-    min_prob: float = 0.65,
+    min_prob: float = 0.0,
 ) -> bool:
     """Check whether `Dihya-5M` classifies the text as `kab_Latn`."""
     cleaned = text.strip()
@@ -440,7 +440,7 @@ def _extract_single_pdf(
         cleaned = clean(repaired, normaliser)
         if len(cleaned) < MIN_DIGITAL_PAGE_CHARS:
             continue
-        if is_kabyle_window(cleaned, scorer, min_prob=0.60):
+        if is_kabyle_window(cleaned, scorer):
             kept_pages.append(cleaned)
 
     doc.close()
@@ -761,7 +761,7 @@ def extract_pdfs_and_text(
             tallies.append(tally)
             for doc_text in _reconstruct_imsidag_parquets(folder, normaliser):
                 tally.read += 1
-                if not is_kabyle_window(doc_text, scorer, min_prob=0.65):
+                if not is_kabyle_window(doc_text, scorer):
                     tally.rejected["language"] += 1
                     continue
                 tally.kept += 1
@@ -793,7 +793,7 @@ def extract_pdfs_and_text(
             if not tally.resumed:
                 for surah_text in _read_quran_surahs(quran_tsv, normaliser):
                     tally.read += 1
-                    if not is_kabyle_window(surah_text, scorer, min_prob=0.60):
+                    if not is_kabyle_window(surah_text, scorer):
                         tally.rejected["language"] += 1
                         continue
                     tally.kept += 1
@@ -833,7 +833,7 @@ def extract_pdfs_and_text(
                         if len(cleaned) < MIN_DOCUMENT_CHARS:
                             tally.rejected["too_short"] += 1
                             continue
-                        if not is_kabyle_window(cleaned, scorer, min_prob=0.65):
+                        if not is_kabyle_window(cleaned, scorer):
                             tally.rejected["language"] += 1
                             continue
                         tally.kept += 1
@@ -871,7 +871,7 @@ def extract_pdfs_and_text(
                         if len(cleaned) < MIN_DOCUMENT_CHARS:
                             tally.rejected["too_short"] += 1
                             continue
-                        if not is_kabyle_window(cleaned, scorer, min_prob=0.65):
+                        if not is_kabyle_window(cleaned, scorer):
                             tally.rejected["language"] += 1
                             continue
                         tally.kept += 1
@@ -1076,7 +1076,7 @@ def extract_audio_corpora(
                         if boulifa is not None:
                             raw_hyp = boulifa.standardise_lines(raw_hyp)
                         normed = clean(raw_hyp, normaliser)
-                        if is_kabyle_window(normed, scorer, min_prob=0.60):
+                        if is_kabyle_window(normed, scorer):
                             utterances.append(normed)
 
                 if not utterances:
@@ -1358,3 +1358,105 @@ def merge_expanded_sentences(
                     redistribution="permissive",
                     line=line_no,
                 )
+
+
+FRENCH_WORDS: Final[frozenset[str]] = frozenset(
+    [
+        "le",
+        "la",
+        "les",
+        "des",
+        "du",
+        "de",
+        "que",
+        "qui",
+        "est",
+        "je",
+        "tu",
+        "il",
+        "elle",
+        "nous",
+        "vous",
+        "ils",
+        "ne",
+        "pas",
+        "pour",
+        "dans",
+        "avec",
+        "sur",
+        "une",
+        "un",
+        "et",
+        "mais",
+        "ce",
+        "cette",
+        "sont",
+        "être",
+        "avoir",
+        "fait",
+        "comme",
+        "plus",
+        "très",
+        "aussi",
+    ]
+)
+"""French function words; Kabyle uses none of these as a word, so a line made of them is French."""
+
+FRENCH_LINE_SHARE: Final = 0.25
+"""A line whose share of French function words exceeds this is dropped."""
+
+GLUED_TOKEN_CHARS: Final = 25
+"""A token this long is two or more words glued together by the PDF extractor."""
+
+GLUED_DOCUMENT_SHARE: Final = 0.01
+"""A document whose share of glued tokens exceeds this is dropped."""
+
+_WORD_RE: Final = re.compile(r"[^\W\d_]+")
+
+
+def french_share(line: str) -> float:
+    """Fraction of a line's words that are French function words."""
+    words = _WORD_RE.findall(line.lower())
+    if not words:
+        return 0.0
+    return sum(word in FRENCH_WORDS for word in words) / len(words)
+
+
+def clean_document(text: str) -> str | None:
+    """Drop French lines; return None if the document is glued or too short afterwards."""
+    words = _WORD_RE.findall(text)
+    if words and sum(len(w) > GLUED_TOKEN_CHARS for w in words) / len(words) > GLUED_DOCUMENT_SHARE:
+        return None
+    lines = [ln for ln in text.split("\n") if french_share(ln) <= FRENCH_LINE_SHARE]
+    cleaned = "\n".join(lines).strip()
+    return cleaned if len(cleaned) >= MIN_DOCUMENT_CHARS else None
+
+
+def clean_jsonl(path: Path, scorer: LanguageScorer) -> dict[str, dict[str, int]]:
+    """Rewrite `path` in place: French lines out, then the 4B document rule re-applied.
+
+    The original is kept as `<name>.raw`. Returns per-source counts of read, kept and the
+    reason each rejected document was dropped.
+    """
+    raw = path.with_name(path.name + ".raw")
+    if not raw.exists():
+        path.rename(raw)
+    counts: dict[str, dict[str, int]] = {}
+    with raw.open(encoding="utf-8") as src, path.open("w", encoding="utf-8") as sink:
+        for line in src:
+            row = json.loads(line)
+            tally = counts.setdefault(
+                row["source"], {"read": 0, "kept": 0, "glued_or_short": 0, "language": 0}
+            )
+            tally["read"] += 1
+            cleaned = clean_document(row["text"])
+            if cleaned is None:
+                tally["glued_or_short"] += 1
+                continue
+            if not is_kabyle_window(cleaned, scorer):
+                tally["language"] += 1
+                continue
+            row["text"] = cleaned
+            tally["kept"] += 1
+            sink.write(json.dumps(row, ensure_ascii=False) + "\n")
+    return counts
