@@ -23,6 +23,9 @@ import json
 import math
 import os
 import shutil
+
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+os.environ.setdefault("PYTORCH_NO_CUDA_NVML", "1")
 import signal
 import socket
 import statistics
@@ -97,6 +100,7 @@ PREFETCH: Final = 4
 ETA_WINDOW: Final = 20
 """Recent steps the time-left projection is taken over."""
 
+LARGE_PARAM_NUMEL: Final = 100_000_000
 """Parameters larger than this trigger cache eviction before and after optimizer stepping."""
 
 PROBES: Final = (
@@ -610,37 +614,47 @@ class StreamingOptimizer:
 
         clip_coef = min(1.0, clip_norm / (norm + 1e-6))
 
+        if self.device.type == "cuda":
+            torch.cuda.empty_cache()
+
         grads: dict[torch.nn.Parameter, torch.Tensor | None] = {p: p.grad for p in self.params}
         for p in self.params:
             p.grad = None
 
-        for group in self.optimizer.param_groups:
-            for p in group["params"]:
-                g = grads.get(p)
-                if g is None:
-                    continue
-                if clip_coef < 1.0:
-                    g.mul_(clip_coef)
+        sorted_params = sorted(self.params, key=lambda p: p.numel())
 
-                state = self.optimizer.state[p]
-                if p in self.cpu_states:
-                    st = self.cpu_states[p]
-                    state["exp_avg"] = st["exp_avg"].to(self.device, non_blocking=True)
-                    state["exp_avg_sq"] = st["exp_avg_sq"].to(self.device, non_blocking=True)
-                    state["step"] = st["step"]
+        for p in sorted_params:
+            g = grads.get(p)
+            if g is None:
+                continue
+            if clip_coef < 1.0:
+                g.mul_(clip_coef)
 
-                p.grad = g
-                self.optimizer.step()
-                p.grad = None
-                grads[p] = None
-                del g
+            if self.device.type == "cuda" and p.numel() > LARGE_PARAM_NUMEL:
+                torch.cuda.empty_cache()
 
-                self.cpu_states[p] = {
-                    "exp_avg": state["exp_avg"].to("cpu"),
-                    "exp_avg_sq": state["exp_avg_sq"].to("cpu"),
-                    "step": state["step"].clone(),
-                }
-                del state["exp_avg"], state["exp_avg_sq"]
+            state = self.optimizer.state[p]
+            if p in self.cpu_states:
+                st = self.cpu_states[p]
+                state["exp_avg"] = st["exp_avg"].to(self.device, non_blocking=True)
+                state["exp_avg_sq"] = st["exp_avg_sq"].to(self.device, non_blocking=True)
+                state["step"] = st["step"]
+
+            p.grad = g
+            self.optimizer.step()
+            p.grad = None
+            grads[p] = None
+            del g
+
+            self.cpu_states[p] = {
+                "exp_avg": state["exp_avg"].to("cpu"),
+                "exp_avg_sq": state["exp_avg_sq"].to("cpu"),
+                "step": state["step"].clone(),
+            }
+            del state["exp_avg"], state["exp_avg_sq"]
+
+            if self.device.type == "cuda" and p.numel() > LARGE_PARAM_NUMEL:
+                torch.cuda.empty_cache()
 
         if self.device.type == "cuda":
             torch.cuda.synchronize()

@@ -54,7 +54,9 @@ COMPILER: Final = f"{ENVIRONMENT}/bin/x86_64-conda-linux-gnu"
 PREAMBLE: Final = (
     ". ~/hpc-env.sh"
     f" && export CC={COMPILER}-gcc CXX={COMPILER}-g++ LD_LIBRARY_PATH={ENVIRONMENT}/lib"
-    f" HF_HOME={REMOTE_ROOT}/artifacts/hf PYTHONPATH=src {' '.join(QUIET)}"
+    f" HF_HOME={REMOTE_ROOT}/artifacts/hf PYTHONPATH=src"
+    " PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True PYTORCH_NO_CUDA_NVML=1"
+    f" {' '.join(QUIET)}"
     f" && cd {REMOTE_ROOT}"
 )
 """`hpc-env.sh` puts the tools on `PATH`; `CC`/`CXX` then point at the project environment's
