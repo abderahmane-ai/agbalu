@@ -97,7 +97,6 @@ PREFETCH: Final = 4
 ETA_WINDOW: Final = 20
 """Recent steps the time-left projection is taken over."""
 
-LARGE_PARAM_NUMEL: Final = 50_000_000
 """Parameters larger than this trigger cache eviction before and after optimizer stepping."""
 
 PROBES: Final = (
@@ -601,10 +600,8 @@ class StreamingOptimizer:
 
     def step(self, clip_norm: float) -> tuple[float, bool]:
         """Compute global norm on GPU, clip gradients, and step parameters one by one."""
-        total_sq = 0.0
-        for p in self.params:
-            if p.grad is not None:
-                total_sq += float(torch.sum(p.grad.float() ** 2).item())
+        sq_norms = [torch.sum(p.grad.float() ** 2) for p in self.params if p.grad is not None]
+        total_sq = float(torch.stack(sq_norms).sum().item()) if sq_norms else 0.0
         norm = math.sqrt(total_sq)
         finite = math.isfinite(norm)
         if not finite:
@@ -625,9 +622,6 @@ class StreamingOptimizer:
                 if clip_coef < 1.0:
                     g.mul_(clip_coef)
 
-                if self.device.type == "cuda" and p.numel() > LARGE_PARAM_NUMEL:
-                    torch.cuda.empty_cache()
-
                 state = self.optimizer.state[p]
                 if p in self.cpu_states:
                     st = self.cpu_states[p]
@@ -647,9 +641,6 @@ class StreamingOptimizer:
                     "step": state["step"].clone(),
                 }
                 del state["exp_avg"], state["exp_avg_sq"]
-
-                if self.device.type == "cuda" and p.numel() > LARGE_PARAM_NUMEL:
-                    torch.cuda.empty_cache()
 
         if self.device.type == "cuda":
             torch.cuda.synchronize()
