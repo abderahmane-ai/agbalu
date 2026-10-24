@@ -1383,8 +1383,62 @@ GLUED_DOCUMENT_SHARE: Final = 0.01
 CHUNK_MIN_CHARS: Final = 150
 """Consecutive lines are grouped to at least this many characters before Dihya scores them."""
 
-_WORD_RE: Final = re.compile(r"[^\W\d_]+")
+_WORD_RE: Final = re.compile(r"[^\W\d_]+", re.UNICODE)
 _REPEAT_RE: Final = re.compile(r"(\b[^\W\d_]+(?:\s+[^\W\d_]+)?\b)(?:\s+\1){2,}")
+_CID_RE: Final = re.compile(r"\(cid:\d+\)")
+_CYRILLIC_RE: Final = re.compile(r"[\u0400-\u04FF]")
+_MID_CAPS_RE: Final = re.compile(r"[a-z][A-Z]")
+_CIRCUMFLEX_VOWELS: Final = re.compile(r"[âêîôûÂÊÎÔÛ]")
+_PUA_RE: Final = re.compile(r"[\uE000-\uF8FF\uFFF0-\uFFFF]")
+_BIBLIO_LINE_RE: Final = re.compile(
+    r"(?:\(\d{4}\)|pp?\.\s*\d+|éditions?|revue\s+de|isbn)", re.IGNORECASE
+)
+
+FRENCH_STOPWORDS: Final[frozenset[str]] = frozenset({
+    "dans", "pour", "avec", "cette", "sont", "nous", "vous", "leur",
+    "leurs", "plus", "mais", "comme", "faire", "tout", "tous",
+    "entre", "aussi", "notre", "votre", "sur", "est", "une",
+    "des", "les", "par", "qui", "que", "dont", "été",
+    "ces", "ses", "aux", "du", "au", "elle", "elles", "ils",
+    "ont", "était", "étaient", "être", "avoir", "sans", "sous",
+    "chez", "très", "après", "avant", "même", "deux", "autres",
+    "autre", "ainsi", "alors", "donc", "chaque", "plusieurs",
+    "aucun", "aucune", "celle", "celui", "ceux", "celles",
+    "université", "faculté", "département", "mémoire", "thèse",
+    "promotion", "encadreur", "examinateur", "président", "république",
+    "algérienne", "démocratique", "populaire", "enseignement", "supérieur",
+    "chapitre", "généralités", "introduction", "conclusion", "bibliographie",
+    "résumé", "remerciements",
+})
+
+ENGLISH_STOPWORDS: Final[frozenset[str]] = frozenset({
+    "the", "and", "that", "have", "for", "not", "with", "you",
+    "this", "but", "his", "from", "they", "say", "her", "she",
+    "will", "one", "all", "would", "there", "their", "what",
+    "out", "about", "who", "which", "when", "make", "can",
+    "like", "time", "just", "know", "take", "into", "year",
+    "your", "some", "could", "them", "other", "than", "then",
+    "now", "only", "come", "its", "over", "think", "also",
+    "after", "use", "how", "our", "work", "first", "well",
+    "way", "even", "new", "want", "because", "any", "these",
+    "give", "most", "abstract", "keywords", "university", "department",
+})
+
+KABYLE_CORE_WORDS: Final[frozenset[str]] = frozenset({
+    "ara", "ur", "deg", "di", "ɣer", "seg", "akked", "akken",
+    "ad", "dɣa", "neɣ", "maca", "ayen", "amek", "anida", "melmi",
+    "dacu", "d-acu", "acu", "aql-aɣ", "yella", "tella", "llan", "llant",
+    "nneɣ", "nsen", "nwen", "tamurt", "tutlayt", "amaziɣ", "taqbaylit",
+    "amdan", "imdanen", "axxam", "awal", "amaru", "ungal", "tasekla",
+    "amezruy", "wid", "tid", "wigi", "tigi", "tagi", "agi", "akka",
+    "fell-as", "fell-asen", "fell-aneɣ", "gar", "ddaw", "nnig", "zdat",
+    "deffir", "sakin", "imi", "acku", "ihi", "xas", "ulac", "ahat",
+    "yiwen", "yiwet", "sin", "snat", "tlata", "rebɛa", "xemsa",
+})
+
+INVERTED_FRENCH: Final[frozenset[str]] = frozenset({
+    "enb", "sel", "xua", "snad", "sap", "sed", "ruop", "tse", "te", "ed", "al", "nu", "enu",
+})
 
 
 def line_chunks(text: str) -> list[str]:
@@ -1403,17 +1457,68 @@ def line_chunks(text: str) -> list[str]:
     return chunks
 
 
+def is_clean_chunk(chunk: str) -> bool:
+    """Pre-filter non-Kabyle chunks (French thesis headers, bibliographies, mojibake)."""
+    if len(chunk.strip()) < 30 or _CID_RE.search(chunk) or len(_CYRILLIC_RE.findall(chunk)) > 1:
+        return False
+    words = [w.lower() for w in _WORD_RE.findall(chunk)]
+    if (
+        len(words) < 5
+        or len(set(words).intersection(INVERTED_FRENCH)) >= 2
+        or len(_MID_CAPS_RE.findall(chunk)) > 2
+        or len(_CIRCUMFLEX_VOWELS.findall(chunk)) > 3
+    ):
+        return False
+    fr_hits = sum(1 for w in words if w in FRENCH_STOPWORDS)
+    en_hits = sum(1 for w in words if w in ENGLISH_STOPWORDS)
+    if (
+        (fr_hits >= 3 and (fr_hits / len(words)) > 0.05)
+        or fr_hits >= 5
+        or (en_hits >= 3 and (en_hits / len(words)) > 0.05)
+        or en_hits >= 5
+    ):
+        return False
+    lines = [ln.strip() for ln in chunk.split("\n") if ln.strip()]
+    if lines and sum(1 for ln in lines if _BIBLIO_LINE_RE.search(ln)) / len(lines) > 0.3:
+        return False
+    kab_hits = sum(1 for w in words if w in KABYLE_CORE_WORDS)
+    diac_hits = sum(1 for ch in chunk if ch in KABYLE_DIACRITICS)
+    return kab_hits >= 1 or diac_hits >= 1
+
+
 def clean_document(text: str, scorer: LanguageScorer) -> str | None:
     """Keep only the chunks Dihya calls Kabyle; None if glued or too short afterwards."""
+    text = _PUA_RE.sub("", text).replace("*", " ")
     text = _REPEAT_RE.sub(r"\1", text)
     words = _WORD_RE.findall(text)
-    if words and sum(len(w) > GLUED_TOKEN_CHARS for w in words) / len(words) > GLUED_DOCUMENT_SHARE:
+    if not words or (
+        sum(len(w) > GLUED_TOKEN_CHARS for w in words) / len(words) > GLUED_DOCUMENT_SHARE
+    ):
         return None
-    chunks = line_chunks(text)
+    chunks = [c for c in line_chunks(text) if is_clean_chunk(c)]
+    if not chunks:
+        return None
     rows = scorer.probabilities([c.strip()[:LID_WINDOW_CHARS] or " " for c in chunks])
     kept = [c for c, row in zip(chunks, rows, strict=True) if verdict([row]) == KABYLE]
     cleaned = "\n".join(kept).strip()
-    return cleaned if len(cleaned) >= MIN_DOCUMENT_CHARS else None
+    if len(cleaned) < MIN_DOCUMENT_CHARS:
+        return None
+    cleaned_words = [w.lower() for w in _WORD_RE.findall(cleaned)]
+    if len(cleaned_words) < 25:
+        return None
+    fr_hits = sum(1 for w in cleaned_words if w in FRENCH_STOPWORDS)
+    en_hits = sum(1 for w in cleaned_words if w in ENGLISH_STOPWORDS)
+    kab_hits = sum(1 for w in cleaned_words if w in KABYLE_CORE_WORDS)
+    diac_hits = sum(1 for ch in cleaned if ch in KABYLE_DIACRITICS)
+    if (
+        (fr_hits / len(cleaned_words)) > 0.02
+        or fr_hits > 8
+        or (en_hits / len(cleaned_words)) > 0.02
+        or en_hits > 8
+        or (kab_hits < 2 and diac_hits < 2)
+    ):
+        return None
+    return cleaned
 
 
 def clean_jsonl(path: Path, scorer: LanguageScorer) -> dict[str, dict[str, int]]:
