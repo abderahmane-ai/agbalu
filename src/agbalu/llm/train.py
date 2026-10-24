@@ -556,7 +556,7 @@ def peak_memory(device: torch.device) -> int | None:
 
 
 class GradientAccumulator:
-    """Accumulates gradients in pinned host memory to keep single-GPU peak VRAM below 38GB."""
+    """Accumulates gradients in host memory (unpinned to spare BAR1) to keep VRAM below 38GB."""
 
     def __init__(self, model: LanguageModel, device: torch.device) -> None:
         self.device = device
@@ -564,18 +564,19 @@ class GradientAccumulator:
             p for _, p in model.named_parameters() if p.requires_grad
         ]
         self.cpu_grads: dict[torch.nn.Parameter, torch.Tensor] = {
-            p: torch.zeros_like(p, device="cpu", pin_memory=True) for p in self.params
+            p: torch.zeros_like(p, device="cpu", pin_memory=False) for p in self.params
         }
         for p in self.params:
             p.register_post_accumulate_grad_hook(self._hook)  # type: ignore[no-untyped-call]
 
     def _hook(self, param: torch.nn.Parameter) -> None:
         if param.grad is not None:
-            self.cpu_grads[param].add_(param.grad.to("cpu", non_blocking=True))
+            self.cpu_grads[param].add_(param.grad.to("cpu"))
             param.grad = None
 
     def norm_and_clip(self, clip_norm: float) -> tuple[float, float, bool]:
         """Global gradient norm and scaling coefficient."""
+        torch.cuda.synchronize()
         total_sq = 0.0
         for g in self.cpu_grads.values():
             total_sq += float(torch.sum(g.float() ** 2).item())
@@ -594,6 +595,7 @@ class GradientAccumulator:
                 optimizer.step()
                 p.grad = None
                 g_cpu.zero_()
+        torch.cuda.synchronize()
 
     def zero_grad(self) -> None:
         for g in self.cpu_grads.values():
