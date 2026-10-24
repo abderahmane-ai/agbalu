@@ -302,6 +302,19 @@ class TestPieces:
             assert json.loads(path.read_text())["pid"] == os.getpid()
         assert not path.exists()
 
+    def test_streaming_optimizer_tracks_and_updates_states(self) -> None:
+        p = torch.nn.Parameter(torch.randn(10, 10))
+        opt = torch.optim.AdamW([p], lr=1e-3)
+        streamer = train.StreamingOptimizer(opt, torch.device("cpu"))
+        p.grad = torch.randn_like(p)
+        norm, finite = streamer.step(1.0)
+        assert finite
+        assert norm > 0.0
+        grad_after: object = p.grad
+        assert grad_after is None
+        assert p in streamer.cpu_states
+        assert streamer.cpu_states[p]["step"].item() == 1
+
     def test_a_lock_from_before_a_restart_is_taken_even_if_its_pid_is_alive(
         self, tmp_path: Path
     ) -> None:

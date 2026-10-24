@@ -558,55 +558,104 @@ def peak_memory(device: torch.device) -> int | None:
     return int(torch.cuda.max_memory_allocated(device))
 
 
-class GradientAccumulator:
-    """Accumulates gradients in host memory (unpinned to spare BAR1) to keep VRAM below 38GB."""
+class StreamingOptimizer:
+    """Manages 8-bit Adam optimizer states in unpinned host memory for full-speed GPU accumulation.
 
-    def __init__(self, model: LanguageModel, device: torch.device) -> None:
+    During micro-batches (forward and backward), gradients accumulate 100% on the GPU with zero
+    CPU transfers or PCIe stalls. Only during optimizer.step() are states streamed to GPU
+    parameter-by-parameter and returned to host memory, freeing each parameter's gradient
+    immediately to maintain VRAM below 40 GB.
+    """
+
+    def __init__(self, optimizer: torch.optim.Optimizer, device: torch.device) -> None:
+        self.optimizer = optimizer
         self.device = device
         self.params: list[torch.nn.Parameter] = [
-            p for _, p in model.named_parameters() if p.requires_grad
+            p for group in optimizer.param_groups for p in group["params"] if p.requires_grad
         ]
-        self.cpu_grads: dict[torch.nn.Parameter, torch.Tensor] = {
-            p: torch.zeros_like(p, device="cpu", pin_memory=False) for p in self.params
-        }
+        self.cpu_states: dict[torch.nn.Parameter, dict[str, torch.Tensor]] = {}
         for p in self.params:
-            p.register_post_accumulate_grad_hook(self._hook)  # type: ignore[no-untyped-call]
+            st = optimizer.state.get(p)
+            if st and "exp_avg" in st and getattr(st["exp_avg"], "is_cuda", False):
+                self.cpu_states[p] = {
+                    "exp_avg": st["exp_avg"].to("cpu"),
+                    "exp_avg_sq": st["exp_avg_sq"].to("cpu"),
+                    "step": st["step"].clone(),
+                }
+                del st["exp_avg"], st["exp_avg_sq"]
 
-    def _hook(self, param: torch.nn.Parameter) -> None:
-        if param.grad is not None:
-            self.cpu_grads[param].add_(param.grad.to("cpu"))
-            param.grad = None
+    def before_save(self) -> None:
+        """Populate optimizer.state with CPU tensors before torch.save writes the checkpoint."""
+        for p, st in self.cpu_states.items():
+            self.optimizer.state[p]["exp_avg"] = st["exp_avg"]
+            self.optimizer.state[p]["exp_avg_sq"] = st["exp_avg_sq"]
+            self.optimizer.state[p]["step"] = st["step"]
 
-    def norm_and_clip(self, clip_norm: float) -> tuple[float, float, bool]:
-        """Global gradient norm and scaling coefficient."""
-        torch.cuda.synchronize()
+    def after_save(self) -> None:
+        """Clean optimizer.state after saving checkpoint to avoid holding references."""
+        for p in self.params:
+            st = self.optimizer.state.get(p)
+            if st:
+                st.pop("exp_avg", None)
+                st.pop("exp_avg_sq", None)
+
+    def step(self, clip_norm: float) -> tuple[float, bool]:
+        """Compute global norm on GPU, clip gradients, and step parameters one by one."""
         total_sq = 0.0
-        for g in self.cpu_grads.values():
-            total_sq += float(torch.sum(g.float() ** 2).item())
+        for p in self.params:
+            if p.grad is not None:
+                total_sq += float(torch.sum(p.grad.float() ** 2).item())
         norm = math.sqrt(total_sq)
         finite = math.isfinite(norm)
-        coef = min(1.0, clip_norm / (norm + 1e-6)) if finite else 0.0
-        return norm, coef, finite
+        if not finite:
+            self.zero_grad()
+            return norm, False
 
-    def step(self, optimizer: torch.optim.Optimizer, clip_coef: float) -> None:
-        """Stream gradients parameter-by-parameter into optimizer to keep peak VRAM minimal."""
-        for group in optimizer.param_groups:
+        clip_coef = min(1.0, clip_norm / (norm + 1e-6))
+
+        grads: dict[torch.nn.Parameter, torch.Tensor | None] = {p: p.grad for p in self.params}
+        for p in self.params:
+            p.grad = None
+
+        for group in self.optimizer.param_groups:
             for p in group["params"]:
-                if p.numel() > LARGE_PARAM_NUMEL:
+                g = grads.get(p)
+                if g is None:
+                    continue
+                if clip_coef < 1.0:
+                    g.mul_(clip_coef)
+
+                if self.device.type == "cuda" and p.numel() > LARGE_PARAM_NUMEL:
                     torch.cuda.empty_cache()
-                g_cpu = self.cpu_grads[p]
-                scaled = g_cpu if clip_coef >= 1.0 else g_cpu * clip_coef
-                p.grad = scaled.to(self.device, non_blocking=True)
-                optimizer.step()
+
+                state = self.optimizer.state[p]
+                if p in self.cpu_states:
+                    st = self.cpu_states[p]
+                    state["exp_avg"] = st["exp_avg"].to(self.device, non_blocking=True)
+                    state["exp_avg_sq"] = st["exp_avg_sq"].to(self.device, non_blocking=True)
+                    state["step"] = st["step"]
+
+                p.grad = g
+                self.optimizer.step()
                 p.grad = None
-                g_cpu.zero_()
-                if p.numel() > LARGE_PARAM_NUMEL:
+                grads[p] = None
+                del g
+
+                self.cpu_states[p] = {
+                    "exp_avg": state["exp_avg"].to("cpu"),
+                    "exp_avg_sq": state["exp_avg_sq"].to("cpu"),
+                    "step": state["step"].clone(),
+                }
+                del state["exp_avg"], state["exp_avg_sq"]
+
+                if self.device.type == "cuda" and p.numel() > LARGE_PARAM_NUMEL:
                     torch.cuda.empty_cache()
-        torch.cuda.synchronize()
+
+        if self.device.type == "cuda":
+            torch.cuda.synchronize()
+        return norm, True
 
     def zero_grad(self) -> None:
-        for g in self.cpu_grads.values():
-            g.zero_()
         for p in self.params:
             p.grad = None
 
@@ -627,7 +676,7 @@ class Session:
     stop: StopRequest | None
     rows: Rows | None = None
     validation: Rows | None = None
-    accumulator: GradientAccumulator | None = None
+    streaming_optimizer: StreamingOptimizer | None = None
     step_seconds: list[float] = field(default_factory=list)
     step_tokens: list[int] = field(default_factory=list)
     wait_seconds: list[float] = field(default_factory=list)
@@ -753,19 +802,15 @@ def step(session: Session, batch: list[PackedRow]) -> tuple[float, float, bool]:
         torch.autograd.backward(loss / step_targets)
         total_loss += loss.detach().float() / step_targets
         tracker.advance()
-    if session.accumulator is not None:
-        norm_val, clip_coef, finite = session.accumulator.norm_and_clip(GRADIENT_CLIP)
-        if finite:
-            lr = scheduled_rate(session)
-            for group in session.optimizer.param_groups:
-                current = group["lr"]
-                if isinstance(current, torch.Tensor):
-                    current.fill_(lr)
-                else:
-                    group["lr"] = lr
-            session.accumulator.step(session.optimizer, clip_coef)
-        else:
-            session.accumulator.zero_grad()
+    if session.streaming_optimizer is not None:
+        lr = scheduled_rate(session)
+        for group in session.optimizer.param_groups:
+            current = group["lr"]
+            if isinstance(current, torch.Tensor):
+                current.fill_(lr)
+            else:
+                group["lr"] = lr
+        norm_val, finite = session.streaming_optimizer.step(GRADIENT_CLIP)
         return float(total_loss.item()), norm_val, finite
 
     params = [p for _, p in model.named_parameters() if p.requires_grad]
@@ -784,22 +829,38 @@ def step(session: Session, batch: list[PackedRow]) -> tuple[float, float, bool]:
     return float(total_loss.item()), float(norm_tensor.item()), finite
 
 
+def checkpoint_now(session: Session) -> Path:
+    """Save model, optimizer, generators and state, safely handling streaming optimizer states."""
+    session.phase = "checkpointing"
+    if session.streaming_optimizer is not None:
+        session.streaming_optimizer.before_save()
+    path = save_checkpoint(
+        session.config.directory,
+        session.model,
+        session.optimizer,
+        session.state,
+        session.config.keep,
+    )
+    if session.streaming_optimizer is not None:
+        session.streaming_optimizer.after_save()
+    session.log.write("checkpoint", step=session.state.step, path=str(path))
+    return path
+
+
 def loop(session: Session) -> dict[str, object]:
-    config, state = session.config, session.state
+    config = session.config
 
     def status() -> dict[str, object]:
         return {
             "phase": session.phase,
-            "step": state.step + 1,
+            "step": session.state.step + 1,
             "micro": session.micro,
             "micros_per_step": config.micros_per_step,
         }
 
     with Heartbeat("train", status=status):
         ended = steps(session)
-    session.phase = "checkpointing"
-    path = save_checkpoint(config.directory, session.model, session.optimizer, state, config.keep)
-    session.log.write("checkpoint", step=state.step, path=str(path))
+    checkpoint_now(session)
     result = summary(session, ended)
     write_json(config.directory / "summary.json", result)
     session.log.write("end", **result)
@@ -884,11 +945,7 @@ def steps(session: Session) -> str:
             session.phase = "evaluating"
             evaluate_now(session)
         if state.step % config.checkpoint_every == 0 and state.step < session.total:
-            session.phase = "checkpointing"
-            path = save_checkpoint(
-                config.directory, session.model, session.optimizer, state, config.keep
-            )
-            session.log.write("checkpoint", step=state.step, path=str(path))
+            checkpoint_now(session)
     return ended
 
 
@@ -944,8 +1001,8 @@ def train(
             code=code_stamp(),
             blocks_sha256=digest,
         )
-        accumulator = (
-            GradientAccumulator(model, device)
+        streaming_optimizer = (
+            StreamingOptimizer(optimizer, device)
             if parameters > LARGE_MODEL_PARAMETERS and device.type == "cuda"
             else None
         )
@@ -962,7 +1019,7 @@ def train(
             stop,
             rows,
             validation,
-            accumulator,
+            streaming_optimizer,
         )
         return loop(session)
 
