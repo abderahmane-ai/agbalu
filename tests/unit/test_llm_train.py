@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import signal
@@ -314,6 +315,17 @@ class TestPieces:
         assert grad_after is None
         assert p in streamer.cpu_states
         assert streamer.cpu_states[p]["step"].item() == 1
+
+        streamer.before_save()
+        saved_sd = copy.deepcopy(opt.state_dict())
+        streamer.after_save()
+
+        p2 = torch.nn.Parameter(torch.randn(10, 10))
+        opt2 = torch.optim.AdamW([p2], lr=1e-3)
+        streamer2 = train.StreamingOptimizer(opt2, torch.device("cpu"))
+        streamer2.load_state_dict(saved_sd)
+        assert p2 in streamer2.cpu_states
+        assert streamer2.cpu_states[p2]["step"].item() == 1
 
     def test_a_lock_from_before_a_restart_is_taken_even_if_its_pid_is_alive(
         self, tmp_path: Path

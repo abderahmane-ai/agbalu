@@ -472,9 +472,18 @@ def write_checkpoint(
     return final
 
 
-def restore(path: Path, optimizer: torch.optim.Optimizer) -> RunState:
+def restore(
+    path: Path,
+    optimizer: torch.optim.Optimizer,
+    streaming_optimizer: StreamingOptimizer | None = None,
+) -> RunState:
     """Optimizer state and generators from a checkpoint this trainer wrote."""
-    optimizer.load_state_dict(torch.load(path / OPTIMIZER_FILE, weights_only=False))
+    if streaming_optimizer is not None:
+        streaming_optimizer.load_state_dict(
+            torch.load(path / OPTIMIZER_FILE, map_location="cpu", weights_only=False)
+        )
+    else:
+        optimizer.load_state_dict(torch.load(path / OPTIMIZER_FILE, weights_only=False))
     generators = torch.load(path / RNG_FILE, weights_only=False)
     torch.set_rng_state(generators["cpu"])
     if "cuda" in generators and torch.cuda.is_available():
@@ -595,6 +604,31 @@ class StreamingOptimizer:
             self.optimizer.state[p]["exp_avg"] = st["exp_avg"]
             self.optimizer.state[p]["exp_avg_sq"] = st["exp_avg_sq"]
             self.optimizer.state[p]["step"] = st["step"]
+
+    def load_state_dict(self, state_dict: dict[str, object]) -> None:
+        """Load optimizer state directly into CPU memory without touching GPU."""
+        saved_groups: list[dict[str, list[int]]] = state_dict["param_groups"]  # type: ignore[assignment]
+        saved_state: dict[int, dict[str, torch.Tensor]] = state_dict["state"]  # type: ignore[assignment]
+        id_map: dict[int, torch.nn.Parameter] = {
+            pid: p
+            for saved_group, current_group in zip(
+                saved_groups, self.optimizer.param_groups, strict=True
+            )
+            for pid, p in zip(
+                saved_group["params"],
+                current_group["params"],
+                strict=True,
+            )
+        }
+
+        self.cpu_states.clear()
+        for pid, st in saved_state.items():
+            p = id_map[pid]
+            self.cpu_states[p] = {
+                "exp_avg": st["exp_avg"].to("cpu"),
+                "exp_avg_sq": st["exp_avg_sq"].to("cpu"),
+                "step": st["step"].to("cpu"),
+            }
 
     def after_save(self) -> None:
         """Clean optimizer.state after saving checkpoint to avoid holding references."""
@@ -995,9 +1029,14 @@ def train(
         parameters = count_parameters(model, config)
         model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
         optimizer = build_optimizer(model, config)
+        streaming_optimizer = (
+            StreamingOptimizer(optimizer, device)
+            if parameters > LARGE_MODEL_PARAMETERS and device.type == "cuda"
+            else None
+        )
         if latest is not None:
             with stage("restore optimizer and generators", checkpoint=str(latest)):
-                state = restore(latest, optimizer)
+                state = restore(latest, optimizer, streaming_optimizer)
         else:
             torch.manual_seed(TORCH_SEED)
             state = RunState()
@@ -1013,11 +1052,6 @@ def train(
             config_hash=config_hash(config.identity()),
             code=code_stamp(),
             blocks_sha256=digest,
-        )
-        streaming_optimizer = (
-            StreamingOptimizer(optimizer, device)
-            if parameters > LARGE_MODEL_PARAMETERS and device.type == "cuda"
-            else None
         )
         session = Session(
             config,
