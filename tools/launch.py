@@ -127,7 +127,7 @@ DATA_TASKS: Final = (
     "expand-aligned",
     "compile",
 )
-RESUMABLE_TASKS: Final = ("expand-pdfs",)
+RESUMABLE_TASKS: Final = ("expand-pdfs", "compile")
 """Data tasks whose output a later run appends to instead of rebuilding (`--resume`)."""
 WEIGHT_EXCLUDES: Final = ("--exclude", "step-*", "--exclude", "best", "--exclude", "model")
 """What `pull` leaves on the pod unless `--weights`: checkpoints, the best model and a merge."""

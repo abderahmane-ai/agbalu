@@ -462,6 +462,16 @@ def command_compile(args: argparse.Namespace) -> int:
         ("replay", command_replay, replay_args),
         ("pack", command_pack, pack_args),
     ):
+        target = getattr(ns, "out", None)
+        if (
+            args.resume
+            and target
+            and Path(target).is_file()
+            and Path(target).stat().st_size > 0
+        ):
+            size = Path(target).stat().st_size
+            print(f"  {step_name}: {target} already exists ({size:,} bytes), skipping")
+            continue
         with stage(f"compile:{step_name}"):
             code = fn(ns)
             if code != 0:
@@ -1201,6 +1211,9 @@ def add_expansion_commands(sub: argparse._SubParsersAction[argparse.ArgumentPars
     )
     comp.add_argument("--base", default=BASE)
     comp.add_argument("--device", help="CUDA when present, else CPU")
+    comp.add_argument(
+        "--resume", action="store_true", help="skip steps whose outputs already exist"
+    )
 
 
 def add_model_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:

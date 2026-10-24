@@ -140,7 +140,7 @@ REPLAY_SOURCES: Final = (
         "parquet",
         "messages",
         "odc-by",
-        0.05,
+        0.02,
         0.95,
     ),
     ReplaySource(
@@ -150,7 +150,7 @@ REPLAY_SOURCES: Final = (
         "jsonl",
         "text",
         "odc-by",
-        0.05,
+        0.08,
         0.25,
     ),
 )
