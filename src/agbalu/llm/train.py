@@ -57,6 +57,7 @@ from agbalu.llm.recipe import (
     BETAS,
     BLOCKS_PER_STEP,
     GRADIENT_CLIP,
+    LARGE_MODEL_PARAMETERS,
     MICRO_BLOCKS,
     PEAK_LR,
     SFT_EPOCHS,
@@ -554,6 +555,53 @@ def peak_memory(device: torch.device) -> int | None:
     return int(torch.cuda.max_memory_allocated(device))
 
 
+class GradientAccumulator:
+    """Accumulates gradients in pinned host memory to keep single-GPU peak VRAM below 38GB."""
+
+    def __init__(self, model: LanguageModel, device: torch.device) -> None:
+        self.device = device
+        self.params: list[torch.nn.Parameter] = [
+            p for _, p in model.named_parameters() if p.requires_grad
+        ]
+        self.cpu_grads: dict[torch.nn.Parameter, torch.Tensor] = {
+            p: torch.zeros_like(p, device="cpu", pin_memory=True) for p in self.params
+        }
+        for p in self.params:
+            p.register_post_accumulate_grad_hook(self._hook)  # type: ignore[no-untyped-call]
+
+    def _hook(self, param: torch.nn.Parameter) -> None:
+        if param.grad is not None:
+            self.cpu_grads[param].add_(param.grad.to("cpu", non_blocking=True))
+            param.grad = None
+
+    def norm_and_clip(self, clip_norm: float) -> tuple[float, float, bool]:
+        """Global gradient norm and scaling coefficient."""
+        total_sq = 0.0
+        for g in self.cpu_grads.values():
+            total_sq += float(torch.sum(g.float() ** 2).item())
+        norm = math.sqrt(total_sq)
+        finite = math.isfinite(norm)
+        coef = min(1.0, clip_norm / (norm + 1e-6)) if finite else 0.0
+        return norm, coef, finite
+
+    def step(self, optimizer: torch.optim.Optimizer, clip_coef: float) -> None:
+        """Stream gradients parameter-by-parameter into optimizer to keep peak VRAM minimal."""
+        for group in optimizer.param_groups:
+            for p in group["params"]:
+                g_cpu = self.cpu_grads[p]
+                scaled = g_cpu if clip_coef >= 1.0 else g_cpu * clip_coef
+                p.grad = scaled.to(self.device, non_blocking=True)
+                optimizer.step()
+                p.grad = None
+                g_cpu.zero_()
+
+    def zero_grad(self) -> None:
+        for g in self.cpu_grads.values():
+            g.zero_()
+        for p in self.params:
+            p.grad = None
+
+
 @dataclass(slots=True)
 class Session:
     """Everything one invocation of the loop works on."""
@@ -570,6 +618,7 @@ class Session:
     stop: StopRequest | None
     rows: Rows | None = None
     validation: Rows | None = None
+    accumulator: GradientAccumulator | None = None
     step_seconds: list[float] = field(default_factory=list)
     step_tokens: list[int] = field(default_factory=list)
     wait_seconds: list[float] = field(default_factory=list)
@@ -695,9 +744,24 @@ def step(session: Session, batch: list[PackedRow]) -> tuple[float, float, bool]:
         torch.autograd.backward(loss / step_targets)
         total_loss += loss.detach().float() / step_targets
         tracker.advance()
+    if session.accumulator is not None:
+        norm_val, clip_coef, finite = session.accumulator.norm_and_clip(GRADIENT_CLIP)
+        if finite:
+            lr = scheduled_rate(session)
+            for group in session.optimizer.param_groups:
+                current = group["lr"]
+                if isinstance(current, torch.Tensor):
+                    current.fill_(lr)
+                else:
+                    group["lr"] = lr
+            session.accumulator.step(session.optimizer, clip_coef)
+        else:
+            session.accumulator.zero_grad()
+        return float(total_loss.item()), norm_val, finite
+
     params = [p for _, p in model.named_parameters() if p.requires_grad]
-    norm = torch.nn.utils.clip_grad_norm_(params, GRADIENT_CLIP)
-    finite = bool(torch.isfinite(norm).item())
+    norm_tensor = torch.nn.utils.clip_grad_norm_(params, GRADIENT_CLIP)
+    finite = bool(torch.isfinite(norm_tensor).item())
     if finite:
         lr = scheduled_rate(session)
         for group in session.optimizer.param_groups:
@@ -708,7 +772,7 @@ def step(session: Session, batch: list[PackedRow]) -> tuple[float, float, bool]:
                 group["lr"] = lr
         session.optimizer.step()
     session.optimizer.zero_grad(set_to_none=True)
-    return float(total_loss.item()), float(norm.item()), finite
+    return float(total_loss.item()), float(norm_tensor.item()), finite
 
 
 def loop(session: Session) -> dict[str, object]:
@@ -871,6 +935,11 @@ def train(
             code=code_stamp(),
             blocks_sha256=digest,
         )
+        accumulator = (
+            GradientAccumulator(model, device)
+            if parameters > LARGE_MODEL_PARAMETERS and device.type == "cuda"
+            else None
+        )
         session = Session(
             config,
             model,
@@ -884,6 +953,7 @@ def train(
             stop,
             rows,
             validation,
+            accumulator,
         )
         return loop(session)
 
