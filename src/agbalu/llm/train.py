@@ -595,8 +595,26 @@ class StreamingOptimizer:
                     "step": st["step"].clone(),
                 }
                 del st["exp_avg"], st["exp_avg_sq"]
+        self.cpu_accum_params: dict[torch.nn.Parameter, torch.Tensor] = {
+            p: torch.zeros_like(p, device="cpu", pin_memory=False)
+            for p in self.params
+            if p.numel() > LARGE_PARAM_NUMEL and self.device.type == "cuda"
+        }
+        for p, buf in self.cpu_accum_params.items():
+            p.register_post_accumulate_grad_hook(self._make_accum_hook(buf))  # type: ignore[no-untyped-call]
         if self.device.type == "cuda":
             torch.cuda.empty_cache()
+
+    @staticmethod
+    def _make_accum_hook(
+        buf: torch.Tensor,
+    ) -> Callable[[torch.nn.Parameter], None]:
+        def hook(param: torch.nn.Parameter) -> None:
+            if param.grad is not None:
+                buf.add_(param.grad.to("cpu", non_blocking=True))
+                param.grad = None
+
+        return hook
 
     def before_save(self) -> None:
         """Populate optimizer.state with CPU tensors before torch.save writes the checkpoint."""
@@ -640,17 +658,54 @@ class StreamingOptimizer:
         if self.device.type == "cuda":
             torch.cuda.empty_cache()
 
+    def _step_param(
+        self,
+        p: torch.nn.Parameter,
+        g: torch.Tensor,
+        clip_coef: float,
+    ) -> None:
+        if clip_coef < 1.0:
+            g.mul_(clip_coef)
+        if self.device.type == "cuda" and p.numel() > LARGE_PARAM_NUMEL:
+            torch.cuda.empty_cache()
+
+        state = self.optimizer.state[p]
+        if p in self.cpu_states:
+            st = self.cpu_states[p]
+            state["exp_avg"] = st["exp_avg"].to(self.device, non_blocking=True)
+            state["exp_avg_sq"] = st["exp_avg_sq"].to(self.device, non_blocking=True)
+            state["step"] = st["step"]
+
+        p.grad = g
+        self.optimizer.step()
+        p.grad = None
+        del g
+
+        self.cpu_states[p] = {
+            "exp_avg": state["exp_avg"].to("cpu"),
+            "exp_avg_sq": state["exp_avg_sq"].to("cpu"),
+            "step": state["step"].clone(),
+        }
+        del state["exp_avg"], state["exp_avg_sq"]
+
+        if self.device.type == "cuda" and p.numel() > LARGE_PARAM_NUMEL:
+            torch.cuda.empty_cache()
+
     def step(self, clip_norm: float) -> tuple[float, bool]:
         """Compute global norm on GPU, clip gradients, and step parameters one by one."""
         if self.device.type == "cuda":
             torch.cuda.empty_cache()
 
         sq_norms = [
-            torch.linalg.vector_norm(p.grad, dtype=torch.float32) ** 2
+            float(torch.linalg.vector_norm(p.grad, dtype=torch.float32).item() ** 2)
             for p in self.params
-            if p.grad is not None
+            if p not in self.cpu_accum_params and p.grad is not None
         ]
-        total_sq = float(torch.stack(sq_norms).sum().item()) if sq_norms else 0.0
+        sq_norms.extend(
+            float(torch.linalg.vector_norm(buf, dtype=torch.float32).item() ** 2)
+            for buf in self.cpu_accum_params.values()
+        )
+        total_sq = sum(sq_norms)
         norm = math.sqrt(total_sq)
         finite = math.isfinite(norm)
         if not finite:
@@ -659,44 +714,25 @@ class StreamingOptimizer:
 
         clip_coef = min(1.0, clip_norm / (norm + 1e-6))
 
-        grads: dict[torch.nn.Parameter, torch.Tensor | None] = {p: p.grad for p in self.params}
+        grads: dict[torch.nn.Parameter, torch.Tensor | None] = {
+            p: p.grad for p in self.params if p not in self.cpu_accum_params
+        }
         for p in self.params:
             p.grad = None
 
         sorted_params = sorted(self.params, key=lambda p: p.numel())
 
         for p in sorted_params:
-            g = grads.get(p)
-            if g is None:
-                continue
-            if clip_coef < 1.0:
-                g.mul_(clip_coef)
-
-            if self.device.type == "cuda" and p.numel() > LARGE_PARAM_NUMEL:
-                torch.cuda.empty_cache()
-
-            state = self.optimizer.state[p]
-            if p in self.cpu_states:
-                st = self.cpu_states[p]
-                state["exp_avg"] = st["exp_avg"].to(self.device, non_blocking=True)
-                state["exp_avg_sq"] = st["exp_avg_sq"].to(self.device, non_blocking=True)
-                state["step"] = st["step"]
-
-            p.grad = g
-            self.optimizer.step()
-            p.grad = None
-            grads[p] = None
-            del g
-
-            self.cpu_states[p] = {
-                "exp_avg": state["exp_avg"].to("cpu"),
-                "exp_avg_sq": state["exp_avg_sq"].to("cpu"),
-                "step": state["step"].clone(),
-            }
-            del state["exp_avg"], state["exp_avg_sq"]
-
-            if self.device.type == "cuda" and p.numel() > LARGE_PARAM_NUMEL:
-                torch.cuda.empty_cache()
+            if p in self.cpu_accum_params:
+                buf = self.cpu_accum_params[p]
+                g = buf.to(self.device, non_blocking=True)
+                buf.zero_()
+                self._step_param(p, g, clip_coef)
+            else:
+                g_opt = grads.get(p)
+                if g_opt is not None:
+                    self._step_param(p, g_opt, clip_coef)
+                    grads[p] = None
 
         if self.device.type == "cuda":
             torch.cuda.synchronize()
@@ -705,6 +741,8 @@ class StreamingOptimizer:
     def zero_grad(self) -> None:
         for p in self.params:
             p.grad = None
+        for buf in self.cpu_accum_params.values():
+            buf.zero_()
 
 
 @dataclass(slots=True)
