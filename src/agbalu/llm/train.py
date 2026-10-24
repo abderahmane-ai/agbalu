@@ -97,6 +97,9 @@ PREFETCH: Final = 4
 ETA_WINDOW: Final = 20
 """Recent steps the time-left projection is taken over."""
 
+LARGE_PARAM_NUMEL: Final = 50_000_000
+"""Parameters larger than this trigger cache eviction before and after optimizer stepping."""
+
 PROBES: Final = (
     "Tamurt n Leqbayel",
     "Deg useggas-nni, imezdaɣ n taddart",
@@ -589,12 +592,16 @@ class GradientAccumulator:
         """Stream gradients parameter-by-parameter into optimizer to keep peak VRAM minimal."""
         for group in optimizer.param_groups:
             for p in group["params"]:
+                if p.numel() > LARGE_PARAM_NUMEL:
+                    torch.cuda.empty_cache()
                 g_cpu = self.cpu_grads[p]
                 scaled = g_cpu if clip_coef >= 1.0 else g_cpu * clip_coef
                 p.grad = scaled.to(self.device, non_blocking=True)
                 optimizer.step()
                 p.grad = None
                 g_cpu.zero_()
+                if p.numel() > LARGE_PARAM_NUMEL:
+                    torch.cuda.empty_cache()
         torch.cuda.synchronize()
 
     def zero_grad(self) -> None:

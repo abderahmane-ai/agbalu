@@ -54,7 +54,7 @@ class TestCommands:
         assert resumed[1] == ["expand-pdfs", "--resume"]
 
     def test_resume_is_refused_for_a_task_that_cannot_use_it(self) -> None:
-        argv = ["data", "--task", "compile", "--resume"]
+        argv = ["data", "--task", "documents", "--resume"]
         with pytest.raises(launch.LaunchError):
             launch.job(launch.build_parser().parse_args(argv))
 

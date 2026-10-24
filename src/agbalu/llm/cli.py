@@ -463,12 +463,7 @@ def command_compile(args: argparse.Namespace) -> int:
         ("pack", command_pack, pack_args),
     ):
         target = getattr(ns, "out", None)
-        if (
-            args.resume
-            and target
-            and Path(target).is_file()
-            and Path(target).stat().st_size > 0
-        ):
+        if args.resume and target and Path(target).is_file() and Path(target).stat().st_size > 0:
             size = Path(target).stat().st_size
             print(f"  {step_name}: {target} already exists ({size:,} bytes), skipping")
             continue
