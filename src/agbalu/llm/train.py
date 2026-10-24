@@ -586,6 +586,8 @@ class StreamingOptimizer:
                     "step": st["step"].clone(),
                 }
                 del st["exp_avg"], st["exp_avg_sq"]
+        if self.device.type == "cuda":
+            torch.cuda.empty_cache()
 
     def before_save(self) -> None:
         """Populate optimizer.state with CPU tensors before torch.save writes the checkpoint."""
@@ -601,6 +603,8 @@ class StreamingOptimizer:
             if st:
                 st.pop("exp_avg", None)
                 st.pop("exp_avg_sq", None)
+        if self.device.type == "cuda":
+            torch.cuda.empty_cache()
 
     def step(self, clip_norm: float) -> tuple[float, bool]:
         """Compute global norm on GPU, clip gradients, and step parameters one by one."""
