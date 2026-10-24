@@ -6,6 +6,11 @@ python3 -m agbalu.llm.cli fertility|holdout|merge|select
 
 from __future__ import annotations
 
+import os
+
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+os.environ.setdefault("PYTORCH_NO_CUDA_NVML", "1")
+
 import argparse
 import json
 import sys

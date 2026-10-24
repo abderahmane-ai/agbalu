@@ -604,7 +604,14 @@ class StreamingOptimizer:
 
     def step(self, clip_norm: float) -> tuple[float, bool]:
         """Compute global norm on GPU, clip gradients, and step parameters one by one."""
-        sq_norms = [torch.sum(p.grad.float() ** 2) for p in self.params if p.grad is not None]
+        if self.device.type == "cuda":
+            torch.cuda.empty_cache()
+
+        sq_norms = [
+            torch.linalg.vector_norm(p.grad, dtype=torch.float32) ** 2
+            for p in self.params
+            if p.grad is not None
+        ]
         total_sq = float(torch.stack(sq_norms).sum().item()) if sq_norms else 0.0
         norm = math.sqrt(total_sq)
         finite = math.isfinite(norm)
@@ -613,9 +620,6 @@ class StreamingOptimizer:
             return norm, False
 
         clip_coef = min(1.0, clip_norm / (norm + 1e-6))
-
-        if self.device.type == "cuda":
-            torch.cuda.empty_cache()
 
         grads: dict[torch.nn.Parameter, torch.Tensor | None] = {p: p.grad for p in self.params}
         for p in self.params:
