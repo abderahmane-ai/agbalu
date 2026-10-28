@@ -224,18 +224,66 @@ def working_set(cards: Sequence[Card], seed: int = SEED) -> list[Card]:
     return sorted(chosen, key=lambda card: card.id)
 
 
-TEACHER_TASKS: Final = ("identity", "hierarchy")
-"""The only tasks still asked of the teacher, operator decision 2026-10-17 to end the pasting
-at five more batches. Native Kabyle and non-Kabyle input have their conversations,
-translation is built from human pairs (`agbalu.llm.translations`), and reasoning, code and
-grounded answers are left to the merged instruct model; the set's think share falls to about
-10% as a result."""
+TASKS_ROTATION: Final = (
+    "reasoning",
+    "native_kabyle",
+    "code",
+    "grounded",
+    "hierarchy",
+    "non_kabyle_input",
+    "translation",
+    "identity",
+)
 
 
 def teacher_cards(cards: Sequence[Card], seed: int = SEED) -> list[Card]:
-    """The working set's cards of the tasks still asked of the teacher."""
-    working = working_set(cards, seed)
-    return [c for c in working if c.task in TEACHER_TASKS and c.split == "train"]
+    """All training cards ordered in a balanced, interleaved sequence across all tasks,
+    allocating 1 thinking card every 3 cards (~33% think share in new generation) to build
+    towards the 25% target."""
+    train_cards = [c for c in cards if c.split == "train"]
+    rng = random.Random(seed + 42)
+
+    pools: dict[tuple[str, bool], list[Card]] = {}
+    for c in train_cards:
+        pools.setdefault((c.task, c.think), []).append(c)
+
+    for key in pools:
+        rng.shuffle(pools[key])
+
+    scheduled: list[Card] = []
+    task_idx = 0
+
+    while any(pools.values()):
+        want_think = len(scheduled) % 3 == 0
+
+        found_card: Card | None = None
+        for offset in range(len(TASKS_ROTATION)):
+            t = TASKS_ROTATION[(task_idx + offset) % len(TASKS_ROTATION)]
+            bucket = pools.get((t, want_think), [])
+            if bucket:
+                found_card = bucket.pop(0)
+                task_idx = (task_idx + offset + 1) % len(TASKS_ROTATION)
+                break
+
+        if found_card is None:
+            for offset in range(len(TASKS_ROTATION)):
+                t = TASKS_ROTATION[(task_idx + offset) % len(TASKS_ROTATION)]
+                bucket = pools.get((t, not want_think), [])
+                if bucket:
+                    found_card = bucket.pop(0)
+                    task_idx = (task_idx + offset + 1) % len(TASKS_ROTATION)
+                    break
+
+        if found_card is None:
+            for bucket in pools.values():
+                if bucket:
+                    found_card = bucket.pop(0)
+                    break
+
+        if found_card is not None:
+            scheduled.append(found_card)
+
+    return scheduled
 
 
 def needs_passage(card: Card) -> bool:

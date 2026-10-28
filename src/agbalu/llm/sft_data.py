@@ -36,7 +36,7 @@ from agbalu.llm.teacher import Candidate
 
 Status = Literal["rejected", "flagged", "accepted", "surplus", "pending_review"]
 
-TASK_TARGETS: Final[dict[str, int]] = {
+TASK_TARGETS_V1: Final[dict[str, int]] = {
     "native_kabyle": 450,
     "non_kabyle_input": 150,
     "translation": 100,
@@ -46,8 +46,18 @@ TASK_TARGETS: Final[dict[str, int]] = {
     "identity": 20,
     "grounded": 70,
 }
-"""`docs/llm_post_training_design.md` §4.4's shares of 1,000 accepted conversations, cut from
-5,000 on 2026-10-16."""
+
+TASK_TARGETS: Final[dict[str, int]] = {
+    "native_kabyle": 1400,
+    "non_kabyle_input": 350,
+    "translation": 250,
+    "reasoning": 500,
+    "code": 300,
+    "hierarchy": 200,
+    "identity": 150,
+    "grounded": 350,
+}
+"""Target distribution for 3,500 accepted conversations (Jugurtha-9B SFT)."""
 
 ALWAYS_REVIEWED: Final = frozenset({"identity", "hierarchy"})
 REVIEW_SAMPLE: Final = 100
@@ -58,11 +68,9 @@ CATEGORY_MIN_REVIEWS: Final = 20
 """Fewer reviews than this in a task decide nothing about the task: one rejection out of one
 is not a rate."""
 
-THINK_SHARE: Final = 0.12
-THINK_TOLERANCE: Final = 0.04
-"""Operator decision 2026-10-17: the teacher set ends without its reasoning, code and
-grounded cards, so the think share is what the closed set holds, projected at 13.5% of the
-teacher conversations after the leak filters, not §6's 20%."""
+THINK_SHARE: Final = 0.25
+THINK_TOLERANCE: Final = 0.08
+"""Target 25% think-mode conversations for Jugurtha-9B with reasoning traces in Kabyle."""
 
 REPEAT_SPAN: Final = 4
 REPEAT_SHARE: Final = 0.25

@@ -684,7 +684,9 @@ def command_evaluate(args: argparse.Namespace) -> int:
 
     device = cuda()
     model = loader(device)(args.model, torch.bfloat16)
-    result = run(model, HubTokenizer(args.tokenizer), args.parts, device=device, limit=args.limit)
+    is_9b = any(x in str(args.model).lower() or x in str(args.tokenizer).lower() for x in ("9b",))
+    tokenizer_name = args.tokenizer if args.tokenizer != BASE else (BASE_9B if is_9b else BASE)
+    result = run(model, HubTokenizer(tokenizer_name), args.parts, device=device, limit=args.limit)
     write_stats(args.out, {"model": args.model, **result})
     print(json.dumps(result, indent=2, ensure_ascii=False))
     print(f"-> {args.out}")
@@ -706,7 +708,7 @@ def snapshot(repo: str) -> Path:
 def command_merge(args: argparse.Namespace) -> int:
     from agbalu.llm import merge
 
-    is_9b = "9B" in (str(args.cpt) + str(args.base or "") + str(args.instruct or ""))
+    is_9b = any(x in (str(args.cpt) + str(args.base or "") + str(args.instruct or "")).lower() for x in ("9b",))
     base_model = BASE_9B if is_9b else BASE
     instruct_model = INSTRUCT_9B if is_9b else INSTRUCT
     base_path = args.base or snapshot(base_model)

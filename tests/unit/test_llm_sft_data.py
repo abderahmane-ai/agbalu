@@ -49,7 +49,7 @@ def answer(index: int) -> str:
     )
 
 
-def world(count: int = 10, thinking: int = 1) -> tuple[list[Candidate], dict[str, Card]]:
+def world(count: int = 10, thinking: int = 2) -> tuple[list[Candidate], dict[str, Card]]:
     cards = {f"k{i}": card(f"k{i}", think=i < thinking) for i in range(count)}
     found = [
         candidate(f"c{i}", f"k{i}", answer(i), reasoning="Axemmem." if i < thinking else None)
@@ -284,7 +284,7 @@ class TestReviewAndQuotas:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setitem(sft_data.TASK_TARGETS, "native_kabyle", 10)
-        found, cards = world(11, thinking=0)
+        found, cards = world(11, thinking=1)
         last = max(found, key=lambda c: sft_data.stable_rank(c.id))
         index = found.index(last)
         found[index] = candidate(last.id, last.card, answer(index), reasoning="Axemmem.")
@@ -304,13 +304,13 @@ class TestReviewAndQuotas:
         assert len(accepted) == 11
 
     def test_a_category_review_failure_stops_the_build(self) -> None:
-        found, cards = world(30, thinking=6)
+        found, cards = world(30, thinking=7)
         reviews = {f"c{i}": Review(f"c{i}", i % 4 != 0, "") for i in range(30)}
         with pytest.raises(sft_data.DataError, match=r"native_kabyle.*regenerate"):
             run(found, cards, evidence(found, reviews=reviews))
 
     def test_too_few_reviews_decide_nothing_about_a_category(self) -> None:
-        found, cards = world(30, thinking=4)
+        found, cards = world(30, thinking=7)
         reviews = {"c10": Review("c10", False, "")}
         _, ledger = run(found, cards, evidence(found, reviews=reviews))
         assert ledger.status["c10"] == "rejected"
@@ -321,7 +321,7 @@ class TestReviewAndQuotas:
             run(found, cards, evidence(found))
 
     def test_the_review_sample_takes_every_identity_candidate(self) -> None:
-        found, cards = world(40)
+        found, cards = world(40, thinking=10)
         cards["k39"] = card("k39", "identity")
         chosen = sft_data.review_sample(found, cards, size=10)
         assert "c39" in chosen
