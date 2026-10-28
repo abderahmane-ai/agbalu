@@ -55,12 +55,15 @@ def sibling(labels: Sequence[str]) -> str | None:
 
 
 def language_signals(
-    candidates: Sequence[Candidate], glotlid: Labeller, dihya: Labeller
+    candidates: Sequence[Candidate], glotlid: Labeller | None, dihya: Labeller
 ) -> dict[str, dict[str, object]]:
     """The two language signals, per candidate id."""
     flat = [" ".join(kabyle_text(candidate).split()) for candidate in candidates]
-    with stage("glotlid", texts=len(flat)):
-        glot = glotlid.identify(flat)
+    if glotlid is not None:
+        with stage("glotlid", texts=len(flat)):
+            glot = glotlid.identify(flat)
+    else:
+        glot = [GLOTLID_KABYLE for _ in flat]
     with stage("dihya", texts=len(flat)):
         siblings = [sibling(dihya.identify(windows(text))) for text in flat]
     return {

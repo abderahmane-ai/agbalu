@@ -15,6 +15,7 @@ from agbalu.llm.bases import (
     PILOT,
     REVISIONS,
     TEXT_TOWER_PARAMETERS,
+    is_9b,
 )
 
 CONSUMERS = (
@@ -63,3 +64,14 @@ class TestConsumersImportIt:
 
     def test_does_not_redefine_the_name(self, path: Path) -> None:
         assert "BASE: Final =" not in path.read_text(encoding="utf-8")
+
+
+class TestIs9B:
+    def test_identifies_9b_models(self) -> None:
+        assert is_9b(BASE_9B)
+        assert is_9b(INSTRUCT_9B)
+        assert is_9b("jugurtha-9b-sft")
+        assert is_9b("artifacts/runs/merge-a085/model")
+        assert not is_9b(BASE)
+        assert not is_9b(INSTRUCT)
+        assert not is_9b("jugurtha-4b-sft")

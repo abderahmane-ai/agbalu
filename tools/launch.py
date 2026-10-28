@@ -435,9 +435,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--objective", choices=("cpt", "sft"), help="train only; CLI default cpt")
     parser.add_argument(
         "--suite",
-        choices=("exit", "screen", "guard", "select", "release"),
+        choices=("exit", "screen", "guard", "kabyle", "select", "release"),
         default="exit",
         help="exit: completion suite only; screen: translation only, into screen.json; "
+        "kabyle: heldout, mt, and sib into evaluation-kabyle.json; "
         "guard: no-think IFEval and GSM8K into chat-no_think.json; "
         "select and release add the chat suite",
     )
@@ -511,6 +512,8 @@ def job(args: argparse.Namespace) -> Job:
                 message = f"--resume is for {' and '.join(RESUMABLE_TASKS)}, not {task}"
                 raise LaunchError(message)
             flags = ["--resume"] if args.resume else []
+            if args.model:
+                flags += ["--model", args.model]
             return f"data-{task}", [task, *flags], f"data-{task}/log.txt", []
         case "merge":
             run = require(args.run, "--run", "merge")
@@ -543,6 +546,20 @@ def evaluation_job(args: argparse.Namespace) -> Job:
         model = require(args.model, "--model", "evaluate --suite screen")
         arguments = ["evaluate", "--out", f"{RUNS}/{run}/{SCREEN_FILE}", "--parts", "mt"]
         return run, [*arguments, "--model", model], f"{run}/log.txt", []
+    if args.suite == "kabyle":
+        model = require(args.model, "--model", "evaluate --suite kabyle")
+        arguments = [
+            "evaluate",
+            "--out",
+            f"{RUNS}/{run}/evaluation-kabyle.json",
+            "--parts",
+            "heldout",
+            "mt",
+            "sib",
+            "--model",
+            model,
+        ]
+        return run, arguments, f"{run}/log.txt", []
     if args.suite == "guard":
         model = require(args.model, "--model", "evaluate --suite guard")
         guard = chat_module(

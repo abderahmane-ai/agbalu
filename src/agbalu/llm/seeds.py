@@ -242,8 +242,8 @@ def teacher_cards(cards: Sequence[Card], seed: int = SEED) -> list[Card]:
     for c in train_cards:
         pools.setdefault((c.task, c.think), []).append(c)
 
-    for key in pools:
-        rng.shuffle(pools[key])
+    for pool_list in pools.values():
+        rng.shuffle(pool_list)
 
     scheduled: list[Card] = []
     task_idx = 0

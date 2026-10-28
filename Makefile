@@ -139,9 +139,9 @@ train: ## CPT, or SFT with OBJECTIVE=sft, resuming RUN if it exists. RUN= MODEL 
 		$(if $(STOP),--stop $(STOP),) $(if $(OBJECTIVE),--objective $(OBJECTIVE),)
 
 data: ## Corpus stages that run on the pod. TASK=documents|aligned|replay|pack|sft|fluency|expand-fetch|expand-pdfs|expand-audio|expand-clean|expand-aligned|compile. RESUME=1 keeps the sources expand-pdfs already wrote (operator, hpc)
-	$(call launch,data) $(if $(TASK),--task $(TASK),) $(if $(RESUME),--resume,)
+	$(call launch,data) $(if $(TASK),--task $(TASK),) $(if $(RESUME),--resume,) $(if $(MODEL),--model $(MODEL),)
 
-evaluate: ## Evaluation suite on MODEL into artifacts/runs/RUN/. RUN= MODEL SUITE=exit|screen|guard|select|release (screen: translation only; guard: no-think IFEval and GSM8K; select and release add the chat suite; CHAT_ONLY=1 runs that alone) (operator, hpc)
+evaluate: ## Evaluation suite on MODEL into artifacts/runs/RUN/. RUN= MODEL SUITE=exit|screen|guard|kabyle|select|release (screen: translation only; kabyle: heldout, mt, sib; guard: no-think IFEval and GSM8K; select and release add the chat suite; CHAT_ONLY=1 runs that alone) (operator, hpc)
 	$(call launch,evaluate) $(if $(MODEL),--model $(MODEL),) $(if $(SUITE),--suite $(SUITE),) $(if $(CHAT_ONLY),--chat-only,)
 
 merge: ## Instruct + ALPHA x (CPT - base) into artifacts/runs/RUN/model. RUN= ALPHA= MODEL=<cpt checkpoint> (operator, hpc)
@@ -443,6 +443,24 @@ release-jugurtha-4bit:
 	@cp $(CARDS)/jugurtha-4b-4bit.md $(RELEASE)/Jugurtha-4B-MLX-4bit/README.md
 	@echo "$(RELEASE)/Jugurtha-4B-MLX-4bit: $$(ls $(RELEASE)/Jugurtha-4B-MLX-4bit | wc -l | tr -d ' ') files"
 
+release-jugurtha-2-9b:
+	@test -f $(RELEASE)/Jugurtha-2-9B/config.json || \
+		{ echo "no model in $(RELEASE)/Jugurtha-2-9B — stage or pull it from HPC first"; exit 1; }
+	@cp $(CARDS)/jugurtha-2-9b.md $(RELEASE)/Jugurtha-2-9B/README.md
+	@echo "$(RELEASE)/Jugurtha-2-9B: $$(ls $(RELEASE)/Jugurtha-2-9B | wc -l | tr -d ' ') files"
+
+release-jugurtha-2-9b-gguf:
+	@test -f $(RELEASE)/Jugurtha-2-9B-GGUF/Jugurtha-2-9B-Q4_K_M.gguf || \
+		{ echo "no GGUFs in $(RELEASE)/Jugurtha-2-9B-GGUF — stage or pull them from HPC first"; exit 1; }
+	@cp $(CARDS)/jugurtha-2-9b-gguf.md $(RELEASE)/Jugurtha-2-9B-GGUF/README.md
+	@echo "$(RELEASE)/Jugurtha-2-9B-GGUF: $$(ls $(RELEASE)/Jugurtha-2-9B-GGUF | wc -l | tr -d ' ') files"
+
+release-jugurtha-2-9b-4bit:
+	@test -f $(RELEASE)/Jugurtha-2-9B-MLX-4bit/config.json || \
+		{ echo "no model in $(RELEASE)/Jugurtha-2-9B-MLX-4bit — convert with mlx_lm.convert first"; exit 1; }
+	@cp $(CARDS)/jugurtha-2-9b-4bit.md $(RELEASE)/Jugurtha-2-9B-MLX-4bit/README.md
+	@echo "$(RELEASE)/Jugurtha-2-9B-MLX-4bit: $$(ls $(RELEASE)/Jugurtha-2-9B-MLX-4bit | wc -l | tr -d ' ') files"
+
 # One push target with a variable, not one per repository. The table is the only place a
 # staged directory is paired with the repository it belongs in; two copies of that pairing
 # is how a directory gets published under the wrong name.
@@ -473,10 +491,14 @@ HF_masinissa-sentiment := models agbalu/Masinissa-Sentiment \
 HF_jugurtha     := models   agbalu/Jugurtha-4B      $(RELEASE)/Jugurtha-4B      $(CARDS)/jugurtha-4b.md
 HF_jugurtha-gguf := models  agbalu/Jugurtha-4B-GGUF $(RELEASE)/Jugurtha-4B-GGUF $(CARDS)/jugurtha-4b-gguf.md
 HF_jugurtha-4bit := models  agbalu/Jugurtha-4B-MLX-4bit $(RELEASE)/Jugurtha-4B-MLX-4bit $(CARDS)/jugurtha-4b-4bit.md
+HF_jugurtha-2-9b := models  agbalu/Jugurtha-2-9B    $(RELEASE)/Jugurtha-2-9B    $(CARDS)/jugurtha-2-9b.md
+HF_jugurtha-2-9b-gguf := models agbalu/Jugurtha-2-9B-GGUF $(RELEASE)/Jugurtha-2-9B-GGUF $(CARDS)/jugurtha-2-9b-gguf.md
+HF_jugurtha-2-9b-4bit := models agbalu/Jugurtha-2-9B-MLX-4bit $(RELEASE)/Jugurtha-2-9B-MLX-4bit $(CARDS)/jugurtha-2-9b-4bit.md
 
 ALL_REPOS := kabbench kablex kabsentiment kabinflect kabtifinagh kabpunct kabg2p \
 	kabstandard kabliterary encoder tokenizer mt juba fadhma belaid boulifa matoub \
-	feraoun feraoun-pro simohand dihya masinissa-sentiment jugurtha jugurtha-gguf jugurtha-4bit
+	feraoun feraoun-pro simohand dihya masinissa-sentiment jugurtha jugurtha-gguf jugurtha-4bit \
+	jugurtha-2-9b jugurtha-2-9b-gguf
 
 # `hf upload` adds and overwrites; it never removes. A repository whose file set shrank keeps
 # the superseded files beside their replacements, which for Matoub means a 1.93 GB training

@@ -68,7 +68,7 @@ CATEGORY_MIN_REVIEWS: Final = 20
 """Fewer reviews than this in a task decide nothing about the task: one rejection out of one
 is not a rate."""
 
-THINK_SHARE: Final = 0.25
+THINK_SHARE: Final = 0.20
 THINK_TOLERANCE: Final = 0.08
 """Target 25% think-mode conversations for Jugurtha-9B with reasoning traces in Kabyle."""
 

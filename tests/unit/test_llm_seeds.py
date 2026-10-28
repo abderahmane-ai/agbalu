@@ -74,7 +74,7 @@ class TestQuotas:
     def test_teacher_cards_covers_targeted_tasks_and_is_balanced(self, cards: list[Card]) -> None:
         asked = seeds.teacher_cards(cards)
         assert all(card.split == "train" and card.task in seeds.TASKS_ROTATION for card in asked)
-        assert set(card.task for card in asked) == set(seeds.TASKS_ROTATION)
+        assert {card.task for card in asked} == set(seeds.TASKS_ROTATION)
         think_share = sum(card.think for card in asked) / len(asked)
         assert 0.18 <= think_share <= 0.35
 

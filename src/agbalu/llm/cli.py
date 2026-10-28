@@ -32,7 +32,15 @@ from agbalu.llm import (
     sft_files,
     teacher,
 )
-from agbalu.llm.bases import BASE, BASE_9B, INSTRUCT, INSTRUCT_9B, REVISIONS, TEXT_TOWER_PARAMETERS
+from agbalu.llm.bases import (
+    BASE,
+    BASE_9B,
+    INSTRUCT,
+    INSTRUCT_9B,
+    REVISIONS,
+    TEXT_TOWER_PARAMETERS,
+    is_9b,
+)
 from agbalu.llm.chat import ChatError
 from agbalu.llm.corpus import HOLDOUT_RATE, CorpusError, Source, is_held_out
 from agbalu.llm.decontaminate import (
@@ -565,8 +573,10 @@ def command_sft(args: argparse.Namespace) -> int:
     from huggingface_hub import snapshot_download
     from transformers import AutoTokenizer
 
+    base_model = getattr(args, "base", BASE_9B)
+    instruct_model = getattr(args, "instruct", INSTRUCT_9B)
     template = snapshot_download(
-        INSTRUCT, revision=REVISIONS[INSTRUCT], allow_patterns=list(TOKENIZER_FILES)
+        instruct_model, revision=REVISIONS[instruct_model], allow_patterns=list(TOKENIZER_FILES)
     )
     replay_sources = {
         "kabyle": (args.kabyle, file_tokens(stats_path(args.kabyle))),
@@ -576,11 +586,19 @@ def command_sft(args: argparse.Namespace) -> int:
     stats = sft_build.build(
         sft_build.read_conversations(args.conversations),
         AutoTokenizer.from_pretrained(template),
-        HubTokenizer(BASE),
+        HubTokenizer(base_model),
         replay_sources,
         sft_build.Outputs(args.out, args.validation),
     )
-    write_stats(stats_path(args.out), {"conversations_file": str(args.conversations), **stats})
+    write_stats(
+        stats_path(args.out),
+        {
+            "conversations_file": str(args.conversations),
+            "base": base_model,
+            "instruct": instruct_model,
+            **stats,
+        },
+    )
     print(json.dumps(stats, indent=2))
     print(f"-> {args.out}, {args.validation}")
     return 0
@@ -608,7 +626,11 @@ def command_train(args: argparse.Namespace) -> int:
     from agbalu.llm import recipe
     from agbalu.llm.train import RunConfig, StopRequest, train
 
-    model_params = TEXT_TOWER_PARAMETERS.get(args.model)
+    is_9b_run = is_9b(args.model)
+    base_model = BASE_9B if is_9b_run else BASE
+    instruct_model = INSTRUCT_9B if is_9b_run else INSTRUCT
+
+    model_params = TEXT_TOWER_PARAMETERS.get(args.model, TEXT_TOWER_PARAMETERS.get(base_model))
     micro_blocks = getattr(args, "micro_blocks", None) or recipe.default_micro_blocks(model_params)
     peak_lr = getattr(args, "peak_lr", None) or recipe.default_peak_lr(model_params)
     config = RunConfig(
@@ -622,8 +644,6 @@ def command_train(args: argparse.Namespace) -> int:
         stop_after=args.stop_after,
     )
     if args.objective == "sft":
-        is_9b = "9B" in args.model or "9b" in args.model
-        instruct_model = INSTRUCT_9B if is_9b else INSTRUCT
         expected_params = TEXT_TOWER_PARAMETERS.get(
             args.model, TEXT_TOWER_PARAMETERS[instruct_model]
         )
@@ -635,10 +655,11 @@ def command_train(args: argparse.Namespace) -> int:
             peak_lr=SFT_PEAK_LR,
             blocks_per_step=SFT_ROWS_PER_STEP,
             micro_blocks=1,
-            checkpoint_every=SFT_EVERY,
+            checkpoint_every=50,
             eval_every=SFT_EVERY,
             probe=False,
             expected_parameters=expected_params,
+            keep=1,
         )
     if args.checkpoint_every is not None:
         config = replace(config, checkpoint_every=args.checkpoint_every)
@@ -649,7 +670,8 @@ def command_train(args: argparse.Namespace) -> int:
     device = cuda()
     stop = StopRequest()
     stop.install()
-    result = train(config, loader(device), HubTokenizer(args.tokenizer), device, stop=stop)
+    tokenizer_name = args.tokenizer if args.tokenizer != BASE else (BASE_9B if is_9b_run else BASE)
+    result = train(config, loader(device), HubTokenizer(tokenizer_name), device, stop=stop)
     print(json.dumps(result, indent=2))
     return 0
 
@@ -684,8 +706,8 @@ def command_evaluate(args: argparse.Namespace) -> int:
 
     device = cuda()
     model = loader(device)(args.model, torch.bfloat16)
-    is_9b = any(x in str(args.model).lower() or x in str(args.tokenizer).lower() for x in ("9b",))
-    tokenizer_name = args.tokenizer if args.tokenizer != BASE else (BASE_9B if is_9b else BASE)
+    is_9b_eval = is_9b(args.model, args.tokenizer)
+    tokenizer_name = args.tokenizer if args.tokenizer != BASE else (BASE_9B if is_9b_eval else BASE)
     result = run(model, HubTokenizer(tokenizer_name), args.parts, device=device, limit=args.limit)
     write_stats(args.out, {"model": args.model, **result})
     print(json.dumps(result, indent=2, ensure_ascii=False))
@@ -708,9 +730,9 @@ def snapshot(repo: str) -> Path:
 def command_merge(args: argparse.Namespace) -> int:
     from agbalu.llm import merge
 
-    is_9b = any(x in (str(args.cpt) + str(args.base or "") + str(args.instruct or "")).lower() for x in ("9b",))
-    base_model = BASE_9B if is_9b else BASE
-    instruct_model = INSTRUCT_9B if is_9b else INSTRUCT
+    is_9b_merge = is_9b(args.cpt, args.base, args.instruct)
+    base_model = BASE_9B if is_9b_merge else BASE
+    instruct_model = INSTRUCT_9B if is_9b_merge else INSTRUCT
     base_path = args.base or snapshot(base_model)
     instruct_path = args.instruct or snapshot(instruct_model)
     sources = {
@@ -866,7 +888,6 @@ def command_ingest(args: argparse.Namespace) -> int:
 
 
 def command_signals(args: argparse.Namespace) -> int:
-    from agbalu.bench.lid_systems import build
     from agbalu.lid.infer import Identifier
     from agbalu.llm import signals
 
@@ -874,7 +895,7 @@ def command_signals(args: argparse.Namespace) -> int:
     done = sft_files.read_signals(sft_files.LANGUAGE_SIGNALS)
     todo = [c for c in sft_files.read_candidates() if c.id not in done]
     found = signals.language_signals(
-        todo, build("glotlid"), Identifier.load(DIHYA_RUN, device=identifier_device())
+        todo, None, Identifier.load(DIHYA_RUN, device=identifier_device())
     )
     rows = sft_files.signal_rows({**done, **found})
     count = sft_files.write_jsonl(sft_files.LANGUAGE_SIGNALS, rows)
@@ -890,7 +911,9 @@ def command_fluency(args: argparse.Namespace) -> int:
     device = cuda()
     model = loader(device)(args.model, torch.bfloat16)
     model.eval()
-    tokenizer = HubTokenizer(BASE)
+    is_9b_fluency = is_9b(args.model)
+    base_model = BASE_9B if is_9b_fluency else BASE
+    tokenizer = HubTokenizer(base_model)
     scorer = Scorer.of(model, tokenizer.eos, device)
     heldout = holdout.read(LLM_DIR / "heldout-kab.jsonl")
     floor = signals.percentile(
@@ -1146,6 +1169,8 @@ def add_corpus_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser]
     packer.add_argument("--out", type=Path, default=BLOCKS_OUT)
 
     sft = sub.add_parser("sft", help="SFT rows from accepted conversations and replay")
+    sft.add_argument("--base", default=BASE_9B)
+    sft.add_argument("--instruct", default=INSTRUCT_9B)
     sft.add_argument("--conversations", type=Path, default=SFT_CONVERSATIONS)
     sft.add_argument("--kabyle", type=Path, default=DOCUMENTS_OUT)
     sft.add_argument("--aligned", type=Path, default=ALIGNED_OUT)

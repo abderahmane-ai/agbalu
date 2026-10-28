@@ -13,6 +13,8 @@ tower excludes the vision tower and the multi-token-prediction head, which
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Final
 
 BASE: Final = "Qwen/Qwen3.5-4B-Base"
@@ -49,3 +51,34 @@ TEXT_TOWER_PARAMETERS: Final[dict[str, int]] = {
     PILOT: 752_393_024,
 }
 """`N` in the `6 * N * D` that sizes a run and in the model-FLOP utilisation it reports."""
+
+
+MIN_9B_HIDDEN_SIZE: Final = 4096
+MIN_9B_VOCAB_SIZE: Final = 200_000
+
+
+def is_9b(*descriptors: object) -> bool:
+    """True if any descriptor (model name, repo id, path, config) indicates a 9B model."""
+    for desc in descriptors:
+        if not desc:
+            continue
+        text = str(desc).lower()
+        if any(marker in text for marker in ("9b", "merge")):
+            return True
+        path = Path(str(desc))
+        config_path = (
+            path / "config.json"
+            if path.is_dir()
+            else (path if path.name == "config.json" else None)
+        )
+        if config_path and config_path.is_file():
+            try:
+                cfg = json.loads(config_path.read_text(encoding="utf-8"))
+                text_cfg = cfg.get("text_config", cfg)
+                hidden = text_cfg.get("hidden_size", 0)
+                vocab = text_cfg.get("vocab_size", 0)
+                if hidden >= MIN_9B_HIDDEN_SIZE or vocab > MIN_9B_VOCAB_SIZE:
+                    return True
+            except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+                continue
+    return False

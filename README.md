@@ -27,6 +27,7 @@ without this repository.
 
 | Model | | |
 |---|---|---|
+| [`Jugurtha-2-9B`](https://huggingface.co/agbalu/Jugurtha-2-9B) | sovereign foundation & reasoning LLM (8.95B) | Second-generation Kabyle LLM; 80.81% SIB-200, eng→kab 30.80 / kab→eng 49.45 chrF++, 0.00 orthography gap. Available in [`Jugurtha-2-9B-GGUF`](https://huggingface.co/agbalu/Jugurtha-2-9B-GGUF) and [`Jugurtha-2-9B-MLX-4bit`](https://huggingface.co/agbalu/Jugurtha-2-9B-MLX-4bit) |
 | [`Jugurtha-4B`](https://huggingface.co/agbalu/Jugurtha-4B) | foundation & reasoning LLM (4.2B) | First Kabyle LLM with native thinking mode; 100% NIAH (32k), 80.89% GSM8K, 62.86% MMLU-Pro, 73.74% SIB-200, eng→kab 28.77 / kab→eng 46.17 chrF++. Also available in [`Jugurtha-4B-GGUF`](https://huggingface.co/agbalu/Jugurtha-4B-GGUF) and [`Jugurtha-4B-MLX-4bit`](https://huggingface.co/agbalu/Jugurtha-4B-MLX-4bit) |
 | [`Amrouche-1.3B`](https://huggingface.co/agbalu/Amrouche-1.3B) | translation | beats NLLB-1.3B in all four directions; eng→kab 36.34 chrF++ |
 | [`Fadhma-300M`](https://huggingface.co/agbalu/Fadhma-300M) | speech recognition | CER 8.01 / WER 25.65 over 888 unseen speakers |

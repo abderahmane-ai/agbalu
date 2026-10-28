@@ -12,29 +12,32 @@ import argparse
 import json
 import re
 import sys
-from collections import Counter as Tally
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final
 
 from agbalu.lid.infer import Identifier
 from agbalu.llm import sft_files, teacher
-from agbalu.llm.chat import MARKERS
 from agbalu.llm.seeds import CONVERSATIONS_PER_CARD, Card, Passage
 from agbalu.normalise import Normaliser
 
 DIHYA_DIR: Final = Path("artifacts/runs/dihya")
 BATCH_DIR: Final = Path("data/interim/llm/sft/batches")
 REPLY_DIR: Final = Path("data/raw/gemini-sft")
+MAX_DISPLAY_FIXES: Final = 10
 
-ARABIC_SCRIPT: Final = re.compile(r"[\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff\ufb50-\ufdff\ufe70-\ufeff]")
+ARABIC_SCRIPT: Final = re.compile(
+    r"[\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff\ufb50-\ufdff\ufe70-\ufeff]"
+)
 LEAK_TERMS: Final = re.compile(
     r"\b(?:ilmend\s+n\s+uḍris|deg\s+uḍris|deg\s+uɣbalu|deg\s+umagrad\s+n\s+wikipedya|according\s+to\s+the\s+text)\b",
     re.IGNORECASE,
 )
-BASE_MODELS: Final = re.compile(r"\b(?:qwen|alibaba|chatgpt|openai|meta\s+llama|claude)\b", re.IGNORECASE)
+BASE_MODELS: Final = re.compile(
+    r"\b(?:qwen|alibaba|chatgpt|openai|meta\s+llama|claude)\b", re.IGNORECASE
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,7 +64,7 @@ def clean_text_field(
 
     # Remove accidental Arabic glosses in Kabyle text (e.g. "يوض (yewweḍ)" -> "yewweḍ")
     if is_kabyle and ARABIC_SCRIPT.search(cleaned):
-        cleaned = re.sub(r"[\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff\ufb50-\ufdff\ufe70-\ufeff]+\s*", "", cleaned)
+        cleaned = ARABIC_SCRIPT.sub("", cleaned)
         cleaned = re.sub(r"\(\s*\)", "", cleaned)
         cleaned = re.sub(r"\s{2,}", " ", cleaned)
         notes.append("stripped_arabic_gloss")
@@ -108,7 +111,7 @@ def load_card_map() -> dict[str, Card]:
     return cards
 
 
-def validate_batch_text(
+def validate_batch_text(  # noqa: PLR0912, PLR0915
     batch_name: str,
     raw_content: str,
     cards_map: dict[str, Card] | None = None,
@@ -155,7 +158,9 @@ def validate_batch_text(
         turns = row.get("turns")
 
         if not isinstance(card_id, str) or card_id not in expected_cards:
-            errors.append(f"Line {line_num}: Unknown or unexpected card {card_id!r} (expected {sorted(expected_cards)})")
+            errors.append(
+                f"Line {line_num}: Unknown card {card_id!r} (expected {sorted(expected_cards)})"
+            )
             continue
 
         if not isinstance(n, int) or isinstance(n, bool) or not (1 <= n <= CONVERSATIONS_PER_CARD):
@@ -204,17 +209,23 @@ def validate_batch_text(
             # Handle thinking mode constraints
             if role == "assistant":
                 if card.think and (reasoning is None or not str(reasoning).strip()):
-                    errors.append(f"Line {line_num}: Card {card_id} requires think: yes, but turn {t_idx} has no reasoning")
+                    errors.append(
+                        f"Line {line_num}: Card {card_id} requires think: yes, "
+                        f"but turn {t_idx} has no reasoning"
+                    )
                     turn_error = True
                     break
                 if not card.think and reasoning is not None:
                     # Strip unexpected reasoning on non-think card
-                    turn = {k: v for k, v in turn.items() if k != "reasoning"}
                     reasoning = None
-                    fixes.append(f"{card_id} n={n}: stripped unexpected reasoning for non-think card")
+                    fixes.append(
+                        f"{card_id} n={n}: stripped unexpected reasoning for non-think card"
+                    )
 
             # Normalise and clean Kabyle content
-            is_kabyle_turn = role == "assistant" or (role == "user" and card.input_language == "kab")
+            is_kabyle_turn = (
+                role == "assistant" or (role == "user" and card.input_language == "kab")
+            )
             clean_content, c_notes = clean_text_field(content, normaliser, is_kabyle=is_kabyle_turn)
             if c_notes:
                 fixes.append(f"{card_id} n={n} turn {t_idx} content: {', '.join(c_notes)}")
@@ -256,14 +267,13 @@ def save_batch_reply(
 ) -> Path:
     """Save cleaned and validated batch reply to `data/raw/gemini-sft/<batch>.txt`."""
     if date_str is None:
-        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        date_str = datetime.now(UTC).strftime("%Y-%m-%d")
 
     REPLY_DIR.mkdir(parents=True, exist_ok=True)
     out_path = REPLY_DIR / f"{batch_name}.txt"
 
     lines = [f"# model: {model_name} | date: {date_str}"]
-    for row in valid_rows:
-        lines.append(json.dumps(row, ensure_ascii=False))
+    lines.extend(json.dumps(row, ensure_ascii=False) for row in valid_rows)
 
     out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return out_path
@@ -271,9 +281,8 @@ def save_batch_reply(
 
 def run_ingest() -> dict[str, object]:
     """Run `agbalu.llm.cli ingest` programmatically and return statistics."""
-    from agbalu.llm import cli, seeds
+    from agbalu.llm import seeds
 
-    args = argparse.Namespace()
     cards = {card.id: card for card in seeds.read(sft_files.SEEDS)}
     candidates: list[teacher.Candidate] = []
     rejects: list[dict[str, object]] = []
@@ -319,11 +328,12 @@ def print_scorecard(stats: dict[str, object]) -> None:
     think_candidates = int(str(stats.get("think_candidates", 0)))
     think_pct = (think_candidates / candidates * 100) if candidates > 0 else 0.0
     completed_cards = int(str(stats.get("cards_complete", 0)))
+    pct_str = f"{(candidates / 3500) * 100:.1f}%"
 
     print("\n" + "=" * 60)
     print("🏆  AƔBALU SFT SCORECARD (Jugurtha-9B Expansion)")
     print("=" * 60)
-    print(f"• Total Candidate Conversations: {candidates:,} / 3,500 target ({(candidates / 3500) * 100:.1f}%)")
+    print(f"• Total Candidate Conversations: {candidates:,} / 3,500 target ({pct_str})")
     print(f"• Thinking Mode Traces:          {think_candidates:,} ({think_pct:.1f}% vs 25.0% target)")
     print(f"• Fully Completed Cards:         {completed_cards:,}")
     print(f"• Batches Ingested:              {stats.get('batches_completed')}")
@@ -334,7 +344,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Validate and ingest Gemini SFT batch output")
     parser.add_argument("--batch", required=True, help="Batch name (e.g. batch-0054)")
     parser.add_argument("--file", type=Path, help="Path to raw reply file")
-    parser.add_argument("--model", default="Gemini 2.5 Pro", help="Model name as shown in interface")
+    parser.add_argument(
+        "--model", default="Gemini 2.5 Pro", help="Model name as shown in interface"
+    )
     parser.add_argument("--skip-dihya", action="store_true", help="Skip Dihya LID verification")
     args = parser.parse_args()
 
@@ -356,10 +368,10 @@ def main() -> int:
 
     if validation.fixes:
         print(f"Fixes applied ({len(validation.fixes)}):")
-        for fix in validation.fixes[:10]:
+        for fix in validation.fixes[:MAX_DISPLAY_FIXES]:
             print(f"  ✓ {fix}")
-        if len(validation.fixes) > 10:
-            print(f"  ... and {len(validation.fixes) - 10} more fixes")
+        if len(validation.fixes) > MAX_DISPLAY_FIXES:
+            print(f"  ... and {len(validation.fixes) - MAX_DISPLAY_FIXES} more fixes")
 
     if validation.warnings:
         print(f"Warnings ({len(validation.warnings)}):")
