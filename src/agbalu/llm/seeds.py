@@ -226,21 +226,16 @@ def working_set(cards: Sequence[Card], seed: int = SEED) -> list[Card]:
 
 TASKS_ROTATION: Final = (
     "reasoning",
-    "native_kabyle",
-    "code",
     "grounded",
     "hierarchy",
-    "non_kabyle_input",
-    "translation",
-    "identity",
 )
 
 
 def teacher_cards(cards: Sequence[Card], seed: int = SEED) -> list[Card]:
-    """All training cards ordered in a balanced, interleaved sequence across all tasks,
-    allocating 1 thinking card every 3 cards (~33% think share in new generation) to build
-    towards the 25% target."""
-    train_cards = [c for c in cards if c.split == "train"]
+    """All training cards for the targeted non-code pillars (reasoning, grounded, hierarchy),
+    interleaved with a 50% thinking share to strengthen multi-step Kabyle reasoning and document
+    comprehension."""
+    train_cards = [c for c in cards if c.split == "train" and c.task in TASKS_ROTATION]
     rng = random.Random(seed + 42)
 
     pools: dict[tuple[str, bool], list[Card]] = {}
@@ -254,7 +249,7 @@ def teacher_cards(cards: Sequence[Card], seed: int = SEED) -> list[Card]:
     task_idx = 0
 
     while any(pools.values()):
-        want_think = len(scheduled) % 3 == 0
+        want_think = len(scheduled) % 2 == 0
 
         found_card: Card | None = None
         for offset in range(len(TASKS_ROTATION)):

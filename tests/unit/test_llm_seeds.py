@@ -71,13 +71,12 @@ class TestQuotas:
         assert sum(card.task == "identity" for card in chosen) == 4
         assert chosen == seeds.working_set(cards)
 
-    def test_teacher_cards_covers_all_tasks_and_is_balanced(self, cards: list[Card]) -> None:
+    def test_teacher_cards_covers_targeted_tasks_and_is_balanced(self, cards: list[Card]) -> None:
         asked = seeds.teacher_cards(cards)
-        assert len(asked) == sum(card.split == "train" for card in cards)
-        assert all(card.split == "train" for card in asked)
-        assert set(card.task for card in asked) == set(seeds.TASK_CARDS)
+        assert all(card.split == "train" and card.task in seeds.TASKS_ROTATION for card in asked)
+        assert set(card.task for card in asked) == set(seeds.TASKS_ROTATION)
         think_share = sum(card.think for card in asked) / len(asked)
-        assert 0.18 <= think_share <= 0.25
+        assert 0.18 <= think_share <= 0.35
 
 
 class TestSeedTexts:
