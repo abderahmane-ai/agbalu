@@ -200,14 +200,12 @@ Jugurtha-2-9B was trained on three streams:
 3. **Decontamination:** Filtered against FLORES+ `kab_Latn` and SIB-200 with an n-gram
    and sentence boundary checker. Measured overlap: **0 sentences**, verified with positive controls.
 
-### Recipe
+### Compute
 
 | | |
 |---|---|
 | **Hardware** | Single NVIDIA H100 NVL MIG (`3g.47gb`) |
-| **Stage 1 — CPT** | Full-parameter continued pretraining on the 9B text tower |
-| **Stage 2 — Merge** | Task-vector arithmetic into a 9B instruction-tuned backbone ($\alpha = 0.85$) |
-| **Stage 3 — SFT** | Supervised fine-tuning on curated Kabyle dialogues with thinking traces |
+| **Training** | Continued pretraining on the 9B text tower and supervised fine-tuning on curated Kabyle dialogues |
 
 ## Limitations
 

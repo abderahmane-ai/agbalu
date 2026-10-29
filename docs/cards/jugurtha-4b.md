@@ -254,14 +254,12 @@ Jugurtha-4B was trained on three streams:
 3. **Decontamination:** Filtered against FLORES+ `kab_Latn` and SIB-200 with a 13-word n-gram
    and 8-word sentence boundary. Measured overlap: **0 sentences**, verified with positive controls.
 
-### Recipe
+### Compute
 
 | | |
 |---|---|
 | **Hardware** | Single NVIDIA H100 NVL MIG (`3g.47gb`) |
-| **Stage 1 — CPT** | Full-parameter continued pretraining on 800.8M tokens |
-| **Stage 2 — Merge** | Task-vector arithmetic into a 4B instruction-tuned backbone |
-| **Stage 3 — SFT** | Supervised fine-tuning on curated Kabyle dialogues, 1 epoch |
+| **Training** | Continued pretraining on 800.8M tokens and supervised fine-tuning on curated Kabyle dialogues |
 
 ## Limitations
 

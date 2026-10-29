@@ -96,7 +96,7 @@ Jugurtha-2-9B supports native dual-mode reasoning on Apple Silicon:
 
 ## Full Model & Benchmark Details
 
-For full evaluations (FLORES+, SIB-200, BPC), training methodology, and safetensors BF16 weights, visit the primary repository: [**agbalu/Jugurtha-2-9B**](https://huggingface.co/agbalu/Jugurtha-2-9B).
+For full evaluations (FLORES+, SIB-200, BPC), specifications, and safetensors BF16 weights, visit the primary repository: [**agbalu/Jugurtha-2-9B**](https://huggingface.co/agbalu/Jugurtha-2-9B).
 
 ## Licence
 

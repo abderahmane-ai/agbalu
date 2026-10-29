@@ -92,7 +92,7 @@ llama-cli -m Jugurtha-2-9B-Q4_K_M.gguf -ngl 99 -t 8 \
 
 ## Main Repository & Full Evaluations
 
-For benchmark scores (FLORES+, SIB-200, BPC), training methodology, and BF16 weights, see the primary repository: [**agbalu/Jugurtha-2-9B**](https://huggingface.co/agbalu/Jugurtha-2-9B).
+For benchmark scores (FLORES+, SIB-200, BPC), evaluations, and BF16 weights, see the primary repository: [**agbalu/Jugurtha-2-9B**](https://huggingface.co/agbalu/Jugurtha-2-9B).
 
 ## Licence
 
