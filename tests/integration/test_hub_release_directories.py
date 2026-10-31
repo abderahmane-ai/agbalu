@@ -148,7 +148,7 @@ def test_masinissa_s_published_tokenizer_is_the_vocabulary_it_was_trained_on(
     directory = _staged("Masinissa-31M", "masinissa", tmp_path)
     tokenizer = AutoTokenizer.from_pretrained(directory, trust_remote_code=True)
     processor = spm.SentencePieceProcessor(
-        model_file=str(RELEASE / "Masinissa-31M" / "agbalu-tok-base-16k.model")
+        model_file=str(RELEASE / "Masinissa-31M" / "mammeri-tok-base-16k.model")
     )
     for text in (
         "Azul fell-awen, amek i tellam?",

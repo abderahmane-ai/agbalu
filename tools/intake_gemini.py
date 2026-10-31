@@ -223,8 +223,8 @@ def validate_batch_text(  # noqa: PLR0912, PLR0915
                     )
 
             # Normalise and clean Kabyle content
-            is_kabyle_turn = (
-                role == "assistant" or (role == "user" and card.input_language == "kab")
+            is_kabyle_turn = role == "assistant" or (
+                role == "user" and card.input_language == "kab"
             )
             clean_content, c_notes = clean_text_field(content, normaliser, is_kabyle=is_kabyle_turn)
             if c_notes:
@@ -334,7 +334,9 @@ def print_scorecard(stats: dict[str, object]) -> None:
     print("🏆  AƔBALU SFT SCORECARD (Jugurtha-9B Expansion)")
     print("=" * 60)
     print(f"• Total Candidate Conversations: {candidates:,} / 3,500 target ({pct_str})")
-    print(f"• Thinking Mode Traces:          {think_candidates:,} ({think_pct:.1f}% vs 25.0% target)")
+    print(
+        f"• Thinking Mode Traces:          {think_candidates:,} ({think_pct:.1f}% vs 25.0% target)"
+    )
     print(f"• Fully Completed Cards:         {completed_cards:,}")
     print(f"• Batches Ingested:              {stats.get('batches_completed')}")
     print("=" * 60 + "\n")

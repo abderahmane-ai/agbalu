@@ -21,7 +21,6 @@ from pathlib import Path
 from typing import Final
 
 from agbalu.llm.provenance import STAMP_FILE, git_stamp
-from agbalu.llm.smoke import SMOKE_PARTS
 from tools.run_log import Printer, View, summary
 
 HOST: Final = "hpc"
@@ -142,6 +141,7 @@ STREAM_BACKLOG: Final = 400
 LOG_MARKER: Final = "@@log@@"
 CHECKPOINT_MARKER: Final = "@@checkpoints@@"
 BASELINE_MARKER: Final = "@@baseline@@"
+ROLES_MARKER: Final = "@@roles@@"
 
 
 class LaunchError(Exception):
@@ -168,7 +168,15 @@ def session_name(run: str) -> str:
 
 
 def module(arguments: Sequence[str]) -> str:
-    return " ".join([PYTHON, "-m", "agbalu.llm.cli", *(shlex.quote(a) for a in arguments)])
+    if arguments and arguments[0] == "__raw__":
+        return " ".join(arguments[1:])
+    encoder = bool(arguments) and arguments[0] == "__encoder__"
+    package = "agbalu.encoder.cli" if encoder else "agbalu.llm.cli"
+    selected = arguments[1:] if encoder else arguments
+    command = " ".join([PYTHON, "-m", package, *(shlex.quote(a) for a in selected)])
+    if encoder and selected and selected[0] == "smoke":
+        return f"timeout --signal=TERM --kill-after=30s 840s {command}"
+    return command
 
 
 VLLM_ENVIRONMENT: Final = "VLLM_USE_FLASHINFER_SAMPLER=0"
@@ -230,12 +238,20 @@ def baseline_command(run: str) -> str:
 def status_script(run: str, lines: int) -> str:
     """Session state, the log's tail and the newest checkpoints, between section markers."""
     runs = f"{REMOTE_ROOT}/{RUNS}/{run}"
+    roles = (
+        "import json; from pathlib import Path; "
+        f"root=Path({runs!r}); "
+        "print(json.dumps({name:json.loads((root/(name+'.json')).read_text()) "
+        "for name in ('latest','best_mlm','best_deployment') if (root/(name+'.json')).is_file()}))"
+    )
     return (
         f"(tmux has-session -t {session_name(run)} 2>/dev/null && echo 'session: running'"
         " || echo 'session: not running');"
         f" echo {BASELINE_MARKER}; {baseline_command(run)};"
         f" echo {LOG_MARKER}; tail -n {lines} {runs}/log.txt 2>/dev/null;"
-        f" echo {CHECKPOINT_MARKER}; ls -d {runs}/step-* {runs}/*/step-* 2>/dev/null | tail -n 3"
+        f" echo {CHECKPOINT_MARKER}; find {runs} -maxdepth 2 -type d -name 'step-*' "
+        "2>/dev/null | sort | tail -n 3;"
+        f" echo {ROLES_MARKER}; {PYTHON} -c {shlex.quote(roles)}"
     )
 
 
@@ -244,9 +260,22 @@ def readable_status(output: str) -> list[str]:
     head, _, rest = output.partition(BASELINE_MARKER)
     baseline, _, rest = rest.partition(LOG_MARKER)
     log, _, saved = rest.partition(CHECKPOINT_MARKER)
-    lines = [head.strip(), *summary(log.splitlines(), STATUS_EVENTS, baseline.strip())]
+    summarised = summary(log.splitlines(), STATUS_EVENTS, baseline.strip())
+    if summarised:
+        lines = [head.strip(), *summarised]
+    else:
+        recent_log = [line.strip() for line in log.splitlines() if line.strip()][-12:]
+        lines = [head.strip(), *recent_log]
+    saved, _, roles = saved.partition(ROLES_MARKER)
     found = [line.strip() for line in saved.splitlines() if line.strip()]
     lines.append("checkpoints: " + (", ".join(Path(p).name for p in found) if found else "none"))
+    if roles.strip():
+        payload = json.loads(roles.strip())
+        if isinstance(payload, dict) and payload:
+            for role in ("latest", "best_mlm", "best_deployment"):
+                item = payload.get(role)
+                selected = item.get("snapshot") if isinstance(item, dict) else "none eligible"
+                lines.append(f"{role}: {selected}")
     return lines
 
 
@@ -276,7 +305,7 @@ def write_now(text: str) -> None:
 def stream_log(run: str, *, raw: bool) -> None:
     """Follow the log until Ctrl-C, which ends the stream on this machine and nothing else."""
     path = f"{REMOTE_ROOT}/{RUNS}/{run}/log.txt"
-    if raw:
+    if raw or run == "encbench":
         execute(["ssh", "-t", HOST, f"tail -f {path}"])
         return
     view = View()
@@ -347,6 +376,32 @@ def sync() -> None:
     print(f"synced code and {len(present)} data files; absent here: {absent or 'none'}")
 
 
+def sync_encoder() -> None:
+    """Sync code and tokenizer inputs without replacing the HPC's existing Kabyle corpus."""
+    files = [
+        "artifacts/encoder/measurements/agbalu-tok-base-16k.model",
+        "data/raw/git.ud-kabyle-adpt/kab_adpt-ud-train.conllu",
+        "data/raw/git.ud-kabyle-adpt/kab_adpt-ud-test.conllu",
+    ]
+    local_tokenizer = Path("artifacts/tokenizer/agbalu-tok-base-16k.model")
+    destination = Path(files[0])
+    if not destination.exists():
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(local_tokenizer.read_bytes())
+    for file in files:
+        if not Path(file).is_file():
+            message = f"encoder sync requires {file}"
+            raise LaunchError(message)
+    execute(code_sync())
+    execute(data_sync(files))
+    stamp_file = stamp()
+    try:
+        execute(["rsync", "-az", str(stamp_file), f"{HOST}:{REMOTE_ROOT}/{STAMP_FILE}"])
+    finally:
+        stamp_file.unlink()
+    print("synced encoder code, Mammeri and treebank; existing HPC corpus preserved")
+
+
 def record(run: str, arguments: Sequence[str], log: str, then: Sequence[str] = ()) -> None:
     """`artifacts/runs/<run>/hpc.session` on the laptop: what was started and where it logs."""
     path = RUNS / run / "hpc.session"
@@ -362,7 +417,10 @@ def record(run: str, arguments: Sequence[str], log: str, then: Sequence[str] = (
 
 
 def start(run: str, arguments: Sequence[str], log: str, then: Sequence[str] = ()) -> None:
-    sync()
+    if arguments and arguments[0] == "__encoder__":
+        sync_encoder()
+    else:
+        sync()
     execute(detached(run, arguments, log, then))
     record(run, arguments, log, then)
     print(f"started {session_name(run)}; run id {run}; log {REMOTE_ROOT}/{RUNS}/{log}")
@@ -415,12 +473,15 @@ def build_parser() -> argparse.ArgumentParser:
             "evaluate",
             "merge",
             "assemble",
+            "encbench",
         ),
     )
     parser.add_argument("--target", choices=("hpc",), default="hpc")
+    parser.add_argument("--family", choices=("llm", "encoder"), default="llm")
     parser.add_argument("--run")
-    parser.add_argument("--part", choices=SMOKE_PARTS)
-    parser.add_argument("--task", choices=DATA_TASKS)
+    parser.add_argument("--part")
+    parser.add_argument("--models", nargs="+")
+    parser.add_argument("--task", choices=(*DATA_TASKS, "prepare"))
     parser.add_argument(
         "--resume",
         action="store_true",
@@ -429,13 +490,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--model")
     parser.add_argument("--steps", type=int)
+    parser.add_argument("--tokens", type=int)
+    parser.add_argument("--lr", type=float)
+    parser.add_argument("--batch-tokens", type=int)
+    parser.add_argument("--micro-tokens", type=int)
+    parser.add_argument("--workers", type=int)
+    parser.add_argument("--config")
     parser.add_argument("--stop", type=int, help="end the train invocation at this step")
     parser.add_argument("--alpha", type=float, help="merge coefficient")
     parser.add_argument("--template", help="assemble: the full model the tower was trained from")
     parser.add_argument("--objective", choices=("cpt", "sft"), help="train only; CLI default cpt")
     parser.add_argument(
         "--suite",
-        choices=("exit", "screen", "guard", "kabyle", "select", "release"),
+        choices=("exit", "screen", "guard", "kabyle", "select", "release", "dev", "baseline"),
         default="exit",
         help="exit: completion suite only; screen: translation only, into screen.json; "
         "kabyle: heldout, mt, and sib into evaluation-kabyle.json; "
@@ -470,7 +537,10 @@ def main(argv: list[str] | None = None) -> int:
             case "stop":
                 execute(remote(stop_script(require(args.run, "--run", "stop"))))
             case "sync":
-                sync()
+                if args.family == "encoder":
+                    sync_encoder()
+                else:
+                    sync()
             case "status":
                 show_status(require(args.run, "--run", "status"), raw=args.raw)
             case "logs":
@@ -493,8 +563,38 @@ Job = tuple[str, list[str], str, list[str]]
 """Run id, CLI arguments, log file, and the commands chained after the CLI."""
 
 
-def job(args: argparse.Namespace) -> Job:
+def job(args: argparse.Namespace) -> Job:  # noqa: PLR0912
     """What an action that starts a detached job runs."""
+    if args.action == "encbench":
+        run = args.run or "encbench"
+        models = args.models or ["masinissa-73m", "masinissa-31m", "xlm-roberta-base"]
+        if len(models) > 1:
+            cmd = [
+                "__raw__",
+                PYTHON,
+                "-u",
+                "tools/run_parallel_encbench.py",
+                "--models",
+                *models,
+                "--workers",
+                str(getattr(args, "workers", None) or 3),
+                "--out-dir",
+                f"{RUNS}/{run}",
+            ]
+        else:
+            cmd = [
+                "__raw__",
+                PYTHON,
+                "-u",
+                "tools/run_encbench.py",
+                "--models",
+                *models,
+                "--out",
+                f"{RUNS}/{run}/encbench_results.json",
+            ]
+        return run, cmd, f"{run}/log.txt", []
+    if args.family == "encoder":
+        return encoder_job(args)
     match args.action:
         case "train":
             run = require(args.run, "--run", "train")
@@ -523,6 +623,35 @@ def job(args: argparse.Namespace) -> Job:
             return run, assemble_arguments(args), f"{run}/log.txt", []
         case _:
             return evaluation_job(args)
+
+
+def encoder_job(args: argparse.Namespace) -> Job:
+    run = args.run or ("encoder-data" if args.action == "data" else None)
+    run = require(run, "--run", args.action)
+    action = "prepare" if args.action == "data" else args.action
+    if action not in {"prepare", "train", "smoke", "evaluate"}:
+        message = f"encoder does not support action {action!r}"
+        raise LaunchError(message)
+    arguments = ["__encoder__", action, "--run", run]
+    options = (
+        ("--part", args.part),
+        ("--tokens", args.tokens),
+        ("--lr", args.lr),
+        ("--batch-tokens", args.batch_tokens),
+        ("--micro-tokens", args.micro_tokens),
+        ("--workers", args.workers),
+        ("--config", args.config),
+        ("--stop-after", args.stop),
+        ("--steps", args.steps),
+    )
+    for flag, value in options:
+        if value is not None:
+            arguments += [flag, str(value)]
+    if action == "evaluate":
+        arguments += ["--suite", "dev" if args.suite == "exit" else args.suite]
+        if args.model:
+            arguments += ["--model", args.model]
+    return run, arguments, f"{run}/log.txt", []
 
 
 SCREEN_FILE: Final = "screen.json"

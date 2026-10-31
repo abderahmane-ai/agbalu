@@ -39,15 +39,24 @@ resource into the scarce one.
 | [**Feraoun-Pro**](https://huggingface.co/agbalu/Feraoun-Pro) | document OCR, 51M | **7.34% Latin and 0.91% Neo-Tifinagh character error rate, 81.77% line exact match** over 30,000 held-out rendered lines. A second architecture for Feraoun-36M's task: one CTC forward pass per line instead of one decoder step per character, a canvas that follows the line to 1,024 px instead of squeezing it, and **`ţ` and `Ţ`** — Boulifa's transcription convention, which has never had a slot in an OCR alphabet before |
 | [**Feraoun-36M**](https://huggingface.co/agbalu/Feraoun-36M) | document OCR, 36M | **2.85% character error rate and 70.20% line exact match** over 1,000 held-out lines of printed Kabyle, reading Latin and Neo-Tifinagh from one 171-symbol character alphabet — the first OCR model trained for the language, and the first that keeps the sub-dot on `ḍ ḥ ṛ ṣ ṭ ẓ` instead of normalising it away |
 | [**SiMohand-278M**](https://huggingface.co/agbalu/SiMohand-278M) | sentence embeddings and retrieval, 278M | **97.0% Recall@1** and **0.9833 MRR** finding the right Kabyle passage among 499 distractors — against **63.8%** for the multilingual backbone it was fine-tuned from, which maps five Kabyle consonant characters to `<unk>` and collapses the language into one cone. Its 64-dimension Matryoshka slice, a 12× compression, scores the same 97.0% |
-| [**Masinissa-31M**](https://huggingface.co/agbalu/Masinissa-31M) | encoder, 31M | **90.51%** on gold UD part-of-speech tags — against 83.42% for a most-frequent-tag baseline and 63.69% for the previously published Kabyle tagger — and **87.42%** under deliberate homoglyph corruption |
+| [**Masinissa-73M**](https://huggingface.co/agbalu/Masinissa-73M) | flagship encoder, 73M | **1,953.7 Bradley–Terry Elo** across nine models on `KabEncBench`, leading all external multilingual models by +753+ Elo points; **80.59%** UPOS Macro-F1 (94.08% surface accuracy) on gold UD POS, **57.91%** Aspect Macro-F1, **64.87%** SIB-200 Topic, **64.38%** TaPaCo Paraphrase retrieval |
+| [**Masinissa-31M**](https://huggingface.co/agbalu/Masinissa-31M) | lightweight encoder, 31M | **1,708.4 Bradley–Terry Elo** on `KabEncBench` (#2 overall, outperforming every 278M external baseline); **90.51%** surface accuracy on gold UD POS tags and **87.42%** under homoglyph corruption |
 | [**Masinissa-Sentiment**](https://huggingface.co/agbalu/Masinissa-Sentiment) | sentiment, 31M | **90.27% accuracy and 0.9026 macro-F1** over negative, neutral and positive — the first sentiment classifier published for any Berber language, against 88.80% for an ordinary fine-tune of the same encoder and 77.53% for a linear probe on it, all three scored on the same 1,500 rows. Its labels are projected from the English side of a Tatoeba pair, and the transfer is measured rather than assumed: accuracy rises monotonically with the *English* classifier's own confidence — **87.85%** on the 889 rows it was least sure about, 95.00% on the 40 it was surest of. **Total homoglyph corruption moves it not at all**, because the repair is inside the inference path. Returns a conformal **set** of labels on the 12.53% of sentences where the polarity is in the situation rather than the words |
 | [**Dihya-5M**](https://huggingface.co/agbalu/Dihya-5M) | language identification, 5M | Separates six Latin-script Amazigh varieties (`kab`, `shi`, `rif`, `taq`, `tzm`, `shy`) and rejects non-Berber: **85.52% over the seven classes**. On the six Berber classes, scored beside the public identifiers in one pass over the same rows, **84.44% against GlotLID's 41.78% and NLLB `lid218e`'s 28.33%** — and where those send **96.0% of Shawiya and 90.0% of Tarifit** into Kabyle, this sends 19.3% and 6.7%. That absorption is what `lid218e` did to the 90.1% of AƔBALU-Parallel it mined. **Tarifit, Central Atlas Tamazight and Shawiya have no label at all in either public identifier**, so their recall here — 0.873, 0.660, 0.687 — is the first that exists. Returns a conformal **set** of labels where the text is genuinely ambiguous |
 | [**Mammeri-Tok**](https://huggingface.co/agbalu/Mammeri-Tok) | tokenizer | Ten Unigram vocabularies, 8k–32k, two initialisation arms. The sweep settles two open questions about Kabyle segmentation |
+
+## Interactive Spaces
+
+| | | |
+|---|---|---|
+| [**KabEncBench-Leaderboard**](https://huggingface.co/spaces/agbalu/KabEncBench-Leaderboard) | representation benchmark & leaderboard | Pairwise Bradley–Terry Elo tournament (2,000 bootstraps), multi-model polar radar chart comparisons, and item-level win-rate matrices across 9 foundation encoders on Kabyle |
+| [**Jugurtha-4B-Chat**](https://huggingface.co/spaces/agbalu/Jugurtha-4B-Chat) | conversational AI interface | Official sovereign Taqbaylit chat interface powered by `Jugurtha-4B`, featuring native chain-of-thought (`<think>` blocks) and fast streaming |
 
 ## Datasets
 
 | | | |
 |---|---|---|
+| [**KabEncBench**](https://huggingface.co/datasets/agbalu/KabEncBench) | multi-task representation benchmark | 100,609 annotated instances across 6 core tasks (Syntax UPOS, Aspect Morphology, Named Entity Recognition, 3-way Sentiment, SIB-200 Topic Classification, Punctuation Restoration) and 3 diagnostic probes (Clitic Alternation, Paraphrase Retrieval, Spelling Minimal Pairs) under Track A: Frozen Scale-Normalized Probe |
 | [**KabBench**](https://huggingface.co/datasets/agbalu/KabBench) | evaluation | A **repaired** Kabyle MT reference — 326 of its 2,009 sentences were corrupt in the public original and have never been fixed upstream — plus a balanced six-language set for telling Kabyle from its Berber siblings |
 | [**KabLex**](https://huggingface.co/datasets/agbalu/KabLex) | lexicon | 366,892 permissive lexical entries (licence-cut by code from 395,834 with per-row `source` and `licence`) over 17,090 lemmas, with morphological features, and 25,642 word–pronunciation pairs in IPA |
 | [**KabInflect**](https://huggingface.co/datasets/agbalu/KabInflect) | morphology | 336,151 inflected verb form entries across 13,226 lemmas, partitioned by verb lemma into sealed splits (0 paradigm leakage; copying the lemma unchanged scores 4.07%), plus 6,198 full verb conjugation paradigms |
@@ -96,6 +105,13 @@ corpus and all 2,009 FLORES+ `kab_Latn` sentences, which are also the text SIB-2
 FLORES+ is built from Wikipedia, which is in the corpus, so this was checked rather than
 assumed, and the detector is positive-controlled against injected leaks — including one
 that differs only by the homoglyph corruption.
+
+**Representation learning is benchmarked on representation, not head capacity.** Multi-task
+evaluations often confound encoder quality with downstream fine-tuning hyperparameters and
+complex heads. In `KabEncBench`, backbones are 100% frozen, representations are pooled across
+all layers via a learnable `ScalarMix`, and a single linear probe is swept across identical
+learning rates and 5 seeds. Model rankings are established via a 2,000 paired cluster-bootstrap
+Bradley–Terry tournament on item-level wins, anchored at `XLM-RoBERTa = 1,000.0`.
 
 ## The names
 

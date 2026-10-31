@@ -310,7 +310,16 @@ ignore = [
 "src/agbalu/llm/provenance.py" = ["S603", "S607"]
 # S603, S607: `ssh`, `rsync` and `tmux` with arguments this module builds and quotes; the
 #             only user values are run ids and model paths, passed through `shlex.quote`.
-"tools/launch.py" = ["S603", "S607"]
+# PLR0911: the dispatch has one explicit return per compute action, including the encoder.
+"tools/launch.py" = ["S603", "S607", "PLR0911"]
+
+# Generated protobuf classes expose fields dynamically, so typed boundary checks use getattr.
+# PLR0915 keeps the corpus write/verify/rename transaction in one auditable function.
+"src/agbalu/encoder/corpus.py" = ["B009", "PLR0915"]
+# Each batch setting and optimizer-update collaborator is an independent contract.
+"src/agbalu/encoder/batches.py" = ["PLR0913"]
+# Keep the ordered training/evaluation/checkpoint state transitions in the same loop.
+"src/agbalu/encoder/training.py" = ["PLR0913", "PLR0912", "PLR0915"]
 # PLR0913: `select` takes the pool, the two exclusion sets, the size and the three
 #          constants that define the set's shape — length floor, speaker cap and seed.
 #          Each is a separate decision a reviewer has to be able to see and a test has to
@@ -372,7 +381,8 @@ ignore = [
 #          sentences, the device, the checkpoint step it reports as `revision`, and the
 #          hyperparameters — which are already bundled into `ProbeConfig`. The remaining
 #          six are each a distinct collaborator, and folding any two would hide one.
-"src/agbalu/bench/probe.py" = ["PLR0913"]
+# S311: probe order is deliberately seeded for reproducible benchmark comparisons.
+"src/agbalu/bench/probe.py" = ["PLR0913", "S311"]
 # PLC0415: `agbalu.model.trainer` pulls in torch. Importing it at module scope would break
 #          `data`, which is the command you run *before* deciding whether to install a
 #          training stack at all.

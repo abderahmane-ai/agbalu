@@ -122,12 +122,14 @@ def _check_fit(
         raise ValueError(message)
 
 
-def export(
+def export(  # noqa: PLR0913
     checkpoint_path: Path,
     out: Path,
     preset: Preset,
     card: Path | None = None,
     tokenizer: Path | None = None,
+    *,
+    tokenizer_name: str | None = None,
 ) -> dict[str, object]:
     """Write a publishable directory, having first proved the weights belong to `preset`.
 
@@ -159,8 +161,12 @@ def export(
     if tokenizer is not None:
         # The model is unusable without the exact vocabulary it was trained on, so it
         # travels in the repo rather than as a cross-reference someone has to resolve.
-        shutil.copyfile(tokenizer, out / tokenizer.name)
-        manifest["tokenizer"] = {"file": tokenizer.name, "sha256": sha256(tokenizer)}
+        # Shipped under the tokenizer's release name: the build artifact is called
+        # `agbalu-tok-*`, the published tokenizer is Mammeri-Tok, and a repository that
+        # names its vocabulary differently from the repository it points at is confusing.
+        shipped = tokenizer_name or tokenizer.name
+        shutil.copyfile(tokenizer, out / shipped)
+        manifest["tokenizer"] = {"file": shipped, "sha256": sha256(tokenizer)}
     (out / "config.json").write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
@@ -187,6 +193,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--card", type=Path, help="model card to copy in as README.md")
     parser.add_argument("--tokenizer", type=Path, help="the vocabulary the run was trained on")
+    parser.add_argument(
+        "--tokenizer-name", help="filename the vocabulary ships under; bytes are unchanged"
+    )
     args = parser.parse_args(argv)
 
     checkpoint_path = RUNS / args.run / args.checkpoint
@@ -199,7 +208,14 @@ def main(argv: list[str] | None = None) -> int:
             message = f"{label} not found: {path}"
             raise SystemExit(message)
 
-    manifest = export(checkpoint_path, args.out, args.preset, args.card, args.tokenizer)
+    manifest = export(
+        checkpoint_path,
+        args.out,
+        args.preset,
+        args.card,
+        args.tokenizer,
+        tokenizer_name=args.tokenizer_name,
+    )
     size = (args.out / "model.safetensors").stat().st_size
     digest = str(manifest["weights_sha256"])
     print(f"{args.out}")

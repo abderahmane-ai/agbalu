@@ -250,3 +250,22 @@ def test_the_stamp_records_the_checkout() -> None:
         assert '"git_sha"' in path.read_text(encoding="utf-8")
     finally:
         path.unlink()
+
+
+def test_encoder_training_dispatch_preserves_its_token_budget() -> None:
+    args = launch.build_parser().parse_args(
+        ["train", "--family", "encoder", "--run", "encoder-train", "--tokens", "1000000"]
+    )
+    run, arguments, log, then = launch.job(args)
+    assert run == "encoder-train"
+    assert arguments == ["__encoder__", "train", "--run", "encoder-train", "--tokens", "1000000"]
+    assert log == "encoder-train/log.txt"
+    assert then == []
+
+
+def test_only_encoder_smokes_have_a_bounded_runtime() -> None:
+    assert launch.module(["__encoder__", "smoke"]).startswith(
+        "timeout --signal=TERM --kill-after=30s 840s "
+    )
+    assert not launch.module(["__encoder__", "train"]).startswith("timeout")
+    assert not launch.module(["smoke"]).startswith("timeout")

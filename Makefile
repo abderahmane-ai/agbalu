@@ -5,6 +5,7 @@ SRC := src tests tools modal_app
 export PYDANTIC_DISABLE_PLUGINS := 1
 export PYTEST_DISABLE_PLUGIN_AUTOLOAD := 1
 export MODAL_CONFIG_PATH := /tmp/modal.toml
+export NUMBA_CACHE_DIR := $(CURDIR)/.pytest_cache/numba
 
 # Every build target below is one package's CLI plus a subcommand, so the invocation is
 # written once here. A family of subcommands is one target with a variable, never one target
@@ -79,7 +80,7 @@ clean: ## Delete all tool caches and bytecode
 	@rm -rf .coverage htmlcov coverage.xml build dist .benchmarks .tokenizer-cache
 	@echo "Caches cleaned."
 
-bench: ## TASK=audit|contamination|score|pos|lid|lid-sources|lid-audit|tifinagh|inflect. lid-audit takes MARKER=ṯ
+bench: ## TASK=audit|contamination|score|pos|lid|lid-sources|lid-audit|tifinagh|inflect|encbench-build|encbench. lid-audit takes MARKER=ṯ
 	$(call cli,bench) $(or $(TASK),audit) $(if $(MARKER),--marker "$(MARKER)",)
 
 bench-ceiling: ## What a perfect system scores against the uncorrected FLORES+ reference
@@ -106,6 +107,9 @@ tokenizer: ## Train AƔBALU-Tok v1. STAGE=prepare|build|sweep|evaluate
 model: ## Encoder. TASK=data|train (50 local steps, STEPS=n)|fill-mask|neighbours|analogy
 	$(call cli,model) $(or $(TASK),data) $(if $(filter train,$(TASK)),--steps $(or $(STEPS),50),)
 
+encoder: ## Inspect the new encoder configuration locally. TASK=inspect
+	$(call cli,encoder) $(if $(TASK),$(TASK),inspect) $(encoder_options)
+
 mt: ## NLLB corpus. TASK=corpus|pivot|consistency (pivot needs the models extra)
 	$(call cli,mt) $(or $(TASK),corpus)
 
@@ -123,7 +127,9 @@ llm: ## Phase 11, GPU-free. TASK=fertility|holdout|criterion|select|seeds|prompt
 # `smoke`, `train`, `data` and `evaluate` sync, start a detached tmux session on the pod and
 # return with the run id; `status`, `logs` and `pull` read it back. tools/launch.py defaults
 # TARGET to hpc, the only target it implements.
-launch = $(PY) -m tools.launch $(1) $(if $(TARGET),--target $(TARGET),) $(if $(RUN),--run $(RUN),)
+launch = $(PY) -m tools.launch $(1) $(if $(TARGET),--target $(TARGET),) $(if $(RUN),--run $(RUN),) $(if $(FAMILY),--family $(FAMILY),)
+
+encoder_options = $(if $(TOKENS),--tokens $(TOKENS),) $(if $(LR),--lr $(LR),) $(if $(BATCH_TOKENS),--batch-tokens $(BATCH_TOKENS),) $(if $(MICRO_TOKENS),--micro-tokens $(MICRO_TOKENS),) $(if $(WORKERS),--workers $(WORKERS),) $(if $(CONFIG),--config $(CONFIG),)
 
 setup: ## Build the pod environment from requirements/hpc.lock; report GPU, versions, disk (operator, hpc)
 	$(call launch,setup)
@@ -131,12 +137,12 @@ setup: ## Build the pod environment from requirements/hpc.lock; report GPU, vers
 sync: ## Push code, corpus inputs, Dihya and every evaluation set to the pod (operator, hpc)
 	$(call launch,sync)
 
-smoke: ## One part of the 11.19 smoke. RUN= MODEL= PART=throughput|parity|resume|evaluate (operator, hpc)
-	$(call launch,smoke) $(if $(PART),--part $(PART),) $(if $(MODEL),--model $(MODEL),)
+smoke: ## Measured smoke. FAMILY=encoder|llm RUN= PART=throughput|parity|resume|evaluate|failure (operator, hpc)
+	$(call launch,smoke) $(if $(PART),--part $(PART),) $(if $(MODEL),--model $(MODEL),) $(encoder_options)
 
-train: ## CPT, or SFT with OBJECTIVE=sft, resuming RUN if it exists. RUN= MODEL STEPS STOP OBJECTIVE (operator, hpc)
+train: ## Resume or train RUN. FAMILY=encoder|llm; encoder: TOKENS LR BATCH_TOKENS MICRO_TOKENS; llm: MODEL OBJECTIVE (operator, hpc)
 	$(call launch,train) $(if $(MODEL),--model $(MODEL),) $(if $(STEPS),--steps $(STEPS),) \
-		$(if $(STOP),--stop $(STOP),) $(if $(OBJECTIVE),--objective $(OBJECTIVE),)
+		$(if $(STOP),--stop $(STOP),) $(if $(OBJECTIVE),--objective $(OBJECTIVE),) $(encoder_options)
 
 data: ## Corpus stages that run on the pod. TASK=documents|aligned|replay|pack|sft|fluency|expand-fetch|expand-pdfs|expand-audio|expand-clean|expand-aligned|compile. RESUME=1 keeps the sources expand-pdfs already wrote (operator, hpc)
 	$(call launch,data) $(if $(TASK),--task $(TASK),) $(if $(RESUME),--resume,) $(if $(MODEL),--model $(MODEL),)
@@ -149,6 +155,9 @@ merge: ## Instruct + ALPHA x (CPT - base) into artifacts/runs/RUN/model. RUN= AL
 
 assemble: ## Trained text tower MODEL back into full model TEMPLATE, into artifacts/runs/RUN/model. RUN= MODEL= TEMPLATE= (operator, hpc)
 	$(call launch,assemble) $(if $(MODEL),--model $(MODEL),) $(if $(TEMPLATE),--template $(TEMPLATE),)
+
+encbench: ## Run KabEncBench multi-task evaluation on HPC pod. RUN=encbench MODEL=... or MODELS="..." WORKERS=3 (operator, hpc)
+	$(call launch,encbench) $(if $(MODELS),--models $(MODELS),) $(if $(MODEL),--models $(MODEL),) $(if $(WORKERS),--workers $(WORKERS),)
 
 status: ## Is RUN alive: session, recent events read plainly, checkpoints. RAW=1 for the raw log (operator, hpc)
 	$(call launch,status) $(if $(RAW),--raw,)
@@ -261,7 +270,8 @@ print('Uploaded:', HfApi().upload_file(\
 release-encoder:
 	$(PY) -m tools.export_release --run agbalu-encoder-v1 --preset kab \
 		--out $(RELEASE)/Masinissa-31M --card docs/cards/masinissa-31m.md \
-		--tokenizer artifacts/tokenizer/agbalu-tok-base-16k.model
+		--tokenizer artifacts/tokenizer/agbalu-tok-base-16k.model \
+		--tokenizer-name mammeri-tok-base-16k.model
 	$(PY) -m tools.stage_hub --repo masinissa --dir $(RELEASE)/Masinissa-31M
 
 release-mt:

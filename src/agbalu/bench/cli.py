@@ -663,6 +663,36 @@ def command_inflect(args: argparse.Namespace) -> int:
     return _write_report(report, args.out / "inflect-baseline.json")
 
 
+def command_encbench_build(args: argparse.Namespace) -> int:
+    """Compile all 6 core + 3 diagnostic KabEncBench splits deterministically."""
+    from agbalu.bench.encbench_data import BuildLocations, compile_all
+
+    stats = compile_all(BuildLocations(out=args.out_dir))
+    print(json.dumps(stats, ensure_ascii=False, indent=2))
+    return 0
+
+
+def command_encbench(args: argparse.Namespace) -> int:
+    """Inspect KabEncBench tasks and encoder registry, or compute Elo leaderboard from results."""
+    from agbalu.bench.encbench import ENCODER_REGISTRY
+    from agbalu.bench.encbench_data import CORE_TASKS, DIAG_TASKS
+
+    stats_path = args.data_dir / "encbench.stats.json"
+    task_stats: dict[str, object] = {}
+    if stats_path.exists():
+        task_stats = json.loads(stats_path.read_text(encoding="utf-8"))
+
+    report: dict[str, object] = {
+        "benchmark": "KabEncBench",
+        "version": "1.0.0",
+        "core_tasks": list(CORE_TASKS),
+        "diagnostic_tasks": list(DIAG_TASKS),
+        "encoders": [asdict(spec) for spec in ENCODER_REGISTRY],
+        "task_stats": task_stats,
+    }
+    return _write_report(report, args.out / "encbench-report.json")
+
+
 def _write_report(report: dict[str, object], path: Path) -> int:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -758,7 +788,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _add_floor_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    """The two baselines whose only options are which split and how much of it."""
+    """The two baselines and the KabEncBench commands."""
     for name, help_text in (
         ("tifinagh", "what the character table scores on Tifinagh to Latin conversion"),
         ("inflect", "what copying the lemma scores on morphological inflection"),
@@ -767,6 +797,16 @@ def _add_floor_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser])
         floor.add_argument("--split", choices=("dev", "test"), default="test")
         floor.add_argument("--limit", type=int)
         floor.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    eb_build = sub.add_parser(
+        "encbench-build", help="compile all 6 core + 3 diagnostic KabEncBench splits"
+    )
+    eb_build.add_argument("--out-dir", type=Path, default=Path("data/tasks/encbench"))
+    eb_inspect = sub.add_parser(
+        "encbench", help="inspect KabEncBench or compute Bradley-Terry Elo leaderboard"
+    )
+    eb_inspect.add_argument("--data-dir", type=Path, default=Path("data/tasks/encbench"))
+    eb_inspect.add_argument("--results", type=Path, default=None)
+    eb_inspect.add_argument("--out", type=Path, default=DEFAULT_OUT)
 
 
 COMMANDS: Final[dict[str, Callable[[argparse.Namespace], int]]] = {
@@ -779,6 +819,8 @@ COMMANDS: Final[dict[str, Callable[[argparse.Namespace], int]]] = {
     "lid-sources": command_lid_sources,
     "tifinagh": command_tifinagh,
     "inflect": command_inflect,
+    "encbench-build": command_encbench_build,
+    "encbench": command_encbench,
 }
 
 

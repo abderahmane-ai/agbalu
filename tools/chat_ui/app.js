@@ -35,7 +35,7 @@ class JugurthaChatApp {
     // Load persisted settings or defaults
     this.settings = {
       endpoint: localStorage.getItem('jugurtha_endpoint') || '/v1',
-      model: localStorage.getItem('jugurtha_model') || 'jugurtha-4b',
+      model: localStorage.getItem('jugurtha_model') || 'jugurtha-2-9b',
       temperature: parseFloat(localStorage.getItem('jugurtha_temp') || '0.3'),
       maxTokens: parseInt(localStorage.getItem('jugurtha_max_tokens') || '8192', 10) <= 1024 ? 8192 : parseInt(localStorage.getItem('jugurtha_max_tokens') || '8192', 10),
       systemPrompt: localStorage.getItem('jugurtha_sys_prompt') || DEFAULT_SYSTEM_PROMPT,
@@ -156,7 +156,7 @@ class JugurthaChatApp {
 
   saveSettings() {
     this.settings.endpoint = this.dom.apiEndpointInput.value.trim() || '/v1';
-    this.settings.model = this.dom.modelAliasInput.value.trim() || 'jugurtha-4b';
+    this.settings.model = this.dom.modelAliasInput.value.trim() || 'jugurtha-2-9b';
     this.settings.temperature = parseFloat(this.dom.tempSlider.value);
     this.settings.maxTokens = parseInt(this.dom.maxTokensInput.value, 10) || 1024;
     this.settings.systemPrompt = this.dom.sysPromptInput.value.trim() || DEFAULT_SYSTEM_PROMPT;

@@ -27,6 +27,54 @@ STEP = event(
 )
 
 
+def test_encoder_evaluation_is_compact_and_preserves_the_primary_score() -> None:
+    rendered = View().render(
+        event(
+            "eval",
+            family="encoder",
+            step=4,
+            mlm={"ce": 3.2, "accuracy": 0.4},
+            downstream={"surface/canonical": {"nonpunct_accuracy": 0.8125, "by_label": ["VERB"]}},
+        )
+    )
+    assert rendered is not None
+    assert "surface POS 81.25%" in rendered.text
+    assert "MLM CE 3.2" in rendered.text
+    assert "by_label" not in rendered.text
+
+
+def test_encoder_step_with_unmeasured_utilization_displays_a_dash() -> None:
+    line = json.loads(STEP)
+    line.update(family="encoder", mfu=None)
+    rendered = View().render(json.dumps(line))
+    assert rendered is not None
+    assert "MFU -" in rendered.text
+    assert "ETA " in rendered.text
+    assert ", done " in rendered.text
+
+
+def test_encoder_diagnostics_keep_arrays_in_the_raw_log() -> None:
+    rendered = View().render(
+        event("diagnostics", family="encoder", step=100, activation_rms=[0.2, 1.5, 0.7])
+    )
+    assert rendered is not None
+    assert rendered.text == "   encoder health at step 100: layer activation RMS 0.200–1.500"
+    assert View().render(event("result", family="encoder", by_label=["VERB"])) is None
+
+
+def test_encoder_previews_show_complete_sentences_and_keep_other_families_short() -> None:
+    sentence = "A" * 250 + " gar-aneɣ."
+    encoder = View().render(
+        event("probe", family="encoder", step=100, texts={"sentence 4 original": sentence})
+    )
+    other = View().render(event("probe", step=100, texts={"sample": sentence}))
+    assert encoder is not None
+    assert other is not None
+    assert sentence in encoder.text
+    assert sentence not in other.text
+    assert "..." in other.text
+
+
 class TestSteps:
     def test_a_step_carries_position_loss_rate_and_finish_time(self) -> None:
         rendered = View().render(STEP)

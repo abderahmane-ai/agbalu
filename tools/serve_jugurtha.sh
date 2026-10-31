@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# AƔBALU: Jugurtha-4B Production Daemon & OpenAI API Server (vLLM)
+# AƔBALU: Jugurtha-2-9B Production Daemon & OpenAI API Server (vLLM)
 # ==============================================================================
 # Usage:
 #   ./tools/serve_jugurtha.sh start    # Start vLLM in background with monitoring
@@ -16,14 +16,14 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENV_PYTHON="/home/jovyan/envs/vllm/bin/python"
 VENV_VLLM="/home/jovyan/envs/vllm/bin/vllm"
-MODEL_DIR="${REPO_DIR}/artifacts/runs/jugurtha-4b-sft/model"
+MODEL_DIR="${REPO_DIR}/artifacts/runs/jugurtha-9b-sft/model"
 RUN_DIR="${REPO_DIR}/artifacts/runs/vllm-serve"
 PID_FILE="${RUN_DIR}/vllm.pid"
 LOG_FILE="${RUN_DIR}/serve.log"
 
 HOST="${HOST:-0.0.0.0}"
 PORT="${PORT:-8000}"
-MODEL_NAME="${MODEL_NAME:-jugurtha-4b}"
+MODEL_NAME="${MODEL_NAME:-jugurtha-2-9b}"
 GPU_UTIL="${GPU_UTIL:-0.85}"
 MAX_LEN="${MAX_LEN:-32768}"
 
@@ -53,8 +53,8 @@ start_server() {
     local pid
     pid="$(get_pid)"
     if [[ -n "${pid}" ]]; then
-        echo "[Jugurtha-4B] Server is ALREADY RUNNING (PID: ${pid})."
-        echo "[Jugurtha-4B] Listening on http://${HOST}:${PORT}"
+        echo "[Jugurtha-2-9B] Server is ALREADY RUNNING (PID: ${pid})."
+        echo "[Jugurtha-2-9B] Listening on http://${HOST}:${PORT}"
         return 0
     fi
 
@@ -69,10 +69,10 @@ start_server() {
     fi
 
     echo "=================================================================="
-    echo " Starting Jugurtha-4B Production vLLM Server"
+    echo " Starting Jugurtha-2-9B Production vLLM Server"
     echo " Model:     ${MODEL_DIR}"
     echo " Template:  ${MODEL_DIR}/chat_template.jinja"
-    echo " Aliases:   Jugurtha-4B, agbalu/Jugurtha-4B, jugurtha-4b"
+    echo " Aliases:   Jugurtha-2-9B, agbalu/Jugurtha-2-9B, jugurtha-2-9b, jugurtha-4b"
     echo " Endpoint:  http://${HOST}:${PORT}"
     echo " Context:   ${MAX_LEN} tokens"
     echo " GPU Util:  ${GPU_UTIL}"
@@ -80,7 +80,7 @@ start_server() {
     echo "=================================================================="
 
     nohup "${VENV_VLLM}" serve "${MODEL_DIR}" \
-        --served-model-name "Jugurtha-4B" "agbalu/Jugurtha-4B" "jugurtha-4b" \
+        --served-model-name "Jugurtha-2-9B" "agbalu/Jugurtha-2-9B" "jugurtha-2-9b" "jugurtha-4b" \
         --chat-template "${MODEL_DIR}/chat_template.jinja" \
         --host "${HOST}" \
         --port "${PORT}" \
@@ -92,9 +92,9 @@ start_server() {
 
     local new_pid=$!
     echo "${new_pid}" > "${PID_FILE}"
-    echo "[Jugurtha-4B] Process spawned with PID: ${new_pid}"
+    echo "[Jugurtha-2-9B] Process spawned with PID: ${new_pid}"
 
-    echo -n "[Jugurtha-4B] Waiting for engine warmup & CUDA graph capture..."
+    echo -n "[Jugurtha-2-9B] Waiting for engine warmup & CUDA graph capture..."
     local attempts=0
     local max_attempts=90
     while [[ ${attempts} -lt ${max_attempts} ]]; do
@@ -111,7 +111,7 @@ start_server() {
         if curl -s "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
             echo " READY!"
             echo "=================================================================="
-            echo " [Jugurtha-4B] Status: ONLINE and HEALTHY"
+            echo " [Jugurtha-2-9B] Status: ONLINE and HEALTHY"
             echo " OpenAI Base URL: http://${HOST}:${PORT}/v1"
             echo " Chat Endpoint:   http://${HOST}:${PORT}/v1/chat/completions"
             echo " Models List:     http://${HOST}:${PORT}/v1/models"
@@ -122,7 +122,7 @@ start_server() {
 
         echo -n "."
         sleep 2
-        ((attempts++))
+        attempts=$((attempts + 1))
     done
 
     echo ""
@@ -133,20 +133,20 @@ stop_server() {
     local pid
     pid="$(get_pid)"
     if [[ -z "${pid}" ]]; then
-        echo "[Jugurtha-4B] No running server found."
+        echo "[Jugurtha-2-9B] No running server found."
         rm -f "${PID_FILE}"
         return 0
     fi
 
-    echo "[Jugurtha-4B] Stopping server (PID: ${pid})..."
+    echo "[Jugurtha-2-9B] Stopping server (PID: ${pid})..."
     kill -TERM "${pid}" 2>/dev/null || true
 
     local count=0
     while kill -0 "${pid}" 2>/dev/null; do
         sleep 1
-        ((count++))
+        count=$((count + 1))
         if [[ ${count} -gt 15 ]]; then
-            echo "[Jugurtha-4B] Force killing server (PID: ${pid})..."
+            echo "[Jugurtha-2-9B] Force killing server (PID: ${pid})..."
             kill -KILL "${pid}" 2>/dev/null || true
             break
         fi
@@ -155,24 +155,24 @@ stop_server() {
     # Clean up any residual child/worker processes
     pkill -f "vllm.*jugurtha" 2>/dev/null || true
     rm -f "${PID_FILE}"
-    echo "[Jugurtha-4B] Server stopped cleanly."
+    echo "[Jugurtha-2-9B] Server stopped cleanly."
 }
 
 check_status() {
     local pid
     pid="$(get_pid)"
     if [[ -n "${pid}" ]]; then
-        echo "[Jugurtha-4B] Status: RUNNING (PID: ${pid})"
+        echo "[Jugurtha-2-9B] Status: RUNNING (PID: ${pid})"
         if curl -s -f "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
-            echo "[Jugurtha-4B] Health: OK (HTTP 200)"
-            echo "[Jugurtha-4B] Models: Jugurtha-4B | agbalu/Jugurtha-4B | jugurtha-4b"
-            echo "[Jugurtha-4B] API:    http://${HOST}:${PORT}/v1"
-            echo "[Jugurtha-4B] Chat:   http://${HOST}:${PORT}/v1/chat/completions"
+            echo "[Jugurtha-2-9B] Health: OK (HTTP 200)"
+            echo "[Jugurtha-2-9B] Models: Jugurtha-2-9B | agbalu/Jugurtha-2-9B | jugurtha-2-9b"
+            echo "[Jugurtha-2-9B] API:    http://${HOST}:${PORT}/v1"
+            echo "[Jugurtha-2-9B] Chat:   http://${HOST}:${PORT}/v1/chat/completions"
         else
-            echo "[Jugurtha-4B] Health: INITIALIZING / UNHEALTHY (check logs: ${LOG_FILE})"
+            echo "[Jugurtha-2-9B] Health: INITIALIZING / UNHEALTHY (check logs: ${LOG_FILE})"
         fi
     else
-        echo "[Jugurtha-4B] Status: STOPPED"
+        echo "[Jugurtha-2-9B] Status: STOPPED"
     fi
 }
 

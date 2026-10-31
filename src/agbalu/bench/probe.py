@@ -25,7 +25,6 @@ from typing import Final, Protocol
 import torch
 from torch import Tensor, nn
 
-from agbalu.model.config import ModelConfig
 from agbalu.tokenizer.spec import CLS_ID, SEP_ID
 from agbalu.treebank import Sentence as TreebankSentence
 
@@ -81,8 +80,14 @@ class Tokenizer(Protocol):
     def unk_id(self) -> int: ...
 
 
+class EncoderDimensions(Protocol):
+    @property
+    def hidden_size(self) -> int: ...
+
+
 class Encoder(Protocol):
-    config: ModelConfig
+    @property
+    def config(self) -> EncoderDimensions: ...
 
     def contextualise(self, input_ids: Tensor, attention_mask: Tensor) -> Tensor: ...
 
@@ -195,7 +200,7 @@ def train_head(
     )
     objective = nn.CrossEntropyLoss(ignore_index=IGNORE_INDEX)
     order = list(range(len(examples)))
-    rng = random.Random(config.seed)  # noqa: S311 — a fixed-seed shuffle, not a secret
+    rng = random.Random(config.seed)
     history: list[float] = []
 
     for epoch in range(1, config.epochs + 1):
@@ -223,6 +228,44 @@ def train_head(
     return history
 
 
+def train_cached_head(
+    encoder: Encoder,
+    head: Head,
+    examples: Sequence[Example],
+    *,
+    device: torch.device,
+    config: ProbeConfig,
+) -> None:
+    """Fit the same probe after caching frozen sentence representations once."""
+    cached: list[tuple[Tensor, Tensor]] = []
+    for example in examples:
+        ids, mask = _batch([example], device)
+        with torch.no_grad():
+            hidden = encoder.contextualise(ids, mask)
+        selected = _selected(hidden, [example], device)
+        if selected is None:
+            message = "probe sentence has no alignable annotated words"
+            raise ValueError(message)
+        cached.append((selected[0].detach(), selected[1]))
+    optimizer = torch.optim.AdamW(
+        head.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay
+    )
+    order = list(range(len(cached)))
+    rng = random.Random(config.seed)
+    for _ in range(config.epochs):
+        rng.shuffle(order)
+        for start in range(0, len(order), config.batch_size):
+            chunk = [cached[index] for index in order[start : start + config.batch_size]]
+            vectors = torch.cat([pair[0] for pair in chunk])
+            labels = torch.cat([pair[1] for pair in chunk])
+            logits = head.forward(vectors)
+            loss = torch.nn.functional.cross_entropy(logits, labels, ignore_index=IGNORE_INDEX)
+            optimizer.zero_grad(set_to_none=True)
+            torch.autograd.backward(loss)
+            torch.nn.utils.clip_grad_norm_(head.parameters(), config.max_gradient)
+            optimizer.step()
+
+
 class ProbeTagger:
     """A frozen encoder and its trained head, behind `agbalu.bench.pos.Tagger`."""
 
@@ -245,6 +288,7 @@ class ProbeTagger:
         device: torch.device,
         step: int,
         config: ProbeConfig | None = None,
+        cache_features: bool = False,
     ) -> ProbeTagger:
         examples, skipped = examples_for(sentences, tokenizer)
         if skipped:
@@ -254,7 +298,10 @@ class ProbeTagger:
             raise ValueError(message)
         settings = config or ProbeConfig()
         head = Head(encoder.config.hidden_size, seed=settings.seed).to(device)
-        train_head(encoder, head, examples, device=device, config=settings)
+        if cache_features:
+            train_cached_head(encoder, head, examples, device=device, config=settings)
+        else:
+            train_head(encoder, head, examples, device=device, config=settings)
         return cls(encoder, head, tokenizer, device, step)
 
     @property

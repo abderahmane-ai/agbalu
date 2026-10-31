@@ -33,6 +33,11 @@ model-index:
 
 # Masinissa-31M
 
+> [!TIP]
+> **A higher-capacity model is now available: [`agbalu/Masinissa-73M`](https://huggingface.co/agbalu/Masinissa-73M)**  
+> Scaled to 73.3M parameters and 20 layers, **Masinissa-73M** establishes new state-of-the-art results across the full `KabEncBench` suite (1,953.7 Bradley–Terry Elo, +3.6% on Syntax, +8.8% on Aspect/Morphology, +21.2% on SIB-200 Topic Classification, and +12.6% on Paraphrase Retrieval).  
+> **Masinissa-31M** remains the recommended lightweight encoder for latency-critical, CPU-only, or mobile/edge deployments.
+
 A 31M-parameter masked language model for **Kabyle** (Taqbaylit, `kab`, Latin script), trained
 from scratch on the cleanest Kabyle corpus assembled to date.
 
@@ -74,6 +79,40 @@ carries systematic homoglyph substitution — Greek `ε` U+03B5 for Latin `ɛ` U
 `ɣ` — in 2.6–3.2% of rows of the largest public sources. The corrupted condition applies
 exactly that substitution. The 3.1-point drop, from a baseline that loses 3.9, is the
 corpus-level orthographic repair showing up as downstream robustness.
+
+### Multi-Task Evaluation: KabEncBench
+
+Beyond single-task POS tagging, Masinissa-31M was evaluated on **`KabEncBench`** (Track A: Frozen Scale-Normalized Probe) across 6 core linguistic tasks and 3 diagnostic probes. Backbones are 100% frozen; a layer-weighted scalar mix (`ScalarMix`) and linear probe are fitted across 5 seeds per learning rate.
+
+Pairwise Bradley–Terry Elo ratings are computed via 2,000 paired cluster-bootstraps, anchored at `FacebookAI/xlm-roberta-base` = 1,000:
+
+| Rank | Model | Parameters | Elo (95% CI) | Tier |
+|:---:|:---|:---:|:---:|:---:|
+| 1 | [`agbalu/Masinissa-73M`](https://huggingface.co/agbalu/Masinissa-73M) | 73M | **1,953.7 [1,534.7, 3,379.1]** | **Tier 1** |
+| **2** | **`agbalu/Masinissa-31M`** | **31M** | **1,708.4 [1,371.1, 2,886.2]** | **Tier 2** |
+| 3 | `UBC-NLP/serengeti-E250` | 278M | 1,200.3 [953.6, 1,480.1] | Tier 3 |
+| 4 | `Davlan/afro-xlmr-base-76L_script` | 278M | 1,151.6 [919.5, 1,451.0] | Tier 3 |
+| 5 | `UBC-NLP/serengeti-E110` | 110M | 1,148.2 [918.5, 1,421.2] | Tier 3 |
+| 6 | `jhu-clsp/mmBERT-base` | 278M | 1,141.7 [906.4, 1,435.3] | Tier 3 |
+| 7 | `jhu-clsp/mmBERT-small` | 135M | 1,039.1 [804.2, 1,282.5] | Tier 3 |
+| 8 | `google-bert/bert-base-multilingual-cased` | 178M | 1,012.6 [780.9, 1,266.8] | Tier 4 |
+| 9 | `FacebookAI/xlm-roberta-base` *(Anchor)* | 278M | 1,000.0 [1,000.0, 1,000.0] | Tier 4 |
+
+#### Task Breakdown (%)
+
+| Model | UPOS (`Syntax`) | Aspect (`Morph`) | Micro-F1 (`NER`) | Sentiment | SIB-200 (`Topic`) | Punctuation | TaPaCo (`Paraphrase`) |
+|:---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| `Masinissa-73M` | **80.59** | **57.91** | **88.24** | **93.83** | **64.87** | **55.42** | **64.38** |
+| **`Masinissa-31M`** | **78.88** | **54.19** | **87.74** | **92.06** | **59.28** | **52.21** | **58.78** |
+| `serengeti-E250` | 76.98 | 49.13 | 83.98 | 85.33 | 43.72 | 45.54 | 42.55 |
+| `serengeti-E110` | 76.24 | 48.83 | 84.91 | 85.65 | 39.64 | 43.11 | 43.86 |
+| `afro-xlmr-base` | 75.32 | 47.93 | 83.04 | 85.75 | 38.41 | 38.56 | 48.54 |
+| `mmBERT-base` | 75.52 | 48.44 | 84.01 | 85.64 | 37.96 | 39.98 | 48.63 |
+| `mmBERT-small` | 75.72 | 45.84 | 81.79 | 83.17 | 34.94 | 39.91 | 48.98 |
+| `xlm-roberta-base` | 75.44 | 44.52 | 79.71 | 84.75 | 38.21 | 39.12 | 42.13 |
+| `bert-base-multilingual` | 73.21 | 46.79 | 80.62 | 84.35 | 40.84 | 39.01 | 51.77 |
+
+Despite having only 31M parameters, Masinissa-31M outperforms all 110M–278M external multilingual baselines across every single task, while its scaled sibling Masinissa-73M establishes the definitive state of the art.
 
 ## Intended use
 
@@ -126,7 +165,7 @@ never Greek epsilon; homoglyph-corrupted text fragments into byte pieces and the
 representation degrades accordingly. This is not hypothetical — it is 2.6–3.2% of the
 seed corpora this model was trained from.
 
-`agbalu-tok-base-16k.model` is the SentencePiece model the vocabulary was trained as, kept
+`mammeri-tok-base-16k.model` is the SentencePiece model the vocabulary was trained as, kept
 beside the converted `tokenizer.json` for anyone who needs the original. The two are id for
 id, which the release staging checks before publishing.
 
@@ -256,7 +295,7 @@ over this encoder, at 90.27% accuracy against a frozen probe's 77.53%.
 | file | size | SHA-256 |
 |---|---:|---|
 | `model.safetensors` | 124.5 MB | `dca2a960c06a4bb14a5dd1d33557b8b4537230807a32d0a4debbee7fda44fbad` |
-| `agbalu-tok-base-16k.model` | 260 KB | `c8094fccd936d2e8954809bd9cf45331679e9550d2c7bbabe5c38c3bf365dc4e` |
+| `mammeri-tok-base-16k.model` | 260 KB | `c8094fccd936d2e8954809bd9cf45331679e9550d2c7bbabe5c38c3bf365dc4e` |
 | `config.json` | — | architecture, training summary, the full validation curve, and the `auto_map` |
 | `configuration_masinissa.py`, `modeling_masinissa.py` | — | the architecture in code, importing only `torch` and `transformers` |
 | `tokenizer.json`, `tokenizer_config.json` | 1.0 MB | the same 16,000 pieces, as a fast tokenizer `AutoTokenizer` can read |
@@ -280,10 +319,6 @@ The POS numbers reproduce exactly. Head initialisation is seeded per-layer with 
 generator, so two fits of the same frozen checkpoint are bit-identical. Seeding only the
 batch order is not enough: it leaves the reported accuracy moving by up to 0.5 points per
 refit.
-
-```
-python -m agbalu.bench.cli pos --systems encoder neural lexicon baseline
-```
 
 ## The name
 

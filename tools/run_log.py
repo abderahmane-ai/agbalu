@@ -116,7 +116,13 @@ class View:
         resumed = event.get("resumed_from")
         origin = f"resumed from {resumed}" if resumed else "fresh start"
         parameters = event.get("parameters")
-        size = f"{parameters / 1e9:.2f}B parameters" if isinstance(parameters, int) else ""
+        size = (
+            f"{parameters / 1e6:.1f}M parameters"
+            if isinstance(parameters, int) and parameters < GIGABYTE
+            else f"{parameters / 1e9:.2f}B parameters"
+            if isinstance(parameters, int)
+            else ""
+        )
         return Rendered(
             f"== run started at step {event.get('step')} of {self.total}, {origin}, {size}",
             live=False,
@@ -140,13 +146,22 @@ class View:
         memory = event.get("memory")
         gigabytes = f"{memory / GIGABYTE:.1f} GB" if isinstance(memory, int) else "-"
         skipped = "" if event.get("taken", True) else "  SKIPPED: non-finite gradient"
+        utilization = event.get("mfu")
+        mfu = f"{utilization:.0%}" if isinstance(utilization, int | float) else "-"
+        accuracy = event.get("accuracy")
+        masked = event.get("mask_probability")
+        encoder_metrics = (
+            f" | acc {accuracy:.3f} mask {masked:.3f}"
+            if isinstance(accuracy, int | float) and isinstance(masked, int | float)
+            else ""
+        )
         self.progress = ""
         return Rendered(
             f"{where} | loss {loss:.4f} (avg{len(self.losses)} {mean:.4f})"
             f" | lr {float(str(event['lr'])):.2e} | grad {float(str(event['grad_norm'])):.2f}"
             f" | {float(str(event['tokens_per_s'])):,.0f} tok/s"
-            f" | MFU {float(str(event['mfu'])):.0%} | {gigabytes}"
-            f" | {int(str(event['tokens'])) / 1e6:,.1f}M tok | {finish}{skipped}",
+            f" | MFU {mfu} | {gigabytes}"
+            f" | {int(str(event['tokens'])) / 1e6:,.1f}M tok | {finish}{encoder_metrics}{skipped}",
             live=False,
         )
 
@@ -185,6 +200,19 @@ class View:
         )
 
     def on_eval(self, event: dict[str, object]) -> Rendered:
+        if event.get("family") == "encoder":
+            health, tasks = event.get("mlm"), event.get("downstream")
+            health = health if isinstance(health, dict) else {}
+            tasks = tasks if isinstance(tasks, dict) else {}
+            clean = tasks.get("surface/canonical")
+            clean = clean if isinstance(clean, dict) else {}
+            accuracy = clean.get("nonpunct_accuracy")
+            score = f" | surface POS {accuracy:.2%}" if isinstance(accuracy, float) else ""
+            return Rendered(
+                f"== encoder eval at step {event.get('step')}: "
+                f"MLM CE {health.get('ce')} | accuracy {health.get('accuracy')}{score}",
+                live=False,
+            )
         scores = event.get("bpc")
         if not isinstance(scores, dict):
             return Rendered(f"eval at step {event.get('step')}: {scores}", live=False)
@@ -220,6 +248,12 @@ class View:
         )
 
     def on_best(self, event: dict[str, object]) -> Rendered:
+        if event.get("family") == "encoder":
+            return Rendered(
+                f"   new deployment checkpoint: POS {event.get('score')}"
+                f" at step {event.get('step')}",
+                live=False,
+            )
         loss = event.get("validation_loss")
         chosen_on = (
             f"validation loss {float(str(loss)):.4f}"
@@ -235,15 +269,48 @@ class View:
         texts = event.get("texts")
         lines = [f"   samples at step {event.get('step')}:"]
         if isinstance(texts, dict):
-            lines.extend(f"     {short(p)!s} => {short(t)}" for p, t in texts.items())
+            if event.get("family") == "encoder":
+                lines.extend(
+                    f"     {p} => {str(t).replace(chr(10), ' ')}" for p, t in texts.items()
+                )
+            else:
+                lines.extend(f"     {short(p)!s} => {short(t)}" for p, t in texts.items())
         return Rendered("\n".join(lines), live=False)
 
     def on_checkpoint(self, event: dict[str, object]) -> Rendered:
         return Rendered(f"   checkpoint {event.get('path')}", live=False)
 
+    def on_diagnostics(self, event: dict[str, object]) -> Rendered:
+        activations = event.get("activation_rms")
+        values = (
+            [float(value) for value in activations if isinstance(value, int | float)]
+            if isinstance(activations, list)
+            else []
+        )
+        scale = f"{min(values):.3f}–{max(values):.3f}" if values else "unmeasured"
+        return Rendered(
+            f"   encoder health at step {event.get('step')}: layer activation RMS {scale}",
+            live=False,
+        )
+
+    def on_result(self, event: dict[str, object]) -> Rendered | None:
+        if event.get("family") == "encoder":
+            return (
+                Rendered("== encoder checks passed", live=False)
+                if event.get("passed") is True
+                else None
+            )
+        return Rendered(str(event), live=False)
+
     def on_end(self, event: dict[str, object]) -> Rendered:
         rate = event.get("tokens_per_second")
         speed = f"{rate:,.0f} tok/s" if isinstance(rate, int | float) else "-"
+        if event.get("family") == "encoder":
+            return Rendered(
+                f"== encoder ended ({event.get('ended')}) at step {event.get('step')}: {speed},"
+                f" best MLM CE {event.get('best_ce')}, best POS {event.get('best_pos')}",
+                live=False,
+            )
         return Rendered(
             f"== run ended ({event.get('ended')}) at step {event.get('step')}: {speed},"
             f" best Kabyle bpc {event.get('best_kab_bpc')} at step {event.get('best_step')}",
