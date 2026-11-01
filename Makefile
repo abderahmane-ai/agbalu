@@ -132,7 +132,7 @@ llm: ## Phase 11, GPU-free. TASK=fertility|holdout|criterion|select|seeds|prompt
 # TARGET to hpc, the only target it implements.
 launch = $(PY) -m tools.launch $(1) $(if $(TARGET),--target $(TARGET),) $(if $(RUN),--run $(RUN),) $(if $(FAMILY),--family $(FAMILY),)
 
-encoder_options = $(if $(TOKENS),--tokens $(TOKENS),) $(if $(LR),--lr $(LR),) $(if $(BATCH_TOKENS),--batch-tokens $(BATCH_TOKENS),) $(if $(MICRO_TOKENS),--micro-tokens $(MICRO_TOKENS),) $(if $(WORKERS),--workers $(WORKERS),)
+encoder_options = $(if $(TOKENS),--tokens $(TOKENS),) $(if $(LR),--lr $(LR),) $(if $(BATCH_TOKENS),--batch-tokens $(BATCH_TOKENS),) $(if $(MICRO_TOKENS),--micro-tokens $(MICRO_TOKENS),) $(if $(WORKERS),--workers $(WORKERS),) $(if $(CONFIG),--config $(CONFIG),)
 
 setup: ## Build the pod environment from requirements/hpc.lock; report GPU, versions, disk (operator, hpc)
 	$(call launch,setup)
@@ -140,18 +140,18 @@ setup: ## Build the pod environment from requirements/hpc.lock; report GPU, vers
 sync: ## Push code, corpus inputs, Dihya and every evaluation set to the pod (operator, hpc)
 	$(call launch,sync)
 
-smoke: ## Measured smoke. FAMILY=dihya|encoder|llm RUN= PART=throughput|parity|resume|evaluate|failure (operator, hpc)
-	$(call launch,smoke) $(if $(PART),--part $(PART),) $(if $(MODEL),--model $(MODEL),) $(encoder_options)
+smoke: ## Measured smoke. FAMILY=dihya|restoration|encoder|llm RUN= PART=throughput|parity|resume|evaluate|failure (operator, hpc)
+	$(call launch,smoke) $(if $(PART),--part $(PART),) $(if $(MODEL),--model $(MODEL),) $(encoder_options) $(if $(MICRO_WINDOWS),--micro-windows $(MICRO_WINDOWS),)
 
-train: ## Resume or train RUN. FAMILY=dihya|encoder|llm; encoder: TOKENS LR BATCH_TOKENS MICRO_TOKENS; llm: MODEL OBJECTIVE (operator, hpc)
+train: ## Resume or train RUN. FAMILY=dihya|restoration|encoder|llm; restoration: CONFIG MICRO_WINDOWS; encoder: TOKENS LR BATCH_TOKENS MICRO_TOKENS; llm: MODEL OBJECTIVE (operator, hpc)
 	$(call launch,train) $(if $(MODEL),--model $(MODEL),) $(if $(STEPS),--steps $(STEPS),) \
-		$(if $(STOP),--stop $(STOP),) $(if $(OBJECTIVE),--objective $(OBJECTIVE),) $(encoder_options)
+		$(if $(STOP),--stop $(STOP),) $(if $(OBJECTIVE),--objective $(OBJECTIVE),) $(encoder_options) $(if $(MICRO_WINDOWS),--micro-windows $(MICRO_WINDOWS),)
 
-data: ## Corpus stages on the pod. FAMILY=dihya prepares supervised data; llm TASK=documents|aligned|replay|pack|sft|fluency|expand-fetch|expand-pdfs|expand-audio|expand-clean|expand-aligned|compile. RESUME=1 keeps expansion sources (operator, hpc)
-	$(call launch,data) $(if $(TASK),--task $(TASK),) $(if $(RESUME),--resume,) $(if $(MODEL),--model $(MODEL),)
+data: ## Corpus stages on the pod. FAMILY=dihya|restoration prepares supervised data; llm TASK=documents|aligned|replay|pack|sft|fluency|expand-fetch|expand-pdfs|expand-audio|expand-clean|expand-aligned|compile. RESUME=1 keeps expansion sources (operator, hpc)
+	$(call launch,data) $(if $(TASK),--task $(TASK),) $(if $(RESUME),--resume,) $(if $(MODEL),--model $(MODEL),) $(if $(CONFIG),--config $(CONFIG),)
 
 evaluate: ## Evaluation suite on MODEL into artifacts/runs/RUN/. RUN= MODEL SUITE=exit|screen|guard|kabyle|select|release (screen: translation only; kabyle: heldout, mt, sib; guard: no-think IFEval and GSM8K; select and release add the chat suite; CHAT_ONLY=1 runs that alone) (operator, hpc)
-	$(call launch,evaluate) $(if $(MODEL),--model $(MODEL),) $(if $(SUITE),--suite $(SUITE),) $(if $(CHAT_ONLY),--chat-only,)
+	$(call launch,evaluate) $(if $(MODEL),--model $(MODEL),) $(if $(SUITE),--suite $(SUITE),) $(if $(CHAT_ONLY),--chat-only,) $(if $(CONFIG),--config $(CONFIG),)
 
 merge: ## Instruct + ALPHA x (CPT - base) into artifacts/runs/RUN/model. RUN= ALPHA= MODEL=<cpt checkpoint> (operator, hpc)
 	$(call launch,merge) $(if $(ALPHA),--alpha $(ALPHA),) $(if $(MODEL),--model $(MODEL),)

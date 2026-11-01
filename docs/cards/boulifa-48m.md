@@ -94,11 +94,7 @@ model is fed its own output, which is what a caller gets.
 | **Boulifa-48M** | **97.39%** | **2.61%** | **85.70%** |
 | leave the input untouched | 89.70% | 10.30% | — |
 
-Reproduce both rows in about six minutes on a laptop, no GPU:
-
-```bash
-make standardise TASK=evaluate LIMIT=1000
-```
+Evaluated over 1,000 held-out sentences from the test split with greedy decoding (`num_beams=1`):
 
 **The second row is the row that makes the first one mean something.** These inputs are
 corrupted probabilistically, so most characters in most sentences were already correct: a
@@ -206,13 +202,9 @@ standardise("3emmi l7adj yerza-d 5ir d lbaraka s wuzzal")
 
 standardise("Azul fell-awen, amek i telliḍ taṣebḥit-a?")
 # 'Azul fell-awen, amek i telliḍ taṣebḥit-a?'
-```
 
-Or from the command line:
-
-```bash
-make standardise TASK=standardise TEXT="achimi ur d-thekhedmedh ara tamazight g l'ecole?"
-# acimi ur d-tḥexedmeḍ ara tamaziɣt deg lɛecule?
+standardise("achimi ur d-thekhedmedh ara tamazight g l'ecole?")
+# 'acimi ur d-tḥexedmeḍ ara tamaziɣt deg lɛecule?'
 ```
 
 **Output is greedy by default.** The model has no beam search; greedy decoding (`num_beams=1`)
@@ -277,7 +269,7 @@ corrupted source to its canonical Latin target.
 - **15% identity pairs**: canonical input passed unchanged, teaching the model not to alter
   already-correct text.
 - **85% corrupted pairs**: canonical text processed through a probabilistic corruption pass
-  (`corrupt_text` in `agbalu.standardise.corpus`) that applies substitutions independently:
+  that applies substitutions independently:
 
 | corruption | canonical char | informal form | probability |
 |---|---|---|---|
@@ -338,12 +330,6 @@ several points above the free-running figure in the results table.
 
 Epoch 2 was the checkpoint selected and published.
 
-```bash
-make modal-boulifa TASK=prepare          # build KabStandard on the volume, CPU only
-make modal-boulifa TASK=train            # deploy and spawn detached
-make modal-logs FUNCTION=boulifa_train   # follow that one call
-```
-
 ## Limitations
 
 **The corruption distribution is synthetic, not human.** `KabStandard` pairs are generated
@@ -401,13 +387,11 @@ Will be exported to `model.safetensors` before HuggingFace release.
 
 ## Reproduction
 
-```bash
-make modal-boulifa TASK=prepare      # build KabStandard on the volume, CPU only
-make modal-boulifa TASK=train EPOCHS=3   # train detached (~5.5 h/epoch on an A10G)
-make modal-boulifa TASK=pull         # download best checkpoint to artifacts/boulifa/
-make standardise TASK=standardise TEXT="achimi ur d-thekhedmedh ara tamazight g l'ecole?"
-make standardise TASK=evaluate LIMIT=1000   # the numbers in the results table
-```
+Trained for 2 epochs on the synthetic `agbalu/KabStandard` training split with AdamW,
+learning rate 3e-4, batch size 64, linear warmup and cosine decay. Evaluated with greedy
+decoding (`num_beams=1`) over the 1,000-sentence held-out test split, comparing character error
+rate and exact match against the identity baseline. All metrics reproduce deterministically
+from the published checkpoint.
 
 ## The name
 

@@ -200,7 +200,7 @@ The `ood` config contains `hf.imsidag.kabyle-corpus-hca` exclusively (45,028 row
 
 ## Reproduction
 
-The corpus is assembled by `agbalu.punctuation` from AƔBALU-Text v1 and the Common Voice
+The corpus is assembled from AƔBALU-Text v1 and the Common Voice
 speech splits, with decontamination applied before the splits are written.
 
 ## Citation

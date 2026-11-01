@@ -175,8 +175,8 @@ on arbitrary human typing, only on the corruption distribution defined here.
 
 ## Reproduction
 
-The dataset is regenerated deterministically at seed 42 from `agbalu/KabTifinagh` by
-`agbalu.standardise`. No GPU required.
+The dataset is regenerated deterministically at seed 42 from `agbalu/KabTifinagh` using the
+standardized orthography rules and probabilistic corruption engine.
 
 ## Citation
 

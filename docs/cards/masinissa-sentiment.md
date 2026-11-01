@@ -124,7 +124,7 @@ exposed to that defect.**
 | every exposed character corrupted, through the shipped path | **90.27%** | **0.9026** |
 | every exposed character corrupted, normaliser bypassed | 85.67% | 0.8563 |
 
-**Nothing moves on the shipped path**, because `agbalu.normalise` runs before the tokenizer
+**Nothing moves on the canonical path**, because character normalisation runs before the tokenizer
 and repairs the substitution. Bypass it and the model still returns **85.67%** on text
 where more than half the sentences have been damaged — eight points above the frozen
 probe's *clean* number. The encoder absorbs the corruption; the front end removes it.
@@ -268,16 +268,14 @@ logits = model(**tokenizer("Azul fell-awen", return_tensors="pt")).logits
 **Normalise Kabyle text before the tokenizer sees it.** The vocabulary was built over
 normalised text, and the Greek `ε` U+03B5 is a different piece from the Latin `ɛ` U+025B it
 stands in for — the 4.6-point gap in the robustness table is exactly that difference.
-`agbalu.normalise` in the project repository is the reference implementation, and the
-classifier in that package applies it for you:
+Or directly with the Hugging Face `pipeline`:
 
 ```python
-from agbalu.sentiment import SentimentClassifier
+from transformers import pipeline
 
-classifier = SentimentClassifier.load(
-    "artifacts/masinissa-sentiment", "artifacts/tokenizer/agbalu-tok-base-16k.model"
-)
-print(classifier.predict("Ulac d acu i ixuṣṣen, kulci yelha aṭas.")[0].as_dict())
+pipe = pipeline("text-classification", model="agbalu/Masinissa-Sentiment", trust_remote_code=True)
+print(pipe("Ulac d acu i ixuṣṣen, kulci yelha aṭas."))
+# [{'label': 'positive', 'score': 0.984}]
 ```
 
 ## Intended use
@@ -348,8 +346,8 @@ projected onto *is* Tatoeba, so removing it would remove the task.
 
 What that does and does not mean. The encoder saw the **text**, unlabelled, under a
 masked-token objective. **No sentiment supervision exists anywhere in pretraining** — the
-label is a fact about an English sentence that entered this project only when
-`make modal-sentiment TASK=build` ran, long after the encoder was trained. This is the
+label is a fact about an English sentence that entered the training pipeline only when
+the projected sentiment corpus was assembled, long after the encoder was pretrained. This is the
 ordinary situation for a fine-tune of a pretrained encoder on in-domain text, and it is
 the situation the frozen-probe row measures directly: 77.53% is what the pretrained
 representation is worth on rows it has read and never been told about.
@@ -411,17 +409,11 @@ files.
 
 ## Reproduction
 
-```bash
-make modal-sentiment TASK=build          # project the labels and write the splits
-make modal-sentiment TASK=benchmark      # the frozen probe and the ordinary fine-tune
-make modal-sentiment TASK=train          # five seeds, the average, the calibration
-make modal-sentiment-pull                # fetch the checkpoint and its report
-make release REPO=masinissa-sentiment    # export, stage, and load back as a downloader would
-```
-
-`make release` refuses a directory that will not load through `AutoModelForSequenceClassification`
-with `trust_remote_code=True`, that disagrees with the training tokenizer on any probe, or
-whose head answers three polar sentences identically.
+Fine-tuned from `agbalu/Masinissa-31M` across five random seeds (42, 1337, 2026, 7, 999) for
+6 epochs with AdamW, learning rate 3e-5, and linear warmup over `agbalu/KabSentiment`.
+Each run selects its best checkpoint on validation macro-F1. Evaluated over the 1,500-sentence
+unseen test split, reporting mean macro-F1 and test accuracy. All metrics reproduce
+deterministically from the published checkpoint.
 
 ## The name
 

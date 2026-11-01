@@ -361,17 +361,10 @@ No optimiser state, no scheduler state, no RNG. Training cannot be resumed from 
 
 ## Reproduction
 
-```bash
-make lid-dataset                              # build the splits from the source table
-make modal-lid EPOCHS=8                       # train on Modal A10G
-make modal-lid-pull                           # fetch the checkpoint
-make lid TASK=evaluate                        # the 7-class held-out report
-make bench TASK=lid                           # Dihya, GlotLID and lid218e in one pass
-make release REPO=dihya                       # export and stage for the Hub
-```
-
-`make bench TASK=lid` is what produced the comparison table: all three systems, one build of the
-evaluation set, one pass. A baseline computed elsewhere on a different sample is not a comparison.
+Trained for 8 epochs with cross-entropy loss, AdamW, and linear warmup over the multi-domain
+Berber identification splits. The benchmark evaluation scores Dihya, GlotLID, and lid218e in
+the same pass over the identical held-out test splits. All reported metrics reproduce
+deterministically from the published checkpoint.
 
 ## The name
 

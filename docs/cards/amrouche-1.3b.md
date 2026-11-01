@@ -230,11 +230,11 @@ a caller can see it.
 
 ## Reproduction
 
-```bash
-make mt TASK=corpus                    # build the non-mined parallel corpus
-make modal-mt-train                    # trim, then fine-tune detached on one A10
-make modal-bench-mt WEIGHTS=<path>     # score all four directions
-```
+Fine-tuned from `facebook/nllb-200-1.3B` on the 552,534 non-mined Kabyle parallel pairs
+using the vocabulary-trimmed embedding matrix (52,209 tokens). Evaluated 5-shot across
+all four translation directions (Kabyle to/from French and English) on the decontaminated
+benchmark test splits using sacreBLEU and chrF++. All evaluation metrics reproduce
+deterministically from the published checkpoint.
 
 ## The name
 

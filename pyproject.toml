@@ -334,10 +334,21 @@ ignore = [
 # Generated protobuf classes expose fields dynamically, so typed boundary checks use getattr.
 # PLR0915 keeps the corpus write/verify/rename transaction in one auditable function.
 "src/agbalu/encoder/corpus.py" = ["B009", "PLR0915"]
+# SentencePiece creates protobuf message classes dynamically; its stubs omit their attributes.
+"src/agbalu/restoration/alignment.py" = ["B009"]
 # Each batch setting and optimizer-update collaborator is an independent contract.
 "src/agbalu/encoder/batches.py" = ["PLR0913"]
 # Keep the ordered training/evaluation/checkpoint state transitions in the same loop.
 "src/agbalu/encoder/training.py" = ["PLR0913", "PLR0912", "PLR0915"]
+# Keep each restoration artifact transaction and ordered training/recovery loop together.
+"src/agbalu/restoration/corpus.py" = ["PLR0912", "PLR0915"]
+"src/agbalu/restoration/training.py" = ["PLR0912", "PLR0915"]
+# Keep packing allocations and their aligned writes in one auditable batch operation.
+"src/agbalu/restoration/dataset.py" = ["PLR0915"]
+# Evaluation exposes independent mode, fold and optional calibration controls as keyword arguments.
+"src/agbalu/restoration/evaluation.py" = ["PLR0913"]
+# Rendering takes four independent label sequences plus persistent streaming state.
+"src/agbalu/restoration/decoding.py" = ["PLR0913"]
 # PLR0913: `select` takes the pool, the two exclusion sets, the size and the three
 #          constants that define the set's shape — length floor, speaker cap and seed.
 #          Each is a separate decision a reviewer has to be able to see and a test has to

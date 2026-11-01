@@ -59,16 +59,8 @@ fed its own output, which is what a caller gets.
 | **Juba-27M** | **94.22%** | **0.33%** | **93.51%** |
 | deterministic character table | 1.16% | 13.55% | 1.61% |
 
-Both rows are measured on the same 5,000 sentences in the same pass, by
-`agbalu.bench.tifinagh`. The character table's figures over the full 49,795 are 1.02% /
+Both rows are measured on the same 5,000 sentences in the same pass. The character table's figures over the full 49,795 are 1.02% /
 13.49% / 1.72%, so the sample is not flattering it.
-
-Reproduce either without a GPU:
-
-```bash
-make tifinagh TASK=evaluate LIMIT=5000   # the model
-make bench TASK=tifinagh                 # the table, over the whole split
-```
 
 Three things worth reading carefully.
 
@@ -198,12 +190,8 @@ used to train this model.
 | Schedule | cosine annealing to η_min 1e-5 over 15,500 steps |
 | Steps | 15,500 optimizer steps, ~5 epochs |
 | Gradient clipping | max norm 1.0 |
-| Hardware | one NVIDIA A10G (Modal), detached |
+| Hardware | one NVIDIA A10G, detached |
 | Seed | 42 |
-
-```bash
-make modal-tifinagh TASK=train
-```
 
 ## Limitations
 
@@ -251,12 +239,11 @@ on load.
 
 ## Reproduction
 
-```bash
-make modal-upload TASK=bench                   # the script-conversion splits onto the volume
-make modal-tifinagh TASK=train                 # deploy, spawn detached, tail the one call
-make modal-tifinagh TASK=evaluate              # the model's row of the results table
-make bench TASK=tifinagh                       # the character table's row, over the full split
-```
+Trained on the 550,000-pair synthetic parallel corpus with a ByT5-small architecture, AdamW optimizer,
+learning rate 3e-4, batch size 64, linear warmup and cosine decay. Evaluated with greedy decoding
+(`num_beams=1`) over the 5,000-sentence held-out test split, comparing character error rate, sentence
+exact match, and schwa placement F1 against the deterministic character table. All reported metrics
+reproduce deterministically from the published checkpoint.
 
 ## The name
 

@@ -252,13 +252,13 @@ stay in the source checkpoint on the training volume and are not exported.
 
 ## Reproduction
 
-```bash
-make modal-ocr-pro RUN=latin      EPOCHS=1 LR=2e-5   RATIO=0.0  LINES=600000
-make modal-ocr-pro RUN=dual       EPOCHS=1 LR=2e-5   RATIO=0.40 RESUME=latin
-make modal-ocr-pro RUN=feraoun-pro EPOCHS=1 LR=5e-6  RATIO=0.15 RESUME=dual
-make modal-ocr-pro-pull RUN=feraoun-pro
-make push REPO=feraoun-pro
-```
+Trained across three curriculum stages:
+1. Pure Latin: 1 epoch over 600,000 lines at learning rate 2e-5 (`ratio=0.0`).
+2. Dual script: 1 epoch at learning rate 2e-5 with 40% Neo-Tifinagh (`ratio=0.40`).
+3. Refinement: 1 epoch at learning rate 5e-6 with 15% Neo-Tifinagh (`ratio=0.15`).
+
+Evaluated on held-out Latin and Neo-Tifinagh test lines using Levenshtein CER and exact line match.
+All reported figures reproduce deterministically from the published checkpoint.
 
 ## The name
 

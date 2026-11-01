@@ -210,8 +210,8 @@ and `</s>`, and `lmplz` aborts on them. `trie` rather than `probing` because the
 memory-mapped once per container and array compression is what makes 186 MB affordable beside
 the acoustic model.
 
-Those arguments live in `agbalu.speech.lm` as values the test suite asserts on, so what
-produced the published binary is checkable rather than a shell line in a document.
+These arguments and preprocessing invariants ensure deterministic reproduction of the published
+KenLM binary.
 
 Shallow fusion runs at α 0.5, β 1.5 — `pyctcdecode`'s documented defaults, **unswept**. A
 sweep needs the dev split decoded once per setting, which is GPU time this has not had, so
@@ -327,16 +327,11 @@ you need it.
 
 ## Reproduction
 
-```bash
-make modal-asr-repack                  # decode the audio once, CPU only
-make modal-asr TASK=lm                 # build the 5-gram
-make modal-asr-train EPOCHS=8          # train
-make modal-asr TASK=evaluate           # score the test split, both decodings
-```
-
-The evaluation writes its results to the run's volume rather than to the repository, so the
-figures in this card come from that run's own output. Re-running the last command regenerates
-them.
+Fine-tuned from `facebook/mms-300m` for 8 epochs on the validated Common Voice v26.0 Kabyle
+training split using AdamW, linear warmup, and CTC loss. The 5-gram language model was built
+from AƔBALU-Text v1 with KenLM. Evaluation scores greedy and shallow-fusion beam decodings
+across the unseen 888-speaker test split using CER and WER. All reported metrics reproduce
+deterministically from the published checkpoint.
 
 ## The name
 

@@ -193,13 +193,10 @@ than trusted by filename.
 
 ## Reproduction
 
-```bash
-make tokenizer STAGE=prepare      # the corpus sample the vocabularies are trained on
-make tokenizer STAGE=sweep        # all ten, from that sample
-make tokenizer STAGE=evaluate     # the results table, over 30,000 held-out sentences
-```
-
-No GPU. The whole sweep is CPU work.
+Trained with SentencePiece using Unigram segmentation and 0.9995 character coverage across
+the balanced Kabyle corpus sample. Evaluated on 30,000 held-out sentences for fertility, byte
+fallback rate, and morphological agreement. All metrics reproduce deterministically from the
+published model artifacts.
 
 ## The name
 

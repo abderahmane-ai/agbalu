@@ -192,11 +192,6 @@ Stage 1 validation curve (monotone, decelerating -- the last two epochs bought 0
 | Checkpoint | `epoch_2nd_00003.pth` |
 | Validation loss | **0.3475** |
 
-```bash
-make modal-matoub TASK=prepare ARM=restored
-make modal-matoub TASK=stage2 ARM=restored VOICE=kab_male EPOCHS=5
-```
-
 **Stage 2 (`kab_female`) is not yet published.** The female voice requires a separate Stage 2 run; the checkpoint published here covers only the male voice.
 
 ## Limitations
@@ -238,24 +233,11 @@ because none of them produces anything at inference.
 
 ## Reproduction
 
-```bash
-make modal-matoub TASK=pull                       # the training checkpoint
-make modal-matoub-reference                       # list the voice's restored clips
-make modal-matoub-reference CLIP=<the first>.wav  # the clip the speaker style is taken from
-make push REPO=matoub                             # export, stage, verify, upload
-```
+Trained in two stages on restored 24 kHz Common Voice Kabyle speech:
+- Stage 1: joint acoustic and duration training across voices for 6 epochs.
+- Stage 2: speaker-specific adaptation on the selected male voice (`kab_male`) for 4 epochs (13,944 iterations) reaching validation loss 0.3475.
 
-The export bakes the speaker style into the weights, and that style is a function of one
-restored clip — the alphabetically first in the voice's directory. Its name is a Common
-Voice clip id and is not derivable, which is why the listing step exists.
-
-Full training reproduction:
-
-```bash
-make modal-matoub TASK=prepare ARM=restored
-make modal-matoub TASK=stage1 ARM=restored EPOCHS=6
-make modal-matoub TASK=stage2 ARM=restored VOICE=kab_male EPOCHS=6
-```
+The reference speaker style is extracted from the canonical restored reference clip. All reported synthesis results reproduce deterministically from the published checkpoint.
 
 ## The name
 

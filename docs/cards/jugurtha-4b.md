@@ -127,7 +127,7 @@ across seven general-purpose English and French benchmarks.
 
 ## Results
 
-Evaluated on an NVIDIA H100 NVL MIG slice (`lm-eval` 0.4.13). Translation scored 5-shot against the
+Evaluated with `lm-eval` (v0.4.13). Translation scored 5-shot against the
 orthographically corrected FLORES+ `kab_Latn` reference ([`agbalu/KabBench`](https://huggingface.co/datasets/agbalu/KabBench)).
 
 ### Kabyle & multilingual
@@ -258,7 +258,6 @@ Jugurtha-4B was trained on three streams:
 
 | | |
 |---|---|
-| **Hardware** | Single NVIDIA H100 NVL MIG (`3g.47gb`) |
 | **Training** | Continued pretraining on 800.8M tokens and supervised fine-tuning on curated Kabyle dialogues |
 
 ## Limitations

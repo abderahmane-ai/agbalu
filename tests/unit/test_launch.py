@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shlex
+import shutil
 from pathlib import Path
 
 import pytest
@@ -33,6 +34,7 @@ class TestCommands:
         assert not any(
             "data/processed/dihya" in argument for command in commands for argument in command
         )
+
     def test_remote_commands_start_from_the_environment_preamble(self) -> None:
         command = launch.remote("true")
         assert command[:4] == ["ssh", "-o", "ConnectTimeout=15", "hpc"]
@@ -289,3 +291,46 @@ def test_only_encoder_smokes_have_a_bounded_runtime() -> None:
     )
     assert not launch.module(["__encoder__", "train"]).startswith("timeout")
     assert not launch.module(["smoke"]).startswith("timeout")
+
+
+def test_restoration_training_uses_the_native_family() -> None:
+    args = launch.build_parser().parse_args(["train", "--family", "restoration", "--run", "belaid"])
+    assert launch.job(args) == (
+        "belaid",
+        ["__restoration__", "train", "--run", "belaid"],
+        "belaid/log.txt",
+        [],
+    )
+    assert "agbalu.restoration.cli" in launch.module(["__restoration__", "train"])
+    assert launch.module(["__restoration__", "smoke"]).startswith("timeout")
+    assert not launch.module(["__restoration__", "train"]).startswith("timeout")
+
+
+def test_restoration_data_preparation_has_a_separate_run() -> None:
+    args = launch.build_parser().parse_args(["data", "--family", "restoration"])
+    assert launch.job(args) == (
+        "restoration-data",
+        ["__restoration__", "prepare", "--run", "restoration-data"],
+        "restoration-data/log.txt",
+        [],
+    )
+
+
+@pytest.mark.integration
+def test_pull_keeps_evaluation_reports_while_excluding_checkpoint_directories(
+    tmp_path: Path,
+) -> None:
+    if shutil.which("rsync") is None:
+        pytest.skip("rsync is unavailable")
+    source, destination = tmp_path / "source", tmp_path / "destination"
+    checkpoint = source / "step-0000100-123"
+    checkpoint.mkdir(parents=True)
+    (checkpoint / "training.pt").write_bytes(b"weights")
+    reports = source / "evaluations"
+    reports.mkdir()
+    (reports / "step-0000100.stats.json").write_text('{"score": 0.5}\n')
+    launch.execute(["rsync", "-a", *launch.WEIGHT_EXCLUDES, f"{source}/", str(destination)])
+    assert not (destination / checkpoint.name).exists()
+    assert (
+        destination / "evaluations" / "step-0000100.stats.json"
+    ).read_text() == '{"score": 0.5}\n'

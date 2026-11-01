@@ -196,12 +196,8 @@ pass.
 
 ## Reproduction
 
-```bash
-make release-kabliterary
-```
-
-The dataset is assembled by `tools.build_kabliterary` from the verified texts in
-`artifacts/translations/` and `data/documents/`.
+The dataset is assembled from verified Kabyle literary translations with per-document
+checksums, metadata provenance, and normalized character encodings.
 
 ## Citation
 

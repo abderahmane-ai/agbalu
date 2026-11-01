@@ -218,7 +218,6 @@ corpora, the weights licence does not relicense the underlying texts:
 | Updates | **28,731** updates (3,918,417,150 tokens consumed) |
 | Throughput | 42,046 tokens/sec sustained |
 | Precision | BF16 mixed precision, `torch.compile` + FlexAttention |
-| Hardware | 1× NVIDIA H100 SXM 80GB (MIG 3g.47gb partition) |
 | Seed | 20261030 |
 
 ### Pretraining loss

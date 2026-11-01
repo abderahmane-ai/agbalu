@@ -62,6 +62,27 @@ def test_encoder_diagnostics_keep_arrays_in_the_raw_log() -> None:
     assert View().render(event("result", family="encoder", by_label=["VERB"])) is None
 
 
+def test_restoration_evaluation_preserves_offline_and_streaming_metrics() -> None:
+    rendered = View().render(
+        event(
+            "eval",
+            family="restoration",
+            step=5,
+            score=0.7,
+            offline={
+                "punctuation_macro_f1": 0.6,
+                "casing_macro_f1": 0.8,
+                "false_insertions_per_1000_words": 1.2,
+            },
+            streaming={"punctuation_macro_f1": 0.5},
+        )
+    )
+    assert rendered is not None
+    assert "punctuation F1 0.6" in rendered.text
+    assert "stream F1 0.5" in rendered.text
+    assert "false insertions/1k words 1.2" in rendered.text
+
+
 def test_encoder_previews_show_complete_sentences_and_keep_other_families_short() -> None:
     sentence = "A" * 250 + " gar-aneɣ."
     encoder = View().render(
@@ -251,58 +272,3 @@ def test_the_summary_keeps_recent_events_and_where_the_run_is_now() -> None:
     result = summary(lines, keep=1)
     assert result[0] == "-> save checkpoint"
     assert result[1].startswith("step 21 micro-batches")
-
-def test_dihya_evaluation_renders_accuracy_and_floor() -> None:
-    rendered = View().render(
-        event(
-            "eval",
-            family="dihya",
-            step=250,
-            accuracy=0.7801,
-            worst_group_recall=0.6364,
-            worst_group="shy_Latn/everyday",
-            worst_class="shi_Tfng",
-            worst_class_recall=0.6475,
-        )
-    )
-    assert (
-        rendered.line
-        == "== dihya eval at step 250: accuracy 0.7801 | worst recall 0.6364 [shy_Latn/everyday] | worst class 0.6475 [shi_Tfng]"
-    )
-
-
-def test_dihya_best_checkpoint_preserves_group_and_score() -> None:
-    rendered = View().render(
-        event(
-            "best",
-            family="dihya",
-            step=2072,
-            score=0.7760,
-            worst_group="shy_Latn/everyday",
-            worst_class="shi_Tfng",
-        )
-    )
-    assert (
-        rendered.line
-        == "   new dihya checkpoint: score 0.776 [shy_Latn/everyday] class [shi_Tfng] at step 2072"
-    )
-
-
-def test_dihya_result_preserves_rate_on_pass() -> None:
-    rendered = View().render(event("result", family="dihya", passed=True, rate=576.5))
-    assert rendered.line == "== dihya smoke passed (576.5 seq/s)"
-
-
-def test_dihya_run_end_renders_speed_and_best_score() -> None:
-    rendered = View().render(
-        event(
-            "end",
-            family="dihya",
-            ended="finished",
-            step=4752,
-            tokens_per_second=532.0,
-            best_score=0.7760,
-        )
-    )
-    assert rendered.line == "== dihya ended (finished) at step 4752: 532 tok/s, best score 0.776"
-

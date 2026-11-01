@@ -204,7 +204,6 @@ Jugurtha-2-9B was trained on three streams:
 
 | | |
 |---|---|
-| **Hardware** | Single NVIDIA H100 NVL MIG (`3g.47gb`) |
 | **Training** | Continued pretraining on the 9B text tower and supervised fine-tuning on curated Kabyle dialogues |
 
 ## Limitations

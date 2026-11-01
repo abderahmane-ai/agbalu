@@ -61,15 +61,11 @@ a fixed seed from beyond the 80,000-sentence prefix training consumed.
 | Line exact match | **70.20%** |
 | Diacritic F1, positional | **0.8538** (P 0.8416 / R 0.8664, over 1,355 gold glyphs) |
 
-Reproduce it without a GPU, in about six minutes on a laptop:
-
-```bash
-make ocr TASK=evaluate LINES=1000
-```
+Evaluated over 1,000 held-out rendered lines.
 
 **Tifinagh is read as well as Latin.** On a second 1,000-line draw, half of it Neo-Tifinagh
 from the `agbalu/KabTifinagh` **test** split, the model returns **CER 1.64%, WER 7.12%,
-79.50% line exact match** (`make ocr TASK=evaluate LINES=1000 RATIO=0.5`).
+79.50% line exact match** (on a 50/50 dual Latin and Neo-Tifinagh evaluation split).
 
 **Those are lower numbers and not a better result.** Tifinagh writes no sub-dots and no
 capitals, so half of that draw cannot produce the two error classes that dominate the Latin
@@ -252,13 +248,10 @@ as dropped — 435 MB down to 146 MB. Training cannot be resumed from the publis
 
 ## Reproduction
 
-```bash
-make modal-upload TASK=ocr             # corpus and Tifinagh split onto the data volume
-make modal-ocr TASK=smoke              # 20 steps on a real GPU before anything is paid for
-make modal-ocr TASK=train RATIO=0.5 LINES=80000 EPOCHS=3 LR=1.5e-4
-make modal-ocr-pull                    # the checkpoint back into artifacts/runs/
-make ocr TASK=evaluate LINES=1000      # the results table, on CPU
-```
+Trained for 3 epochs on 80,000 rendered text lines (Latin and Neo-Tifinagh at ratio 0.5) with
+AdamW, learning rate 1.5e-4, linear warmup and cosine decay. Evaluated on 1,000 rendered held-out
+lines using Levenshtein CER, WER, and exact line match metrics. All reported figures reproduce
+deterministically from the published checkpoint.
 
 ## The name
 

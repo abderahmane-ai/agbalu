@@ -313,7 +313,7 @@ never read at inference.
 | schedule | 8 epochs, 4,752 steps; batch 16 cells × 12 rows |
 | published checkpoint | step 2,072, selected on dev selection score |
 | dev score there | 0.9157 macro-F1, 0.6364 worst-group recall |
-| hardware | School HPC (one H100 MIG 3g.47gb, free), 24.8 minutes at 532 seq/s |
+| training time | 24.8 minutes at 532 seq/s |
 
 Five objectives address long-tail imbalance, domain collapse, and multi-script structure:
 1. **LDAM margins** for the long tail — $m_k = C / n_k^{1/4}$ ([Cao et al., NeurIPS 2019](https://arxiv.org/abs/1906.07413)).

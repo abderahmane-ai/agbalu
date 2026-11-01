@@ -185,6 +185,7 @@ def module(arguments: Sequence[str]) -> str:
         return " ".join(arguments[1:])
     families = {
         "__encoder__": "agbalu.encoder.cli",
+        "__restoration__": "agbalu.restoration.cli",
         "__dihya__": "agbalu.dihya.cli",
     }
     marker = arguments[0] if arguments else ""
@@ -193,6 +194,8 @@ def module(arguments: Sequence[str]) -> str:
     command = " ".join([PYTHON, "-m", package, *(shlex.quote(a) for a in selected)])
     if marker in families and selected and selected[0] == "smoke":
         return f"timeout --signal=TERM --kill-after=30s 840s {command}"
+    if marker == "__restoration__" and selected and selected[0] == "prepare":
+        return f"timeout --signal=TERM --kill-after=30s 1800s {command}"
     return command
 
 
@@ -266,7 +269,8 @@ def status_script(run: str, lines: int) -> str:
         " || echo 'session: not running');"
         f" echo {BASELINE_MARKER}; {baseline_command(run)};"
         f" echo {LOG_MARKER}; tail -n {lines} {runs}/log.txt 2>/dev/null;"
-        f" echo {CHECKPOINT_MARKER}; find {runs} -maxdepth 2 \\( -type d -name 'step-*' -o -name '*.pt' \\) "
+        f" echo {CHECKPOINT_MARKER}; "
+        f"find {runs} -maxdepth 2 \\( -type d -name 'step-*' -o -name '*.pt' \\) "
         "2>/dev/null | sort | tail -n 3;"
         f" echo {ROLES_MARKER}; {PYTHON} -c {shlex.quote(roles)}"
     )
@@ -418,6 +422,18 @@ def sync_encoder() -> None:
         stamp_file.unlink()
     print("synced encoder code, Mammeri and treebank; existing HPC corpus preserved")
 
+
+def sync_restoration() -> None:
+    """Sync restoration sources while retaining the HPC's tokenizer, corpus and checkpoints."""
+    execute(code_sync())
+    stamp_file = stamp()
+    try:
+        execute(["rsync", "-az", str(stamp_file), f"{HOST}:{REMOTE_ROOT}/{STAMP_FILE}"])
+    finally:
+        stamp_file.unlink()
+    print("synced restoration code; existing HPC data and pretrained checkpoints preserved")
+
+
 def sync_dihya() -> None:
     """Sync Dihya-22M code and sources without replacing the HPC's existing data."""
     execute(code_sync())
@@ -453,7 +469,9 @@ def record(run: str, arguments: Sequence[str], log: str, then: Sequence[str] = (
 
 
 def start(run: str, arguments: Sequence[str], log: str, then: Sequence[str] = ()) -> None:
-    if arguments and arguments[0] == "__encoder__":
+    if arguments and arguments[0] == "__restoration__":
+        sync_restoration()
+    elif arguments and arguments[0] == "__encoder__":
         sync_encoder()
     elif arguments and arguments[0] == "__dihya__":
         sync_dihya()
@@ -515,7 +533,11 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--target", choices=("hpc",), default="hpc")
-    parser.add_argument("--family", choices=("llm", "encoder", "dihya"), default="llm")
+    parser.add_argument(
+        "--family",
+        choices=("llm", "encoder", "restoration", "dihya"),
+        default="llm",
+    )
     parser.add_argument("--run")
     parser.add_argument("--part")
     parser.add_argument("--models", nargs="+")
@@ -532,6 +554,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lr", type=float)
     parser.add_argument("--batch-tokens", type=int)
     parser.add_argument("--micro-tokens", type=int)
+    parser.add_argument("--micro-windows", type=int)
     parser.add_argument("--workers", type=int)
     parser.add_argument("--config")
     parser.add_argument("--stop", type=int, help="end the train invocation at this step")
@@ -575,7 +598,9 @@ def main(argv: list[str] | None = None) -> int:
             case "stop":
                 execute(remote(stop_script(require(args.run, "--run", "stop"))))
             case "sync":
-                if args.family == "encoder":
+                if args.family == "restoration":
+                    sync_restoration()
+                elif args.family == "encoder":
                     sync_encoder()
                 elif args.family == "dihya":
                     sync_dihya()
@@ -633,6 +658,8 @@ def job(args: argparse.Namespace) -> Job:  # noqa: PLR0912
                 f"{RUNS}/{run}/encbench_results.json",
             ]
         return run, cmd, f"{run}/log.txt", []
+    if args.family == "restoration":
+        return restoration_job(args)
     if args.family == "encoder":
         return encoder_job(args)
     if args.family == "dihya":
@@ -695,6 +722,31 @@ def encoder_job(args: argparse.Namespace) -> Job:
             arguments += ["--model", args.model]
     return run, arguments, f"{run}/log.txt", []
 
+
+def restoration_job(args: argparse.Namespace) -> Job:
+    run = require(
+        args.run or ("restoration-data" if args.action == "data" else None), "--run", args.action
+    )
+    action = "prepare" if args.action == "data" else args.action
+    if action not in {"prepare", "train", "smoke", "evaluate"}:
+        message = f"restoration does not support action {action!r}"
+        raise LaunchError(message)
+    arguments = ["__restoration__", action, "--run", run]
+    for flag, value in (
+        ("--part", args.part),
+        ("--config", args.config),
+        ("--workers", args.workers),
+        ("--micro-windows", args.micro_windows),
+        ("--stop-after", args.stop),
+        ("--model", args.model),
+    ):
+        if value is not None:
+            arguments += [flag, str(value)]
+    if action == "evaluate":
+        arguments += ["--suite", "dev" if args.suite == "exit" else args.suite]
+    return run, arguments, f"{run}/log.txt", []
+
+
 def dihya_job(args: argparse.Namespace) -> Job:
     run = require(
         args.run or ("dihya-data" if args.action == "data" else None), "--run", args.action
@@ -709,7 +761,6 @@ def dihya_job(args: argparse.Namespace) -> Job:
     if args.stop is not None:
         arguments += ["--stop-after", str(args.stop)]
     return run, arguments, f"{run}/log.txt", []
-
 
 
 SCREEN_FILE: Final = "screen.json"

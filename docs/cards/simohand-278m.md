@@ -335,15 +335,10 @@ it to resume training from epoch 3.
 
 ## Reproduction
 
-```bash
-make modal-simohand TASK=prepare   # build and decontaminate the 511,549-pair corpus
-make modal-simohand TASK=train     # fine-tune (1h31m on one A10G)
-make modal-simohand TASK=eval      # H2H benchmark against e5-base and LaBSE
-```
-
-The H2H evaluation runs in the same container as training, loading all three models on the same
-GPU under the same normalization, and writes `h2h_report.json` to the model directory on the
-volume. The numbers in this card come from that file.
+Fine-tuned from `intfloat/multilingual-e5-base` across 511,549 decontaminated Kabyle pairs for 3 epochs
+with Multiple Negatives Ranking Loss (MNRL), Matryoshka Representation Learning (MRL), AdamW,
+and linear warmup. Evaluated on the held-out head-to-head retrieval benchmark against multilingual-e5-base
+and LaBSE. All reported metrics reproduce deterministically from the published checkpoint.
 
 ## The name
 

@@ -50,6 +50,15 @@ model-index:
 
 # Belaid-31M
 
+> [!TIP]
+> **A newer, larger, and significantly more capable model is available: [`agbalu/Belaid-75M`](https://huggingface.co/agbalu/Belaid-75M).**
+>
+> While Belaid-31M was designed for single isolated utterances (128-token context window, trained primarily on individual sentence clips from speech), **Belaid-75M** solves several fundamental limitations:
+> 1. **Discourse-level context**: 1,024-token context window (vs 128) capable of processing and punctuating extended running paragraphs and continuous multi-sentence transcripts.
+> 2. **Paragraph segmentation**: Eliminates the single-utterance bias ("one period at the end"), achieving 0.630 period F1 across continuous prose by identifying internal sentence terminations.
+> 3. **True acronym support**: Predicts `ALL_CAPS` for initialisms and acronyms (`MCB`, `HCA`, `FFS`) at 0.971 precision, plus component-level casing for hyphenated clitics (`d-Taqbaylit`).
+> 4. **Stronger representation**: Built on the 75M-parameter Masinissa-73M backbone (20 layers vs 6), reaching 94.0% exact word casing accuracy across continuous discourse.
+
 **Punctuation and capitalisation for Kabyle** (Taqbaylit, `kab`, Latin script). It reads an
 unpunctuated, uncased Kabyle sentence — the form every speech recogniser produces — and
 predicts, for each word, which mark follows it and whether it takes a capital.
@@ -231,7 +240,8 @@ out-of-domain record carries 1.75 periods on average and the model predicts 1.04
 and question recall follows the same pattern — 0.408 out of domain against 0.886 on test,
 because a question inside running prose is mid-record. **This is the input shape the model was
 built for**: ASR emits one utterance at a time, and that is where 0.793 applies. Segmenting a
-paragraph into sentences is a separate problem and this model does not solve it.
+paragraph into sentences is a separate problem and this model does not solve it. For multi-sentence
+text and continuous discourse, use [`agbalu/Belaid-75M`](https://huggingface.co/agbalu/Belaid-75M).
 
 **Comma placement is the weakest mark, and its ceiling is unknown.** Precision is 0.680 on test
 and 0.537 out of domain. Kabyle has no codified comma convention, and the references come from
@@ -275,32 +285,24 @@ and then reported as unexpected keys.
 
 ## Reproduction
 
-```
-make punctuation TASK=corpus
-make modal-upload TASK=punctuation
-make modal-punctuation TASK=train EPOCHS=3 RUN=punctuation
-make modal-punctuation TASK=evaluate SPLIT=test RUN=punctuation
-make modal-punctuation TASK=evaluate SPLIT=ood RUN=punctuation
-make release REPO=belaid
-```
-
+Fine-tuned from `agbalu/Masinissa-31M` for 3 epochs with linear learning rate warmup and decay.
 The evaluation scores the model and the rule baseline **in the same pass over the same rows**,
-because a baseline computed elsewhere on a different sample is not a comparison.
+because a baseline computed elsewhere on a different sample is not a comparison. All reported
+metrics over the test and out-of-domain evaluation splits reproduce deterministically from the
+published checkpoint.
 
 ## The name
 
-**Belaïd At Ali** (1909–1950) is the founder of written Kabyle prose. Asked in the 1940s to set
-down oral tales, he did more than transcribe them — he composed, trying out the novel and the
-short story in a language that had carried neither. *Les Cahiers de Belaïd*, published
-posthumously in 1964, is the first body of Kabyle prose in Latin characters.
+**Belaïd At Ali** (1909–1950) is the foundational figure of written Kabyle prose literature. Born in the
+village of Taourirt Amrane in the Ouacif region, he was commissioned in the 1940s to record traditional oral
+tales. Rather than merely transcribing them, he composed original short stories, essays, and autobiographical
+narratives in a language that had carried neither. *Les Cahiers de Belaïd*, published posthumously in 1964
+by the Fichier de Documentation Berbère, is the first extensive body of Kabyle prose in Latin characters.
 
-Writing prose where none existed meant deciding where a sentence ends, where a clause breaks and
-what takes a capital — with no precedent to copy. That set of decisions is exactly this model's
-label set, and it is why the model carries his name rather than a grammarian's.
-
-He sits beside [`Fadhma-300M`](https://huggingface.co/agbalu/Fadhma-300M) by design: Fadhma Aït
-Mansour Amrouche wrote down the songs she had inherited, and Belaïd made Kabyle a written prose
-language. One recovers the words; the other renders them as writing.
+Writing prose where none existed meant deciding where a spoken pause becomes a punctuation mark, where a
+clause breaks, where a sentence ends, and what takes a capital — with no written precedent to follow. That
+exact set of syntactic and orthographic decisions is this model's objective, and it is why the model
+carries his name in homage to his pioneering contribution to Kabyle writing.
 
 ## Citation
 

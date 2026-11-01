@@ -132,8 +132,8 @@ A deterministic rule-based character mapper provides a baseline floor, but seque
 
 ## Evaluation protocol, and the floor
 
-Scored on the held-out test split by `agbalu.bench.tifinagh`, references case-folded
-because the model is defined over a case-folded alphabet.
+Scored on the held-out test split with case-folded references, because the transliteration
+model is defined over a case-folded alphabet.
 
 | direction | system | sentences | exact match | CER | schwa F1 |
 |---|---|---|---|---|---|

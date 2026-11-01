@@ -223,6 +223,20 @@ class View:
         )
 
     def on_eval(self, event: dict[str, object]) -> Rendered:
+        if event.get("family") == "restoration":
+            offline = event.get("offline")
+            streaming = event.get("streaming")
+            offline = offline if isinstance(offline, dict) else {}
+            streaming = streaming if isinstance(streaming, dict) else {}
+            return Rendered(
+                f"== restoration eval at step {event.get('step')}: "
+                f"punctuation F1 {offline.get('punctuation_macro_f1')}"
+                f" | stream F1 {streaming.get('punctuation_macro_f1')}"
+                f" | casing F1 {offline.get('casing_macro_f1')}"
+                f" | false insertions/1k words {offline.get('false_insertions_per_1000_words')}"
+                f" | selection {event.get('score')}",
+                live=False,
+            )
         if event.get("family") == "encoder":
             health, tasks = event.get("mlm"), event.get("downstream")
             health = health if isinstance(health, dict) else {}
@@ -234,6 +248,19 @@ class View:
             return Rendered(
                 f"== encoder eval at step {event.get('step')}: "
                 f"MLM CE {health.get('ce')} | accuracy {health.get('accuracy')}{score}",
+                live=False,
+            )
+        if event.get("family") == "dihya":
+            acc = event.get("accuracy")
+            w_rec = event.get("worst_group_recall")
+            worst_grp = event.get("worst_group")
+            w_cls = event.get("worst_class")
+            w_cls_rec = event.get("worst_class_recall")
+            grp_str = f" [{worst_grp}]" if worst_grp else ""
+            cls_str = f" | worst class {w_cls_rec} [{w_cls}]" if w_cls else ""
+            return Rendered(
+                f"== dihya eval at step {event.get('step')}: "
+                f"accuracy {acc} | worst recall {w_rec}{grp_str}{cls_str}",
                 live=False,
             )
         scores = event.get("bpc")
@@ -271,6 +298,12 @@ class View:
         )
 
     def on_best(self, event: dict[str, object]) -> Rendered:
+        if event.get("family") == "restoration":
+            return Rendered(
+                f"   new restoration checkpoint: score {event.get('score')}"
+                f" at step {event.get('step')}",
+                live=False,
+            )
         if event.get("family") == "encoder":
             return Rendered(
                 f"   new deployment checkpoint: POS {event.get('score')}"
@@ -327,6 +360,13 @@ class View:
         )
 
     def on_result(self, event: dict[str, object]) -> Rendered | None:
+        if event.get("family") == "restoration":
+            return Rendered(
+                "== restoration checks passed"
+                if event.get("passed") is True
+                else "== restoration task completed",
+                live=False,
+            )
         if event.get("family") == "encoder":
             return (
                 Rendered("== encoder checks passed", live=False)
@@ -345,6 +385,12 @@ class View:
     def on_end(self, event: dict[str, object]) -> Rendered:
         rate = event.get("tokens_per_second")
         speed = f"{rate:,.0f} tok/s" if isinstance(rate, int | float) else "-"
+        if event.get("family") == "restoration":
+            return Rendered(
+                f"== restoration ended ({event.get('ended')}) at step {event.get('step')}: {speed},"
+                f" best selection score {event.get('best_score')}",
+                live=False,
+            )
         if event.get("family") == "encoder":
             return Rendered(
                 f"== encoder ended ({event.get('ended')}) at step {event.get('step')}: {speed},"
