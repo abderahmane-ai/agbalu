@@ -44,6 +44,14 @@ model-index:
 
 # Dihya-5M
 
+> [!NOTE]
+> **A larger, broader upgrade is available: [`agbalu/Dihya-22M`](https://huggingface.co/agbalu/Dihya-22M).**
+> Dihya-22M expands the inventory from seven Latin-only classes to twenty-two classes across five scripts
+> (adding Neo-Tifinagh for all varieties, Algerian and Moroccan Darija in Arabic script and Arabizi, MSA,
+> and world languages). It raises overall accuracy from 85.52% to **91.90%**, resolves Dihya-5M's Kabyle
+> precision trade-off (rising from 0.626 to **0.900**), increases Central Atlas Tamazight recall from 0.660
+> to **0.948**, and cuts sibling leakage into Kabyle across the board.
+
 A 5.19M-parameter byte-level Conv-Transformer that separates six Latin-script Amazigh varieties
 from each other and from an explicit `NOT_AMAZIGH` rejection class: Kabyle (`kab_Latn`),
 Tashelhit (`shi_Latn`), Tarifit (`rif_Latn`), Tamasheq (`taq_Latn`), Central Atlas Tamazight

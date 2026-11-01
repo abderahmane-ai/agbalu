@@ -13,6 +13,26 @@ from agbalu.llm.decontaminate import FLORES_CORRECTED
 
 
 class TestCommands:
+    def test_report_pull_excludes_tensor_checkpoints(self) -> None:
+        excluded = set(launch.WEIGHT_EXCLUDES[1::2])
+        assert {"*.pt", "*.pth", "*.safetensors"} <= excluded
+        assert not any("stats.json" in pattern for pattern in excluded)
+
+    def test_dihya_sync_preserves_remote_processed_splits(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        commands: list[list[str]] = []
+        monkeypatch.setattr(launch, "execute", lambda command: commands.append(list(command)))
+        # File discovery is controlled so this unit test never touches actual datasets.
+        monkeypatch.setattr(Path, "is_file", lambda _path: False)
+        monkeypatch.setattr(Path, "is_dir", lambda _path: True)
+        monkeypatch.setattr(launch, "stamp", lambda: Path("scratch-stamp.json"))
+        monkeypatch.setattr(Path, "unlink", lambda _path: None)
+        launch.sync_dihya()
+        assert len(commands) == 2
+        assert not any(
+            "data/processed/dihya" in argument for command in commands for argument in command
+        )
     def test_remote_commands_start_from_the_environment_preamble(self) -> None:
         command = launch.remote("true")
         assert command[:4] == ["ssh", "-o", "ConnectTimeout=15", "hpc"]
@@ -211,7 +231,7 @@ class TestParser:
 
     def test_pull_leaves_every_kind_of_weights_behind(self) -> None:
         excluded = launch.WEIGHT_EXCLUDES[1::2]
-        assert set(excluded) == {"step-*", "best", "model"}
+        assert set(excluded) == {"step-*/", "best", "model", "*.pt", "*.pth", "*.safetensors"}
 
     def test_status_output_is_rendered_between_its_markers(self) -> None:
         step = (

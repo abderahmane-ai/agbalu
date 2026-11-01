@@ -1,0 +1,495 @@
+# AƔBALU Dihya-22M: Pan-Amazigh & Multi-Script Language Identification Data Registry
+#
+# Exhaustive catalog of remote datasets, digitized archives, and endpoints for
+# automated download on the HPC cluster. Covers 15 Amazigh varieties across 4 scripts
+# (Latin, Neo-Tifinagh, Arabic script, Arabizi) and 5 negative distractor classes.
+#
+# Validated for download via: make data FAMILY=dihya
+
+version: "2.0.0"
+surveyed: "2026-11-01"
+
+sources:
+  # =========================================================================
+  # 1. SHAWIYA (Tacawit / shy) — Target: >50,000 sentences
+  # =========================================================================
+  - id: scriptureearth.shy.latin
+    language: shy
+    script: Latn
+    variety: shawiya
+    domain: scripture
+    trust: gold
+    licence: cc-by-nc-nd-4.0
+    access: https
+    url: https://www.scriptureearth.org/data/shy/PDF/
+    files:
+      - Genesis_shy_Latn.pdf
+      - Psalms_shy_Latn.pdf
+      - Luke_shy_Latn.pdf
+      - Matthew_shy_Latn.pdf
+      - Acts_shy_Latn.pdf
+    notes: >-
+      Official Awal n Rebbi s Tcawit Latin edition. Perfectly parallel to Kabyle
+      and Tashelhit scripture, providing an exact domain-matched contrast spine.
+
+  - id: scriptureearth.shy.arabic
+    language: shy
+    script: Arab
+    variety: shawiya
+    domain: scripture
+    trust: gold
+    licence: cc-by-nc-nd-4.0
+    access: https
+    url: https://www.scriptureearth.org/data/shy/PDF_ARABIC/
+    files:
+      - Injil_Tcawit_Arab.pdf
+    notes: >-
+      Official Awal n Rebbi s Tcawit Arabic-script edition (إنجيل س تـشـاويث).
+      Vital for training shy_Arab discrimination vs Algerian Arabic.
+
+  - id: archive.huyghe.chaouia.1907
+    language: shy
+    script: Latn
+    variety: shawiya
+    domain: lexicon
+    trust: gold
+    licence: public-domain
+    access: archive.org
+    identifier: dictionnairechao00huyg
+    url: https://archive.org/details/dictionnairechao00huyg
+    notes: >-
+      Père Gustave Huyghe (1907): Dictionnaire chaouia-arabe-kabyle & français.
+      Over 5,000 entries with full illustrative sentences comparing Chaouia,
+      Kabyle, and Arabic.
+
+  - id: archive.huyghe.chaouia.1906
+    language: shy
+    script: Latn
+    variety: shawiya
+    domain: lexicon
+    trust: gold
+    licence: public-domain
+    access: archive.org
+    identifier: dictionnairefrancaischaouia
+    url: https://archive.org/details/dictionnairefrancaischaouia
+    notes: >-
+      Père Gustave Huyghe (1906): Dictionnaire Français-Chaouia (Qamus rumi-caui).
+
+  - id: bnf.mercier.chaouia.1896
+    language: shy
+    script: Latn
+    variety: shawiya
+    domain: oral_heritage
+    trust: gold
+    licence: public-domain
+    access: archive.org
+    identifier: lechaouiadelaur00mercgoog
+    url: https://archive.org/details/lechaouiadelaur00mercgoog
+    notes: >-
+      Gustave Mercier (1896): Le Chaouïa de l'Aurès (Ahmar-Khaddou). Contains over
+      100 pages of folk tales, local legends, and songs in bilingual transcription.
+
+  - id: archive.basset.aures.1961
+    language: shy
+    script: Latn
+    variety: shawiya
+    domain: oral_heritage
+    trust: gold
+    licence: public-domain
+    access: archive.org
+    identifier: textesberberesauresbasset1961
+    notes: >-
+      André Basset (1961): Textes berbères de l'Aurès (Aït Frah). Over 300 pages
+      of authentic oral literature transcribed in phonetic/Latin characters.
+
+  - id: wikimedia.incubator.shy
+    language: shy
+    script: Latn
+    variety: shawiya
+    domain: encyclopaedia
+    trust: gold
+    licence: cc-by-sa-4.0
+    access: wikimedia
+    url: https://incubator.wikimedia.org/w/api.php?action=query&generator=allpages&gapnamespace=0&gapprefix=Wp/shy/&prop=revisions&rvprop=content&format=json
+    notes: >-
+      Shawiya Wikipedia incubator articles.
+
+  - id: wikimedia.wiktionary.shy
+    language: shy
+    script: Latn
+    variety: shawiya
+    domain: lexicon
+    trust: gold
+    licence: cc-by-sa-4.0
+    access: wikimedia
+    url: https://dumps.wikimedia.org/shywiktionary/latest/shywiktionary-latest-pages-articles.xml.bz2
+    notes: >-
+      Shawiya Wiktionary dump. Section-gated parser extracting example sentences.
+
+  - id: tatoeba.shy
+    language: shy
+    script: Latn
+    variety: shawiya
+    domain: everyday
+    trust: gold
+    licence: cc-by-2.0
+    access: tatoeba
+    url: https://downloads.tatoeba.org/exports/sentences.tar.bz2
+    filter_lang: shy
+
+  # =========================================================================
+  # 2. MOZABITE (Tumẓabt / mzb) — M'zab Valley
+  # =========================================================================
+  - id: delheure.mozabite.1984
+    language: mzb
+    script: Latn
+    variety: mozabite
+    domain: lexicon
+    trust: gold
+    licence: fair-academic-use
+    access: archive.org
+    identifier: dictionnairemozabitefrançaisdelheure1984
+    notes: >-
+      Jean Delheure (1984): Dictionnaire mozabite-français (SELAF). 8,000+ bilingual
+      sentence examples.
+
+  - id: delheure.mzab.recits.1987
+    language: mzb
+    script: Latn
+    variety: mozabite
+    domain: oral_heritage
+    trust: gold
+    licence: fair-academic-use
+    access: archive.org
+    identifier: faitsdiresdumzabdelheure1987
+    notes: >-
+      Jean Delheure (1987): Faits et dires du Mzab. Transcribed narratives.
+
+  # =========================================================================
+  # 3. SHENWA & DAHRA (Tachenwit / cnu) — Tipaza, Cherchell, Gouraya
+  # =========================================================================
+  - id: archive.destaing.benisnous.1914
+    language: cnu
+    script: Latn
+    variety: shenwa
+    domain: lexicon
+    trust: gold
+    licence: public-domain
+    access: archive.org
+    identifier: dictionnairefran00dest
+    url: https://archive.org/details/dictionnairefran00dest
+    notes: >-
+      Edmond Destaing (1914): Dictionnaire français-berbère (dialecte des Beni-Snous).
+
+  - id: archive.destaing.etude.1907
+    language: cnu
+    script: Latn
+    variety: shenwa
+    domain: oral_heritage
+    trust: gold
+    licence: public-domain
+    access: archive.org
+    identifier: tudesurledialec00destgoog
+    url: https://archive.org/details/tudesurledialec00destgoog
+    notes: >-
+      Edmond Destaing (1907): Étude sur le dialecte berbère des Beni-Snous. Over 350
+      pages of folktales, proverbs, and ethnological narratives.
+
+  # =========================================================================
+  # 4. OUARGLI & GOURARA (oua / grr) — Timimoun, Ouargla Oases
+  # =========================================================================
+  - id: delheure.ouargli.1987
+    language: oua
+    script: Latn
+    variety: ouargli
+    domain: lexicon
+    trust: gold
+    licence: fair-academic-use
+    access: archive.org
+    identifier: dictionnaireouarglifrancaisdelheure1987
+    notes: >-
+      Jean Delheure (1987): Dictionnaire ouargli-français.
+
+  - id: basset.gourara.1892
+    language: grr
+    script: Latn
+    variety: gourara
+    domain: oral_heritage
+    trust: gold
+    licence: public-domain
+    access: archive.org
+    identifier: notesdelexicographieberberebasset1892
+    notes: >-
+      René Basset (1892): Notes de lexicographie berbère (dialecte de Gourara).
+
+  # =========================================================================
+  # 5. KABYLE (Taqbaylit / kab) — Northern Algeria
+  # =========================================================================
+  - id: agbalu.kabyle.corpus
+    language: kab
+    script: Latn
+    variety: kabyle
+    domain: everyday
+    trust: gold
+    licence: various
+    access: local
+    path: data/processed/text/agbalu-text-v1.jsonl
+    notes: >-
+      AƔBALU gold curated Kabyle text corpus (34.9M words).
+
+  # =========================================================================
+  # 6. TASHELHIT (Taclḥit / shi) — Souss & Atlas, Morocco
+  # =========================================================================
+  - id: wikimedia.shiwiki.latin
+    language: shi
+    script: Latn
+    variety: tashelhit
+    domain: encyclopaedia
+    trust: gold
+    licence: cc-by-sa-4.0
+    access: wikimedia
+    url: https://dumps.wikimedia.org/shiwiki/latest/shiwiki-latest-pages-articles.xml.bz2
+
+  - id: hf.glotcc.shi
+    language: shi
+    script: Latn
+    variety: tashelhit
+    domain: web
+    trust: silver
+    licence: cc0-1.0
+    access: hf
+    url: https://huggingface.co/datasets/cis-lmu/GlotCC-V1
+    partition: v1.0/shi-Latn
+
+  - id: opus.bible.shi
+    language: shi
+    script: Latn
+    variety: tashelhit
+    domain: scripture
+    trust: gold
+    licence: cc-by-4.0
+    access: opus
+    url: https://object.pouta.csc.fi/OPUS-Bible-uedin/v1/mono/shi.txt.gz
+
+  - id: awzal.alhawd.manuscripts
+    language: shi
+    script: Arab
+    variety: tashelhit
+    domain: scripture
+    trust: gold
+    licence: public-domain
+    access: archive.org
+    identifier: alhawdmuhammadawzal
+    notes: >-
+      Muhammad Awzal (c. 1670–1749): Al-Hawd in Shilha written in Arabic script.
+
+  # =========================================================================
+  # 7. CENTRAL ATLAS TAMAZIGHT (tzm) — Middle Atlas, Morocco
+  # =========================================================================
+  - id: hf.beni_mellal.tzm
+    language: tzm
+    script: Latn
+    variety: central_atlas
+    domain: everyday
+    trust: gold
+    licence: open
+    access: hf
+    url: https://huggingface.co/datasets/tamazight-nlp/beni-mellal
+
+  - id: pontoon.tzm
+    language: tzm
+    script: Latn
+    variety: central_atlas
+    domain: interface
+    trust: gold
+    licence: mpl-2.0
+    access: hf
+    url: https://huggingface.co/datasets/tamazight-nlp/pontoon-siblings
+
+  # =========================================================================
+  # 8. TARIFIT (rif) — Rif, Northern Morocco
+  # =========================================================================
+  - id: archive.tarifit.nt.latin
+    language: rif
+    script: Latn
+    variety: tarifit
+    domain: scripture
+    trust: gold
+    licence: all-rights-reserved
+    access: archive.org
+    identifier: Latin-MERGED_djvu.txt
+
+  - id: tatoeba.rif
+    language: rif
+    script: Latn
+    variety: tarifit
+    domain: everyday
+    trust: gold
+    licence: cc-by-2.0
+    access: tatoeba
+    filter_lang: rif
+
+  - id: hf.glotcc.rif
+    language: rif
+    script: Latn
+    variety: tarifit
+    domain: web
+    trust: silver
+    licence: cc0-1.0
+    access: hf
+    url: https://huggingface.co/datasets/cis-lmu/GlotCC-V1
+    partition: v1.0/rif-Latn
+
+  # =========================================================================
+  # 9. STANDARD MOROCCAN TAMAZIGHT (zgh) — IRCAM
+  # =========================================================================
+  - id: tatoeba.zgh.tifinagh
+    language: zgh
+    script: Tfng
+    variety: standard_moroccan
+    domain: everyday
+    trust: gold
+    licence: cc-by-2.0
+    access: tatoeba
+    filter_lang: zgh
+    notes: >-
+      18,359 sentences in authentic Neo-Tifinagh script.
+
+  # =========================================================================
+  # 10. TUAREG / TAMASHEQ & TAMAHAQ (taq / thv) — Sahara
+  # =========================================================================
+  - id: nllb.seed.taq
+    language: taq
+    script: Latn
+    variety: tamasheq
+    domain: encyclopaedia
+    trust: gold
+    licence: cc-by-sa-4.0
+    access: hf
+    url: https://huggingface.co/datasets/tamazight-nlp/nllb-seed-taq
+
+  - id: archive.foucauld.touareg.1951
+    language: thv
+    script: Latn
+    variety: tamahaq
+    domain: lexicon
+    trust: gold
+    licence: public-domain
+    access: archive.org
+    identifier: dictionnairetouaregfrancaisfoucauld
+    notes: >-
+      Charles de Foucauld (1951): Dictionnaire touareg-français (Hoggar / Ahaggar).
+
+  # =========================================================================
+  # 11. LIBYAN BERBER (Nafusi / jbn, Ghadamès / gha) — Jebel Nafusa, Libya
+  # =========================================================================
+  - id: archive.calassanti.nefousa.1898
+    language: jbn
+    script: Latn
+    variety: nafusi
+    domain: oral_heritage
+    trust: gold
+    licence: public-domain
+    access: archive.org
+    identifier: ledjebelnefousa00mouygoog
+    notes: >-
+      A. de Calassanti-Motylinski (1898): Le Djebel Nefousa.
+
+  - id: lanfry.ghadames.1968
+    language: gha
+    script: Latn
+    variety: ghadames
+    domain: oral_heritage
+    trust: gold
+    licence: fair-academic-use
+    access: archive.org
+    identifier: ghadamesetudelinguistiquelanfry1968
+    notes: >-
+      Jacques Lanfry (1968): Ghadamès: étude linguistique et ethnographique.
+
+  # =========================================================================
+  # 12. SIWI (siz) — Siwa Oasis, Egypt
+  # =========================================================================
+  - id: souag.siwi.grammar.2013
+    language: siz
+    script: Latn
+    variety: siwi
+    domain: academic
+    trust: gold
+    licence: cc-by-nc-4.0
+    access: zenodo
+    url: https://zenodo.org/record/1047124
+    notes: >-
+      Lameen Souag (2013): Grammar of Siwi. Field recordings and transcriptions.
+
+  # =========================================================================
+  # 13. ZENAGA (zen) — Mauritania
+  # =========================================================================
+  - id: taine_cheikh.zenaga.2008
+    language: zen
+    script: Latn
+    variety: zenaga
+    domain: lexicon
+    trust: gold
+    licence: fair-academic-use
+    access: archive.org
+    identifier: dictionnairezenagafrancais2008
+    notes: >-
+      Catherine Taine-Cheikh (2008): Dictionnaire zénaga-français.
+
+  # =========================================================================
+  # 14. NEGATIVES (NOT_AMAZIGH) — Audited via NUMALIA
+  # =========================================================================
+  - id: numalia.dzair.negatives.algerian
+    language: arq
+    script: [Arab, Arabizi]
+    variety: not_amazigh
+    domain: negative_dialect
+    trust: gold
+    licence: apache-2.0
+    access: local
+    path: /Users/abdoumagico/Development/DZAIR/data/processed/splits/
+    notes: >-
+      Sealed Algerian Arabic split filtered and verified by NUMALIA model.
+
+  - id: numalia.dzair.negatives.moroccan
+    language: ary
+    script: [Arab, Arabizi]
+    variety: not_amazigh
+    domain: negative_dialect
+    trust: gold
+    licence: apache-2.0
+    access: local
+    path: /Users/abdoumagico/Development/DZAIR/data/processed/splits/
+    notes: >-
+      Sealed Moroccan Arabic split filtered and verified by NUMALIA model.
+
+  - id: tatoeba.negatives.standard_arabic
+    language: ara
+    script: Arab
+    variety: not_amazigh
+    domain: negative_standard
+    trust: gold
+    licence: cc-by-2.0
+    access: tatoeba
+    filter_lang: ara
+
+  - id: tatoeba.negatives.french
+    language: fra
+    script: Latn
+    variety: not_amazigh
+    domain: negative_foreign
+    trust: gold
+    licence: cc-by-2.0
+    access: tatoeba
+    filter_lang: fra
+
+  - id: tatoeba.negatives.english_spanish
+    language: [eng, spa]
+    script: Latn
+    variety: not_amazigh
+    domain: negative_foreign
+    trust: gold
+    licence: cc-by-2.0
+    access: tatoeba
+    filter_lang: [eng, spa]

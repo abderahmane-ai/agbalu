@@ -111,6 +111,14 @@ class View:
         return result
 
     def on_start(self, event: dict[str, object]) -> Rendered:
+        if event.get("family") == "dihya":
+            total = event.get("steps")
+            self.total = total if isinstance(total, int) else None
+            return Rendered(
+                f"== run started: {event.get('steps')} steps, {event.get('train_rows')} rows, "
+                f"{event.get('classes')} classes, {event.get('params')} params",
+                live=False,
+            )
         total = event.get("total_steps")
         self.total = total if isinstance(total, int) else None
         resumed = event.get("resumed_from")
@@ -129,6 +137,21 @@ class View:
         )
 
     def on_step(self, event: dict[str, object]) -> Rendered:
+        if event.get("family") == "dihya":
+            step = int(str(event["step"]))
+            total = event.get("total_steps", self.total)
+            total = total if isinstance(total, int) else None
+            where = f"step {step:,}/{total:,}" if total else f"step {step:,}"
+            loss = float(str(event["loss"]))
+            cls_l = event.get("cls_loss", 0.0)
+            con_l = event.get("con_loss", 0.0)
+            speed = event.get("speed", 0.0)
+            lr = float(str(event.get("lr", 0.0)))
+            return Rendered(
+                f"{where} | loss {loss:.4f} (cls {cls_l}, con {con_l})"
+                f" | lr {lr:.2e} | {speed} seq/s",
+                live=False,
+            )
         step = int(str(event["step"]))
         total = event.get("total_steps", self.total)
         total = total if isinstance(total, int) else None
@@ -254,6 +277,16 @@ class View:
                 f" at step {event.get('step')}",
                 live=False,
             )
+        if event.get("family") == "dihya":
+            worst_grp = event.get("worst_group")
+            w_cls = event.get("worst_class")
+            grp_str = f" [{worst_grp}]" if worst_grp else ""
+            cls_str = f" class [{w_cls}]" if w_cls else ""
+            return Rendered(
+                f"   new dihya checkpoint: score {event.get('score')}{grp_str}{cls_str} "
+                f"at step {event.get('step')}",
+                live=False,
+            )
         loss = event.get("validation_loss")
         chosen_on = (
             f"validation loss {float(str(loss)):.4f}"
@@ -300,6 +333,13 @@ class View:
                 if event.get("passed") is True
                 else None
             )
+        if event.get("family") == "dihya":
+            return Rendered(
+                f"== dihya smoke passed ({event.get('rate')} seq/s)"
+                if event.get("passed") is True
+                else "== dihya task completed",
+                live=False,
+            )
         return Rendered(str(event), live=False)
 
     def on_end(self, event: dict[str, object]) -> Rendered:
@@ -309,6 +349,12 @@ class View:
             return Rendered(
                 f"== encoder ended ({event.get('ended')}) at step {event.get('step')}: {speed},"
                 f" best MLM CE {event.get('best_ce')}, best POS {event.get('best_pos')}",
+                live=False,
+            )
+        if event.get("family") == "dihya":
+            return Rendered(
+                f"== dihya ended ({event.get('ended')}) at step {event.get('step')}: {speed},"
+                f" best score {event.get('best_score')}",
                 live=False,
             )
         return Rendered(

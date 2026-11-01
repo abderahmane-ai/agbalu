@@ -92,6 +92,9 @@ lid-dataset: ## Build the Berber LID training set (task 7.4, model side). CAP ca
 lid: ## Dihya-5M language identifier. TASK=train|evaluate|calibrate|predict (TEXT="...")
 	$(call cli,lid) $(or $(TASK),predict) $(if $(TEXT),--text "$(TEXT)",) $(if $(EPOCHS),--epochs $(EPOCHS),)
 
+dihya: ## Audit or prepare Dihya-22M locally. TASK=prepare|audit DATA_DIR= RAW_DIR= OUT=
+	$(call cli,dihya) $(if $(TASK),$(TASK),audit) $(if $(DATA_DIR),--data-dir "$(DATA_DIR)",) $(if $(RAW_DIR),--raw-dir "$(RAW_DIR)",) $(if $(OUT),--out "$(OUT)",)
+
 parallel: ## Build AƔBALU-Parallel v1. TASK=agreement partitions the mined NLLB pool
 	$(call cli,parallel) $(or $(TASK),build)
 
@@ -129,7 +132,7 @@ llm: ## Phase 11, GPU-free. TASK=fertility|holdout|criterion|select|seeds|prompt
 # TARGET to hpc, the only target it implements.
 launch = $(PY) -m tools.launch $(1) $(if $(TARGET),--target $(TARGET),) $(if $(RUN),--run $(RUN),) $(if $(FAMILY),--family $(FAMILY),)
 
-encoder_options = $(if $(TOKENS),--tokens $(TOKENS),) $(if $(LR),--lr $(LR),) $(if $(BATCH_TOKENS),--batch-tokens $(BATCH_TOKENS),) $(if $(MICRO_TOKENS),--micro-tokens $(MICRO_TOKENS),) $(if $(WORKERS),--workers $(WORKERS),) $(if $(CONFIG),--config $(CONFIG),)
+encoder_options = $(if $(TOKENS),--tokens $(TOKENS),) $(if $(LR),--lr $(LR),) $(if $(BATCH_TOKENS),--batch-tokens $(BATCH_TOKENS),) $(if $(MICRO_TOKENS),--micro-tokens $(MICRO_TOKENS),) $(if $(WORKERS),--workers $(WORKERS),)
 
 setup: ## Build the pod environment from requirements/hpc.lock; report GPU, versions, disk (operator, hpc)
 	$(call launch,setup)
@@ -137,14 +140,14 @@ setup: ## Build the pod environment from requirements/hpc.lock; report GPU, vers
 sync: ## Push code, corpus inputs, Dihya and every evaluation set to the pod (operator, hpc)
 	$(call launch,sync)
 
-smoke: ## Measured smoke. FAMILY=encoder|llm RUN= PART=throughput|parity|resume|evaluate|failure (operator, hpc)
+smoke: ## Measured smoke. FAMILY=dihya|encoder|llm RUN= PART=throughput|parity|resume|evaluate|failure (operator, hpc)
 	$(call launch,smoke) $(if $(PART),--part $(PART),) $(if $(MODEL),--model $(MODEL),) $(encoder_options)
 
-train: ## Resume or train RUN. FAMILY=encoder|llm; encoder: TOKENS LR BATCH_TOKENS MICRO_TOKENS; llm: MODEL OBJECTIVE (operator, hpc)
+train: ## Resume or train RUN. FAMILY=dihya|encoder|llm; encoder: TOKENS LR BATCH_TOKENS MICRO_TOKENS; llm: MODEL OBJECTIVE (operator, hpc)
 	$(call launch,train) $(if $(MODEL),--model $(MODEL),) $(if $(STEPS),--steps $(STEPS),) \
 		$(if $(STOP),--stop $(STOP),) $(if $(OBJECTIVE),--objective $(OBJECTIVE),) $(encoder_options)
 
-data: ## Corpus stages that run on the pod. TASK=documents|aligned|replay|pack|sft|fluency|expand-fetch|expand-pdfs|expand-audio|expand-clean|expand-aligned|compile. RESUME=1 keeps the sources expand-pdfs already wrote (operator, hpc)
+data: ## Corpus stages on the pod. FAMILY=dihya prepares supervised data; llm TASK=documents|aligned|replay|pack|sft|fluency|expand-fetch|expand-pdfs|expand-audio|expand-clean|expand-aligned|compile. RESUME=1 keeps expansion sources (operator, hpc)
 	$(call launch,data) $(if $(TASK),--task $(TASK),) $(if $(RESUME),--resume,) $(if $(MODEL),--model $(MODEL),)
 
 evaluate: ## Evaluation suite on MODEL into artifacts/runs/RUN/. RUN= MODEL SUITE=exit|screen|guard|kabyle|select|release (screen: translation only; kabyle: heldout, mt, sib; guard: no-think IFEval and GSM8K; select and release add the chat suite; CHAT_ONLY=1 runs that alone) (operator, hpc)
@@ -496,6 +499,7 @@ HF_feraoun     := models   agbalu/Feraoun-36M    $(RELEASE)/Feraoun-36M   $(CARD
 HF_feraoun-pro := models   agbalu/Feraoun-Pro    $(RELEASE)/Feraoun-Pro   $(CARDS)/feraoun-pro.md
 HF_simohand    := models   agbalu/SiMohand-278M  $(SIMOHAND_DIR)          $(CARDS)/simohand-278m.md
 HF_dihya       := models   agbalu/Dihya-5M       $(RELEASE)/Dihya-5M      $(CARDS)/dihya-5m.md
+HF_dihya-22m   := models   agbalu/Dihya-22M      $(RELEASE)/Dihya-22M     $(CARDS)/dihya-22m.md
 HF_masinissa-sentiment := models agbalu/Masinissa-Sentiment \
 	$(RELEASE)/Masinissa-Sentiment $(CARDS)/masinissa-sentiment.md
 HF_jugurtha     := models   agbalu/Jugurtha-4B      $(RELEASE)/Jugurtha-4B      $(CARDS)/jugurtha-4b.md
@@ -507,7 +511,7 @@ HF_jugurtha-2-9b-4bit := models agbalu/Jugurtha-2-9B-MLX-4bit $(RELEASE)/Jugurth
 
 ALL_REPOS := kabbench kablex kabsentiment kabinflect kabtifinagh kabpunct kabg2p \
 	kabstandard kabliterary encoder tokenizer mt juba fadhma belaid boulifa matoub \
-	feraoun feraoun-pro simohand dihya masinissa-sentiment jugurtha jugurtha-gguf jugurtha-4bit \
+	feraoun feraoun-pro simohand dihya dihya-22m masinissa-sentiment jugurtha jugurtha-gguf jugurtha-4bit \
 	jugurtha-2-9b jugurtha-2-9b-gguf
 
 # `hf upload` adds and overwrites; it never removes. A repository whose file set shrank keeps

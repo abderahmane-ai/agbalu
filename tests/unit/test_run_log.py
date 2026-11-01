@@ -251,3 +251,58 @@ def test_the_summary_keeps_recent_events_and_where_the_run_is_now() -> None:
     result = summary(lines, keep=1)
     assert result[0] == "-> save checkpoint"
     assert result[1].startswith("step 21 micro-batches")
+
+def test_dihya_evaluation_renders_accuracy_and_floor() -> None:
+    rendered = View().render(
+        event(
+            "eval",
+            family="dihya",
+            step=250,
+            accuracy=0.7801,
+            worst_group_recall=0.6364,
+            worst_group="shy_Latn/everyday",
+            worst_class="shi_Tfng",
+            worst_class_recall=0.6475,
+        )
+    )
+    assert (
+        rendered.line
+        == "== dihya eval at step 250: accuracy 0.7801 | worst recall 0.6364 [shy_Latn/everyday] | worst class 0.6475 [shi_Tfng]"
+    )
+
+
+def test_dihya_best_checkpoint_preserves_group_and_score() -> None:
+    rendered = View().render(
+        event(
+            "best",
+            family="dihya",
+            step=2072,
+            score=0.7760,
+            worst_group="shy_Latn/everyday",
+            worst_class="shi_Tfng",
+        )
+    )
+    assert (
+        rendered.line
+        == "   new dihya checkpoint: score 0.776 [shy_Latn/everyday] class [shi_Tfng] at step 2072"
+    )
+
+
+def test_dihya_result_preserves_rate_on_pass() -> None:
+    rendered = View().render(event("result", family="dihya", passed=True, rate=576.5))
+    assert rendered.line == "== dihya smoke passed (576.5 seq/s)"
+
+
+def test_dihya_run_end_renders_speed_and_best_score() -> None:
+    rendered = View().render(
+        event(
+            "end",
+            family="dihya",
+            ended="finished",
+            step=4752,
+            tokens_per_second=532.0,
+            best_score=0.7760,
+        )
+    )
+    assert rendered.line == "== dihya ended (finished) at step 4752: 532 tok/s, best score 0.776"
+

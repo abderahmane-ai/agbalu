@@ -130,7 +130,20 @@ DATA_TASKS: Final = (
 )
 RESUMABLE_TASKS: Final = ("expand-pdfs", "compile")
 """Data tasks whose output a later run appends to instead of rebuilding (`--resume`)."""
-WEIGHT_EXCLUDES: Final = ("--exclude", "step-*", "--exclude", "best", "--exclude", "model")
+WEIGHT_EXCLUDES: Final = (
+    "--exclude",
+    "step-*/",
+    "--exclude",
+    "best",
+    "--exclude",
+    "model",
+    "--exclude",
+    "*.pt",
+    "--exclude",
+    "*.pth",
+    "--exclude",
+    "*.safetensors",
+)
 """What `pull` leaves on the pod unless `--weights`: checkpoints, the best model and a merge."""
 LOG_LINES: Final = 20
 STATUS_BACKLOG: Final = 600
@@ -170,11 +183,15 @@ def session_name(run: str) -> str:
 def module(arguments: Sequence[str]) -> str:
     if arguments and arguments[0] == "__raw__":
         return " ".join(arguments[1:])
-    encoder = bool(arguments) and arguments[0] == "__encoder__"
-    package = "agbalu.encoder.cli" if encoder else "agbalu.llm.cli"
-    selected = arguments[1:] if encoder else arguments
+    families = {
+        "__encoder__": "agbalu.encoder.cli",
+        "__dihya__": "agbalu.dihya.cli",
+    }
+    marker = arguments[0] if arguments else ""
+    package = families.get(marker, "agbalu.llm.cli")
+    selected = arguments[1:] if marker in families else arguments
     command = " ".join([PYTHON, "-m", package, *(shlex.quote(a) for a in selected)])
-    if encoder and selected and selected[0] == "smoke":
+    if marker in families and selected and selected[0] == "smoke":
         return f"timeout --signal=TERM --kill-after=30s 840s {command}"
     return command
 
@@ -249,7 +266,7 @@ def status_script(run: str, lines: int) -> str:
         " || echo 'session: not running');"
         f" echo {BASELINE_MARKER}; {baseline_command(run)};"
         f" echo {LOG_MARKER}; tail -n {lines} {runs}/log.txt 2>/dev/null;"
-        f" echo {CHECKPOINT_MARKER}; find {runs} -maxdepth 2 -type d -name 'step-*' "
+        f" echo {CHECKPOINT_MARKER}; find {runs} -maxdepth 2 \\( -type d -name 'step-*' -o -name '*.pt' \\) "
         "2>/dev/null | sort | tail -n 3;"
         f" echo {ROLES_MARKER}; {PYTHON} -c {shlex.quote(roles)}"
     )
@@ -401,6 +418,25 @@ def sync_encoder() -> None:
         stamp_file.unlink()
     print("synced encoder code, Mammeri and treebank; existing HPC corpus preserved")
 
+def sync_dihya() -> None:
+    """Sync Dihya-22M code and sources without replacing the HPC's existing data."""
+    execute(code_sync())
+    data_to_sync: list[str] = []
+    negatives = Path("data/raw/numalia_negatives.jsonl")
+    if negatives.is_file():
+        data_to_sync.append(str(negatives))
+    cmn = Path("data/raw/cmn_sentences.tsv.bz2")
+    if cmn.is_file():
+        data_to_sync.append(str(cmn))
+    if data_to_sync:
+        execute(data_sync(data_to_sync))
+    stamp_file = stamp()
+    try:
+        execute(["rsync", "-az", str(stamp_file), f"{HOST}:{REMOTE_ROOT}/{STAMP_FILE}"])
+    finally:
+        stamp_file.unlink()
+    print("synced Dihya-22M code and data registries; existing HPC data preserved")
+
 
 def record(run: str, arguments: Sequence[str], log: str, then: Sequence[str] = ()) -> None:
     """`artifacts/runs/<run>/hpc.session` on the laptop: what was started and where it logs."""
@@ -419,6 +455,8 @@ def record(run: str, arguments: Sequence[str], log: str, then: Sequence[str] = (
 def start(run: str, arguments: Sequence[str], log: str, then: Sequence[str] = ()) -> None:
     if arguments and arguments[0] == "__encoder__":
         sync_encoder()
+    elif arguments and arguments[0] == "__dihya__":
+        sync_dihya()
     else:
         sync()
     execute(detached(run, arguments, log, then))
@@ -477,7 +515,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--target", choices=("hpc",), default="hpc")
-    parser.add_argument("--family", choices=("llm", "encoder"), default="llm")
+    parser.add_argument("--family", choices=("llm", "encoder", "dihya"), default="llm")
     parser.add_argument("--run")
     parser.add_argument("--part")
     parser.add_argument("--models", nargs="+")
@@ -539,6 +577,8 @@ def main(argv: list[str] | None = None) -> int:
             case "sync":
                 if args.family == "encoder":
                     sync_encoder()
+                elif args.family == "dihya":
+                    sync_dihya()
                 else:
                     sync()
             case "status":
@@ -595,6 +635,8 @@ def job(args: argparse.Namespace) -> Job:  # noqa: PLR0912
         return run, cmd, f"{run}/log.txt", []
     if args.family == "encoder":
         return encoder_job(args)
+    if args.family == "dihya":
+        return dihya_job(args)
     match args.action:
         case "train":
             run = require(args.run, "--run", "train")
@@ -652,6 +694,22 @@ def encoder_job(args: argparse.Namespace) -> Job:
         if args.model:
             arguments += ["--model", args.model]
     return run, arguments, f"{run}/log.txt", []
+
+def dihya_job(args: argparse.Namespace) -> Job:
+    run = require(
+        args.run or ("dihya-data" if args.action == "data" else None), "--run", args.action
+    )
+    action = "prepare" if args.action == "data" else args.action
+    if action not in {"prepare", "train", "smoke", "evaluate", "calibrate"}:
+        message = f"dihya does not support action {action!r}"
+        raise LaunchError(message)
+    arguments = ["__dihya__", action, "--run", run]
+    if args.part is not None:
+        arguments += ["--part", args.part]
+    if args.stop is not None:
+        arguments += ["--stop-after", str(args.stop)]
+    return run, arguments, f"{run}/log.txt", []
+
 
 
 SCREEN_FILE: Final = "screen.json"
