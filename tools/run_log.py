@@ -15,7 +15,7 @@ import statistics
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Final
 
 LOSS_WINDOW: Final = 20
@@ -66,6 +66,7 @@ class View:
 
     def __init__(self) -> None:
         self.losses: deque[float] = deque(maxlen=LOSS_WINDOW)
+        self.codec_losses: deque[tuple[float, int]] = deque(maxlen=LOSS_WINDOW)
         self.total: int | None = None
         self.reference: dict[str, float] | None = None
         self.reference_step: int | None = None
@@ -137,6 +138,8 @@ class View:
         )
 
     def on_step(self, event: dict[str, object]) -> Rendered:
+        if event.get("family") == "codec_tts":
+            return self.on_codec_step(event)
         if event.get("family") == "dihya":
             step = int(str(event["step"]))
             total = event.get("total_steps", self.total)
@@ -188,6 +191,33 @@ class View:
             live=False,
         )
 
+    def on_codec_step(self, event: dict[str, object]) -> Rendered:
+        step = int(str(event["step"]))
+        total = int(str(event["total_steps"]))
+        numerator = float(str(event["loss_numerator"]))
+        count = int(str(event["supervised_tokens"]))
+        if count <= 0:
+            message = f"invalid codec loss denominator={count} at step={step}"
+            raise ValueError(message)
+        self.codec_losses.append((numerator, count))
+        mean = sum(value for value, _ in self.codec_losses) / sum(n for _, n in self.codec_losses)
+        eta_s = event.get("eta_s")
+        eta = "ETA warming up"
+        if isinstance(eta_s, int | float):
+            finish = datetime.fromtimestamp(float(str(event["time"])) + eta_s, tz=UTC)
+            eta = f"ETA {eta_s / 3600:.2f} h, done {finish:%Y-%m-%d %H:%M UTC}"
+        memory = event.get("memory")
+        memory_text = f"{memory / 2**30:.1f} GiB" if isinstance(memory, int) else "unmeasured"
+        speed = float(str(event["supervised_tokens_per_s"]))
+        audio = float(str(event["target_audio_s_per_s"]))
+        return Rendered(
+            f"step {step}/{total} {bar(step, total)} | codec CE {numerator / count:.4f}"
+            f" (weighted {mean:.4f}) | lr {float(str(event['lr'])):.2e}"
+            f" | grad {float(str(event['grad_norm'])):.3f} | {speed:,.0f} decisions/s"
+            f" | {audio:.2f} audio-s/s | {memory_text} | {eta}",
+            live=False,
+        )
+
     def on_progress(self, event: dict[str, object]) -> Rendered:
         done, total = event.get("done"), event.get("total")
         eta = event.get("eta_s")
@@ -223,6 +253,12 @@ class View:
         )
 
     def on_eval(self, event: dict[str, object]) -> Rendered:
+        if event.get("family") == "codec_tts":
+            return Rendered(
+                f"== codec validation step {event.get('step')}: CE {event.get('audio_ce_nats')}"
+                f" | {event.get('examples')} examples (teacher forced)",
+                live=False,
+            )
         if event.get("family") == "restoration":
             offline = event.get("offline")
             streaming = event.get("streaming")
@@ -298,6 +334,12 @@ class View:
         )
 
     def on_best(self, event: dict[str, object]) -> Rendered:
+        if event.get("family") == "codec_tts":
+            return Rendered(
+                f"   selected {event.get('role')} at step {event.get('step')}"
+                f" | CE {event.get('audio_ce_nats')}",
+                live=False,
+            )
         if event.get("family") == "restoration":
             return Rendered(
                 f"   new restoration checkpoint: score {event.get('score')}"
@@ -383,6 +425,13 @@ class View:
         return Rendered(str(event), live=False)
 
     def on_end(self, event: dict[str, object]) -> Rendered:
+        if event.get("family") == "codec_tts":
+            return Rendered(
+                f"== codec TTS ended ({event.get('ended')}) at step {event.get('step')}"
+                f" | {event.get('updates_this_run')} updates this invocation"
+                f" | best CE {event.get('best_ce')} | best speech {event.get('best_speech')}",
+                live=False,
+            )
         rate = event.get("tokens_per_second")
         speed = f"{rate:,.0f} tok/s" if isinstance(rate, int | float) else "-"
         if event.get("family") == "restoration":

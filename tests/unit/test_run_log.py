@@ -11,6 +11,31 @@ def event(kind: str, **values: object) -> str:
     return json.dumps({"event": kind, "time": 1792049375.85, **values})
 
 
+def test_codec_loss_window_is_weighted_by_supervised_decisions() -> None:
+    view = View()
+    for step, numerator, count in ((1, 20, 10), (2, 90, 30)):
+        rendered = view.render(
+            event(
+                "step",
+                family="codec_tts",
+                step=step,
+                total_steps=10,
+                loss_numerator=numerator,
+                supervised_tokens=count,
+                lr=1e-4,
+                grad_norm=1,
+                supervised_tokens_per_s=100,
+                target_audio_s_per_s=2,
+                eta_s=None,
+            )
+        )
+    assert rendered is not None
+    assert "weighted 2.7500" in rendered.text
+    assert "ETA warming up" in rendered.text
+    assert "decisions/s" in rendered.text
+    assert "MFU" not in rendered.text
+
+
 STEP = event(
     "step",
     step=20,

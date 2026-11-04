@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "source": "data/raw_v2/taqbaylit.common-voice-scripted-speech-kab-26-huge",
+  "source_revision": "dc3f6c81050794a2653c76c6d2ef6518a7cd87e2",
+  "source_id": "hf.boffire.common-voice-scripted-speech-kab-26-huge",
+  "license": "cc0-1.0",
+  "output": "artifacts/runs/codec-tts-data/prepared",
+  "rank": 32,
+  "alpha": 64
+}

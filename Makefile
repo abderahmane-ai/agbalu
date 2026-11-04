@@ -40,11 +40,22 @@ typecheck: ## mypy, strict
 test: ## Full pytest suite. UNIT=1 skips integration, COV=1 adds the coverage report
 	$(PY) -m pytest $(if $(UNIT),-m "not integration",) $(if $(COV),--cov --cov-report=term-missing,) $(if $(TESTS),$(TESTS),)
 
-check: lint typecheck test ## The gate: lint + typecheck + test
+check: lint typecheck dead test ## The gate: lint + typecheck + dead-code detection + test
 	@echo "All checks passed."
+
+dead: ## Detect unused code across all source directories
+	vulture $(SRC) --min-confidence 100
 
 registry: ## Validate the corpus registry. SIBLINGS=1 validates the Berber sibling registry
 	$(call cli,registry) $(if $(SIBLINGS),--siblings resources/sibling_registry.yaml,resources/corpus_registry.yaml)
+
+codec-tts: ## Codec speech commands. TASK=inventory|prepare|language|partition|encode|synthesize|select|export CONFIG=path
+	$(call cli,codec_tts) $(if $(TASK),$(TASK),) $(if $(CONFIG),--config $(CONFIG),) \
+		$(if $(RUN),--run $(RUN),) $(if $(DEVICE),--device $(DEVICE),) \
+		$(if $(TEXT_FILE),--text-file $(TEXT_FILE),) $(if $(REFERENCE),--reference $(REFERENCE),) \
+		$(if $(REFERENCE_TEXT_FILE),--reference-text-file $(REFERENCE_TEXT_FILE),) \
+		$(if $(OUTPUT),--output $(OUTPUT),) $(if $(ROLE),--role $(ROLE),) \
+		$(if $(EVALUATION),--evaluation $(EVALUATION),) $(if $(REVIEW_FILE),--review-file $(REVIEW_FILE),)
 
 acquire: acquire-$(or $(TASK),fetch) ## Fetch sources. TASK=fetch|plan|verify|flores|siblings
 

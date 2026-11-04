@@ -33,6 +33,17 @@ from typing import TYPE_CHECKING, Final
 if TYPE_CHECKING:
     from torch import Tensor
 
+    from agbalu.codec_tts.backbone import Generator
+    from agbalu.codec_tts.configuration import Recipe
+
+
+def export_codec_tts(model: Generator, recipe: Recipe, destination: Path) -> dict[str, object]:
+    """Stage native speech artifacts through the shared checkpoint export boundary."""
+    from agbalu.codec_tts.release import export_model
+
+    return export_model(model, recipe, destination)
+
+
 WEIGHT_KEYS: Final = ("model_state_dict", "model", "state_dict")
 """Where a checkpoint keeps its weights, in the order they are looked for. Three spellings
 because three trainers wrote these files; a fourth belongs here, not in a caller."""

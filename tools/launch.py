@@ -16,10 +16,11 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Final
 
+from agbalu.codec_tts.configuration import SMOKE_PARTS, is_run_name
 from agbalu.llm.provenance import STAMP_FILE, git_stamp
 from tools.run_log import Printer, View, summary
 
@@ -28,6 +29,8 @@ PROJECT: Final = "agbalu"
 REMOTE_ROOT: Final = f"/home/jovyan/{PROJECT}"
 ENVIRONMENT: Final = f"/home/jovyan/envs/{PROJECT}"
 PYTHON: Final = f"{ENVIRONMENT}/bin/python"
+CODEC_ENVIRONMENT: Final = f"/home/jovyan/envs/{PROJECT}-codec"
+CODEC_PYTHON: Final = f"{CODEC_ENVIRONMENT}/bin/python"
 VLLM_PYTHON: Final = "/home/jovyan/envs/vllm/bin/python"
 """vLLM 0.30.0 pins torch 2.13, so it lives beside the training environment, not in it."""
 LOCK: Final = Path("requirements/hpc.lock")
@@ -187,11 +190,13 @@ def module(arguments: Sequence[str]) -> str:
         "__encoder__": "agbalu.encoder.cli",
         "__restoration__": "agbalu.restoration.cli",
         "__dihya__": "agbalu.dihya.cli",
+        "__codec_tts__": "agbalu.codec_tts.cli",
     }
     marker = arguments[0] if arguments else ""
     package = families.get(marker, "agbalu.llm.cli")
     selected = arguments[1:] if marker in families else arguments
-    command = " ".join([PYTHON, "-m", package, *(shlex.quote(a) for a in selected)])
+    interpreter = CODEC_PYTHON if marker == "__codec_tts__" else PYTHON
+    command = " ".join([interpreter, "-m", package, *(shlex.quote(a) for a in selected)])
     if marker in families and selected and selected[0] == "smoke":
         return f"timeout --signal=TERM --kill-after=30s 840s {command}"
     if marker == "__restoration__" and selected and selected[0] == "prepare":
@@ -249,6 +254,17 @@ def setup_script() -> str:
     return f"{build} && {PYTHON} -c {shlex.quote(probe)}"
 
 
+def setup_codec_script() -> str:
+    build = (
+        f"test -x {CODEC_PYTHON} || mamba create -y -p {CODEC_ENVIRONMENT} "
+        "-c conda-forge python=3.12"
+    )
+    return (
+        f"({build}) && {CODEC_PYTHON} -m pip install -r requirements/codec_tts.lock"
+        f" && {CODEC_PYTHON} -m agbalu.codec_tts.cli environment"
+    )
+
+
 def baseline_command(run: str) -> str:
     """The run's first evaluation from its event file, which a log tail may not reach."""
     events = f"{REMOTE_ROOT}/{RUNS}/{run}/log.jsonl"
@@ -262,7 +278,8 @@ def status_script(run: str, lines: int) -> str:
         "import json; from pathlib import Path; "
         f"root=Path({runs!r}); "
         "print(json.dumps({name:json.loads((root/(name+'.json')).read_text()) "
-        "for name in ('latest','best_mlm','best_deployment') if (root/(name+'.json')).is_file()}))"
+        "for name in ('latest','best_mlm','best_deployment','best_ce','best_speech') "
+        "if (root/(name+'.json')).is_file()}))"
     )
     return (
         f"(tmux has-session -t {session_name(run)} 2>/dev/null && echo 'session: running'"
@@ -293,7 +310,7 @@ def readable_status(output: str) -> list[str]:
     if roles.strip():
         payload = json.loads(roles.strip())
         if isinstance(payload, dict) and payload:
-            for role in ("latest", "best_mlm", "best_deployment"):
+            for role in ("latest", "best_mlm", "best_deployment", "best_ce", "best_speech"):
                 item = payload.get(role)
                 selected = item.get("snapshot") if isinstance(item, dict) else "none eligible"
                 lines.append(f"{role}: {selected}")
@@ -454,6 +471,38 @@ def sync_dihya() -> None:
     print("synced Dihya-22M code and data registries; existing HPC data preserved")
 
 
+def sync_codec_tts() -> None:
+    files = [
+        "src/agbalu/codec_tts",
+        "src/agbalu/__init__.py",
+        "src/agbalu/_about.py",
+        "src/agbalu/llm/__init__.py",
+        "src/agbalu/llm/progress.py",
+        "src/agbalu/llm/provenance.py",
+        "resources/codec_tts",
+        "requirements/codec_tts.lock",
+        "tools/export_checkpoint.py",
+    ]
+    execute(data_sync(files))
+    stamp_file = stamp()
+    try:
+        execute(["rsync", "-az", str(stamp_file), f"{HOST}:{REMOTE_ROOT}/{STAMP_FILE}"])
+    finally:
+        stamp_file.unlink()
+    print("synced codec TTS sources; existing HPC data and other model families preserved")
+
+
+def sync_family(family: str) -> None:
+    actions: dict[str, Callable[[], None]] = {
+        "restoration": sync_restoration,
+        "encoder": sync_encoder,
+        "dihya": sync_dihya,
+        "codec_tts": sync_codec_tts,
+        "llm": sync,
+    }
+    actions[family]()
+
+
 def record(run: str, arguments: Sequence[str], log: str, then: Sequence[str] = ()) -> None:
     """`artifacts/runs/<run>/hpc.session` on the laptop: what was started and where it logs."""
     path = RUNS / run / "hpc.session"
@@ -475,6 +524,8 @@ def start(run: str, arguments: Sequence[str], log: str, then: Sequence[str] = ()
         sync_encoder()
     elif arguments and arguments[0] == "__dihya__":
         sync_dihya()
+    elif arguments and arguments[0] == "__codec_tts__":
+        sync_codec_tts()
     else:
         sync()
     execute(detached(run, arguments, log, then))
@@ -535,13 +586,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--target", choices=("hpc",), default="hpc")
     parser.add_argument(
         "--family",
-        choices=("llm", "encoder", "restoration", "dihya"),
+        choices=("llm", "encoder", "restoration", "dihya", "codec_tts"),
         default="llm",
     )
     parser.add_argument("--run")
     parser.add_argument("--part")
     parser.add_argument("--models", nargs="+")
-    parser.add_argument("--task", choices=(*DATA_TASKS, "prepare"))
+    parser.add_argument(
+        "--task",
+        choices=(*DATA_TASKS, "prepare", "inventory", "partition", "encode", "language", "fetch"),
+    )
     parser.add_argument(
         "--resume",
         action="store_true",
@@ -563,7 +617,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--objective", choices=("cpt", "sft"), help="train only; CLI default cpt")
     parser.add_argument(
         "--suite",
-        choices=("exit", "screen", "guard", "kabyle", "select", "release", "dev", "baseline"),
+        choices=(
+            "exit",
+            "screen",
+            "guard",
+            "kabyle",
+            "select",
+            "release",
+            "dev",
+            "baseline",
+            "validation",
+        ),
         default="exit",
         help="exit: completion suite only; screen: translation only, into screen.json; "
         "kabyle: heldout, mt, and sib into evaluation-kabyle.json; "
@@ -590,22 +654,20 @@ def require(value: str | None, flag: str, action: str) -> str:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        validate_codec_options(args)
         match args.action:
             case "setup":
                 execute(remote(f"mkdir -p {REMOTE_ROOT}"))
-                sync()
-                execute(remote(setup_script()))
+                if args.family == "codec_tts":
+                    sync_codec_tts()
+                    execute(remote(setup_codec_script()))
+                else:
+                    sync()
+                    execute(remote(setup_script()))
             case "stop":
                 execute(remote(stop_script(require(args.run, "--run", "stop"))))
             case "sync":
-                if args.family == "restoration":
-                    sync_restoration()
-                elif args.family == "encoder":
-                    sync_encoder()
-                elif args.family == "dihya":
-                    sync_dihya()
-                else:
-                    sync()
+                sync_family(args.family)
             case "status":
                 show_status(require(args.run, "--run", "status"), raw=args.raw)
             case "logs":
@@ -630,6 +692,8 @@ Job = tuple[str, list[str], str, list[str]]
 
 def job(args: argparse.Namespace) -> Job:  # noqa: PLR0912
     """What an action that starts a detached job runs."""
+    if args.family == "codec_tts":
+        return codec_tts_job(args)
     if args.action == "encbench":
         run = args.run or "encbench"
         models = args.models or ["masinissa-73m", "masinissa-31m", "xlm-roberta-base"]
@@ -677,6 +741,9 @@ def job(args: argparse.Namespace) -> Job:  # noqa: PLR0912
             return f"{run}/{part}", arguments, f"{run}/{part}/log.txt", []
         case "data":
             task = require(args.task, "--task", "data")
+            if task not in DATA_TASKS:
+                message = f"unsupported llm data task={task!r}"
+                raise LaunchError(message)
             if args.resume and task not in RESUMABLE_TASKS:
                 message = f"--resume is for {' and '.join(RESUMABLE_TASKS)}, not {task}"
                 raise LaunchError(message)
@@ -692,6 +759,70 @@ def job(args: argparse.Namespace) -> Job:  # noqa: PLR0912
             return run, assemble_arguments(args), f"{run}/log.txt", []
         case _:
             return evaluation_job(args)
+
+
+def validate_codec_options(args: argparse.Namespace) -> None:
+    if args.family != "codec_tts":
+        return
+    if args.run is not None and not is_run_name(args.run):
+        message = f"invalid codec TTS run name={args.run!r}"
+        raise LaunchError(message)
+    if args.steps is not None and args.action != "smoke":
+        message = "codec TTS STEPS is only valid for smoke; use STOP for a bounded train invocation"
+        raise LaunchError(message)
+    if args.part is not None and (args.action != "smoke" or args.part not in SMOKE_PARTS):
+        message = f"invalid codec TTS smoke part={args.part!r}"
+        raise LaunchError(message)
+    for name in (
+        "model",
+        "objective",
+        "alpha",
+        "template",
+        "tokens",
+        "lr",
+        "batch_tokens",
+        "micro_tokens",
+        "micro_windows",
+    ):
+        if getattr(args, name) is not None:
+            message = (
+                f"codec_tts config owns {name}; use --config rather than unrelated launcher options"
+            )
+            raise LaunchError(message)
+    if args.workers is not None:
+        message = "codec_tts worker count belongs in --config"
+        raise LaunchError(message)
+
+
+def codec_tts_job(args: argparse.Namespace) -> Job:
+    run = require(args.run, "--run", args.action)
+    validate_codec_options(args)
+    if args.action == "data":
+        action = args.task or "prepare"
+        if action not in {"inventory", "prepare", "partition", "encode", "language", "fetch"}:
+            message = f"unsupported codec_tts data task={action!r}"
+            raise LaunchError(message)
+    elif args.action in {"train", "smoke", "evaluate"}:
+        action = args.action
+    else:
+        message = f"unsupported codec_tts action={args.action!r}"
+        raise LaunchError(message)
+    arguments = ["__codec_tts__", action, "--run", run]
+    for flag, value in (
+        ("--config", args.config),
+        ("--part", args.part),
+        ("--stop-after", args.stop),
+        ("--steps", args.steps),
+    ):
+        if value is not None:
+            arguments += [flag, str(value)]
+    if args.action == "evaluate":
+        suite = "validation" if args.suite == "exit" else args.suite
+        if suite not in {"validation", "release", "baseline"}:
+            message = f"unsupported codec_tts evaluation suite={suite!r}"
+            raise LaunchError(message)
+        arguments += ["--suite", suite]
+    return run, arguments, f"{run}/log.txt", []
 
 
 def encoder_job(args: argparse.Namespace) -> Job:

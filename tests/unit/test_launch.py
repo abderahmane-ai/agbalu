@@ -14,6 +14,39 @@ from agbalu.llm.decontaminate import FLORES_CORRECTED
 
 
 class TestCommands:
+    def test_codec_family_routes_without_qwen_defaults(self) -> None:
+        args = launch.build_parser().parse_args(
+            ["train", "--family", "codec_tts", "--run", "codec-r32"]
+        )
+        run, command, log, chained = launch.job(args)
+        assert run == "codec-r32"
+        assert command == ["__codec_tts__", "train", "--run", "codec-r32"]
+        assert "agbalu.codec_tts.cli" in launch.module(command)
+        assert "agbalu-codec/bin/python" in launch.module(command)
+        assert log == "codec-r32/log.txt"
+        assert chained == []
+
+    def test_codec_smoke_uses_shared_part_and_bounded_execution(self) -> None:
+        args = launch.build_parser().parse_args(
+            ["smoke", "--family", "codec_tts", "--run", "r", "--part", "resume"]
+        )
+        command = launch.job(args)[1]
+        assert command[-2:] == ["--part", "resume"]
+        assert "840s" in launch.module(command)
+
+    def test_codec_rejects_llm_model_and_task_options(self) -> None:
+        parser = launch.build_parser()
+        with pytest.raises(launch.LaunchError, match="config owns model"):
+            launch.job(
+                parser.parse_args(
+                    ["train", "--family", "codec_tts", "--run", "r", "--model", "qwen"]
+                )
+            )
+        with pytest.raises(launch.LaunchError, match="unsupported codec_tts data"):
+            launch.job(
+                parser.parse_args(["data", "--family", "codec_tts", "--run", "r", "--task", "pack"])
+            )
+
     def test_report_pull_excludes_tensor_checkpoints(self) -> None:
         excluded = set(launch.WEIGHT_EXCLUDES[1::2])
         assert {"*.pt", "*.pth", "*.safetensors"} <= excluded
