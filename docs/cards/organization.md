@@ -53,7 +53,7 @@ resource into the scarce one.
 | | | |
 |---|---|---|
 | [**KabEncBench-Leaderboard**](https://huggingface.co/spaces/agbalu/KabEncBench-Leaderboard) | representation benchmark & leaderboard | Pairwise Bradley–Terry Elo tournament (2,000 bootstraps), multi-model polar radar chart comparisons, and item-level win-rate matrices across 9 foundation encoders on Kabyle |
-| [**Jugurtha-4B-Chat**](https://huggingface.co/spaces/agbalu/Jugurtha-4B-Chat) | conversational AI interface | Official sovereign Taqbaylit chat interface powered by `Jugurtha-4B`, featuring native chain-of-thought (`<think>` blocks) and fast streaming |
+| [**Jugurtha-Chat**](https://huggingface.co/spaces/agbalu/Jugurtha-Chat) | conversational AI interface | Official sovereign Taqbaylit chat interface powered by `Jugurtha-2-9B`, featuring native chain-of-thought (`<think>` blocks) and fast streaming |
 
 ## Datasets
 
