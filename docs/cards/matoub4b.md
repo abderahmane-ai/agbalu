@@ -6,7 +6,6 @@ license_name: boson-higgs-research-and-non-commercial
 license_link: LICENSE
 pipeline_tag: text-to-speech
 library_name: transformers
-base_model: bosonai/higgs-tts-3-4b
 tags:
 - kabyle
 - taqbaylit
