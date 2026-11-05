@@ -34,13 +34,14 @@ dependencies = [
 
 [project.optional-dependencies]
 codec-tts = [
+    "onnxruntime==1.31.1",
     "numpy>=1.26",
     "scipy>=1.15",
     "soundfile>=0.13",
     "pyarrow>=17",
-    "torch>=2.11",
-    "torchaudio>=2.11",
-    "transformers>=5.17",
+    "torch==2.11.0",
+    "torchaudio==2.11.0",
+    "transformers==5.17.0",
     "safetensors>=0.7",
 ]
 # Baseline inference for the benchmark. Kept out of the core dependencies so the
@@ -154,13 +155,26 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
+# Keep explicit decoder/cache/deadline contracts and atomic speech/export transactions together.
+"src/agbalu/codec_tts/inference.py" = ["PLR0913"]
+"src/agbalu/codec_tts/synthesis.py" = ["PLR0913", "PLR0915", "TRY301"]
+"src/agbalu/codec_tts/release.py" = ["PLR0912", "PLR0915"]
+# Transformers configs expose their fields in __init__; model flags override instance attributes.
+"src/agbalu/codec_tts/transformers_model.py" = ["PLR0913", "RUF012"]
+# Preserve the public decoder signature in the integration fake.
+"tests/integration/codec_tts/test_synthesis.py" = ["PLR0913"]
+# Run only the fixed local interpreter and staged help entry in this isolation test.
+"tests/integration/codec_tts/test_release.py" = ["S603", "PLR0915"]
+# The benchmark executes fixed native argument lists and inspects Transformers flags.
+# Keep the measured load/generate transaction together so timing scopes stay explicit.
+"tools/quantize_speech.py" = ["S603", "PLR0912", "PLR0915", "SLF001"]
 # Keep each codec-cache transaction and ordered training/evaluation lifecycle auditable.
 "src/agbalu/codec_tts/dataset.py" = ["PLR0915"]
 "src/agbalu/codec_tts/evaluation.py" = ["PLR0915"]
 # The update runner takes the immutable windows plus distinct optimizer/state/log/stop contracts.
 "src/agbalu/codec_tts/training.py" = ["PLR0913", "PLR0915"]
 # Explicit action dispatch has one return per operation; export imports the staging tool lazily.
-"src/agbalu/codec_tts/cli.py" = ["T20", "PLR0911", "PLC0415"]
+"src/agbalu/codec_tts/cli.py" = ["T20", "PLR0911", "PLR0912", "PLC0415"]
 # T20: a command-line entry point reports to stdout; that is the whole of its job. The
 #      library modules it calls stay print-free, and the rule still applies to them.
 "src/agbalu/**/cli.py" = ["T20"]
@@ -545,6 +559,7 @@ ban-relative-imports = "all"
 convention = "google"
 
 [tool.mypy]
+mypy_path = "stubs"
 python_version = "3.12"
 files = ["src", "tests", "tools", "modal_app"]
 strict = true
@@ -581,7 +596,19 @@ disallow_untyped_calls = false
 
 # The native codec constructor/encode/decode are untyped; tensor shapes are checked here.
 [[tool.mypy.overrides]]
-module = ["agbalu.codec_tts.codec"]
+module = ["agbalu.codec_tts.codec", "tests.integration.codec_tts.test_release"]
+disallow_untyped_calls = false
+
+# Transformers requires forwarding its heterogeneous config keywords to its constructors.
+# Runtime config validation and isolated AutoClass tests check the serialization boundary.
+[[tool.mypy.overrides]]
+module = ["agbalu.codec_tts.transformers_model"]
+disallow_untyped_calls = false
+disable_error_code = ["arg-type", "override"]
+
+# GGUF readers and AutoClass loaders expose untyped library constructors.
+[[tool.mypy.overrides]]
+module = ["tools.quantize_speech", "quantize_speech"]
 disallow_untyped_calls = false
 
 # `tokenizers` ships no py.typed marker and has no stubs on PyPI. It is an optional

@@ -138,6 +138,8 @@ class View:
         )
 
     def on_step(self, event: dict[str, object]) -> Rendered:
+        if event.get("family") == "codec_student":
+            return self.on_student_step(event)
         if event.get("family") == "codec_tts":
             return self.on_codec_step(event)
         if event.get("family") == "dihya":
@@ -218,6 +220,34 @@ class View:
             live=False,
         )
 
+    def on_student_step(self, event: dict[str, object]) -> Rendered:
+        stage = event.get("stage")
+        if stage == "alignment":
+            step, total = int(str(event["step"])), int(str(event["total_steps"]))
+            eta = event.get("eta_s")
+            eta_text = (
+                f"ETA {float(eta) / 3600:.2f} h"
+                if isinstance(eta, int | float)
+                else "ETA warming up"
+            )
+            return Rendered(
+                f"alignment step {step}/{total} {bar(step, total)}"
+                f" | representation {float(str(event['representation_loss'])):.5f}"
+                f" | lr {float(str(event['lr'])):.2e}"
+                f" | grad {float(str(event['grad_norm'])):.3f}"
+                f" | {float(str(event['supervised_tokens_per_s'])):,.0f} decisions/s"
+                f" | {eta_text}",
+                live=False,
+            )
+        rendered = self.on_codec_step(event)
+        objective = (
+            f"alignment {float(str(event['representation_loss'])):.5f}"
+            if stage == "alignment"
+            else f"CE {float(str(event['audio_ce_nats'])):.4f}"
+            f" + KD {float(str(event['kd_nats'])):.4f}"
+        )
+        return Rendered(f"{stage}: {objective} | {rendered.text}", live=False)
+
     def on_progress(self, event: dict[str, object]) -> Rendered:
         done, total = event.get("done"), event.get("total")
         eta = event.get("eta_s")
@@ -253,7 +283,7 @@ class View:
         )
 
     def on_eval(self, event: dict[str, object]) -> Rendered:
-        if event.get("family") == "codec_tts":
+        if event.get("family") in {"codec_tts", "codec_student"}:
             return Rendered(
                 f"== codec validation step {event.get('step')}: CE {event.get('audio_ce_nats')}"
                 f" | {event.get('examples')} examples (teacher forced)",
@@ -334,7 +364,7 @@ class View:
         )
 
     def on_best(self, event: dict[str, object]) -> Rendered:
-        if event.get("family") == "codec_tts":
+        if event.get("family") in {"codec_tts", "codec_student"}:
             return Rendered(
                 f"   selected {event.get('role')} at step {event.get('step')}"
                 f" | CE {event.get('audio_ce_nats')}",
@@ -425,7 +455,7 @@ class View:
         return Rendered(str(event), live=False)
 
     def on_end(self, event: dict[str, object]) -> Rendered:
-        if event.get("family") == "codec_tts":
+        if event.get("family") in {"codec_tts", "codec_student"}:
             return Rendered(
                 f"== codec TTS ended ({event.get('ended')}) at step {event.get('step')}"
                 f" | {event.get('updates_this_run')} updates this invocation"

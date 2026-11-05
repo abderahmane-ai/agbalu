@@ -199,6 +199,12 @@ def module(arguments: Sequence[str]) -> str:
     command = " ".join([interpreter, "-m", package, *(shlex.quote(a) for a in selected)])
     if marker in families and selected and selected[0] == "smoke":
         return f"timeout --signal=TERM --kill-after=30s 840s {command}"
+    if (
+        marker == "__codec_tts__"
+        and selected
+        and selected[0] in {"synthesize", "stage", "verify-stage"}
+    ):
+        return f"timeout --signal=TERM --kill-after=30s 840s {command}"
     if marker == "__restoration__" and selected and selected[0] == "prepare":
         return f"timeout --signal=TERM --kill-after=30s 1800s {command}"
     return command
@@ -482,6 +488,8 @@ def sync_codec_tts() -> None:
         "resources/codec_tts",
         "requirements/codec_tts.lock",
         "tools/export_checkpoint.py",
+        "tools/infer_speech.py",
+        "docs/cards/matoub4b.md",
     ]
     execute(data_sync(files))
     stamp_file = stamp()
@@ -581,6 +589,9 @@ def build_parser() -> argparse.ArgumentParser:
             "merge",
             "assemble",
             "encbench",
+            "synthesize",
+            "stage",
+            "verify-stage",
         ),
     )
     parser.add_argument("--target", choices=("hpc",), default="hpc")
@@ -611,6 +622,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--micro-windows", type=int)
     parser.add_argument("--workers", type=int)
     parser.add_argument("--config")
+    for flag in ("text-file", "reference", "reference-text-file", "output", "inference-config"):
+        parser.add_argument(f"--{flag}")
+    parser.add_argument("--role", choices=("latest", "best_ce", "best_speech"))
+    parser.add_argument("--device", choices=("cpu", "cuda"))
     parser.add_argument("--stop", type=int, help="end the train invocation at this step")
     parser.add_argument("--alpha", type=float, help="merge coefficient")
     parser.add_argument("--template", help="assemble: the full model the tower was trained from")
@@ -678,6 +693,8 @@ def main(argv: list[str] | None = None) -> int:
                 local = RUNS / run
                 local.mkdir(parents=True, exist_ok=True)
                 execute(["rsync", "-az", *skip, f"{HOST}:{REMOTE_ROOT}/{RUNS}/{run}/", f"{local}/"])
+            case "synthesize" | "stage" | "verify-stage":
+                start_speech(args)
             case _:
                 start(*job(args))
     except LaunchError as error:
@@ -802,7 +819,7 @@ def codec_tts_job(args: argparse.Namespace) -> Job:
         if action not in {"inventory", "prepare", "partition", "encode", "language", "fetch"}:
             message = f"unsupported codec_tts data task={action!r}"
             raise LaunchError(message)
-    elif args.action in {"train", "smoke", "evaluate"}:
+    elif args.action in {"train", "smoke", "evaluate", "synthesize", "stage", "verify-stage"}:
         action = args.action
     else:
         message = f"unsupported codec_tts action={args.action!r}"
@@ -822,7 +839,56 @@ def codec_tts_job(args: argparse.Namespace) -> Job:
             message = f"unsupported codec_tts evaluation suite={suite!r}"
             raise LaunchError(message)
         arguments += ["--suite", suite]
+    if args.action in {"synthesize", "stage", "verify-stage"}:
+        speech_input_paths(args)
+        for flag, value in (
+            ("--text-file", args.text_file),
+            ("--reference", args.reference),
+            ("--reference-text-file", args.reference_text_file),
+            ("--output", args.output),
+            ("--inference-config", args.inference_config),
+            ("--role", args.role),
+            ("--device", args.device),
+        ):
+            if value is not None:
+                arguments += [flag, value]
+        run = f"{run}-{'synthesis' if args.action == 'synthesize' else args.action}"
     return run, arguments, f"{run}/log.txt", []
+
+
+def speech_input_paths(args: argparse.Namespace) -> list[str]:
+    if args.family != "codec_tts":
+        message = "speech inference/staging requires FAMILY=codec_tts"
+        raise LaunchError(message)
+    names = ["output"]
+    if args.action == "synthesize":
+        names += ["text_file", "reference", "reference_text_file"]
+    paths: list[str] = []
+    for name in names:
+        require(getattr(args, name), f"--{name.replace('_', '-')}", args.action)
+    for name in (*names, "inference_config", "config"):
+        value = getattr(args, name)
+        if value is None:
+            continue
+        path = Path(value)
+        if path.is_absolute() or ".." in path.parts:
+            message = f"speech path must be relative to the project: {value!r}"
+            raise LaunchError(message)
+        if name != "output":
+            paths.append(str(path))
+    return paths
+
+
+def start_speech(args: argparse.Namespace) -> None:
+    definition = job(args)
+    inputs = speech_input_paths(args)
+    for name in inputs:
+        if not Path(name).is_file():
+            message = f"missing local speech input {name}"
+            raise LaunchError(message)
+    if inputs:
+        execute(data_sync(inputs))
+    start(*definition)
 
 
 def encoder_job(args: argparse.Namespace) -> Job:

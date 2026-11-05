@@ -92,15 +92,9 @@ sources:
       571.29 validated hours of 693.88 total; 1,607 speakers; released 2026-06-12.
       Kabyle ranks 10th of 294 locales. Splits: train 152,608 / dev 15,004 /
       test 15,004 / validated 615,368 / other 111,915. 53% male, 20% female.
-      NOT FETCHABLE BY `acquire`, verified 2026-08-11: the uri is a consent-gated
-      landing page and Common Voice moved exclusively to Mozilla Data Collective
-      in October 2025, so retrieval needs an account and an API key. `access`
-      stays `http` because the enum has no value for a source behind an account;
-      `manual` demands a checksum we cannot have until it is downloaded.
-      NOT on the ASR critical path: hf.fsicoli.common-voice-22-kab carries
-      570.37 of these 571.29 validated hours. What v26 buys is the ~395 validated
-      hours outside train/dev/test, whose audio no mirror ships.
-      docs/asr_design.md §2.
+      Full validated audio (520.4 hours across 567,727 clips, 1,330 speakers) is
+      accessible in 35 Parquet shards via taqbaylit/common-voice-scripted-speech-kab-26-huge.
+      Direct upstream access at Mozilla Data Collective (MDC).
 
   - id: hf.fsicoli.common-voice-22-kab
     name: Common Voice v22.0 — Kabyle, community mirror
@@ -920,20 +914,21 @@ sources:
       share-alike terms govern. Prefer extracting from the dump ourselves.
 
   - id: hf.boffire.common-voice-scripted-speech-kab-26-huge
-    name: Common Voice 26 Kabyle, repackaged
+    name: Common Voice 26 Kabyle, repackaged (taqbaylit)
     modality: speech
     tier: supplementary
     access: hf
-    uri: https://huggingface.co/datasets/boffire/common-voice-scripted-speech-kab-26-huge
+    uri: https://huggingface.co/datasets/taqbaylit/common-voice-scripted-speech-kab-26-huge
     licence: cc0-1.0
     languages: [kab]
-    size: { rows: 567727, bytes: 14559900000 }
-    retrieved: 2026-08-05
+    size: { rows: 567727, bytes: 14559900000, hours: 520.4 }
+    retrieved: 2026-10-22
     notes: >-
-      Parquet repackaging of CV26 Kabyle. GONE: HTTP 404 to an authenticated
-      request on 2026-08-11, with facebook/flores returning 200 as the control,
-      so this is deletion rather than gating. Never fetched, so it is a lost
-      bookmark, not lost bytes — hf.fsicoli.common-voice-22-kab supersedes it.
+      Consolidated, full cleaned Mozilla Common Voice 26.0 for Kabyle: 567,727 clips
+      (~520.4 hours, 1,330 speakers) in 35 Parquet shards (13.56 GB). Decoded
+      16 kHz audio, quality-filtered (>=2 upvotes, 0 downvotes), GlotLID v3 filtered
+      (kab_Latn >= 0.95), and 29 false-friend homoglyph types corrected. Public CC0-1.0.
+      Migrated from boffire/ to the taqbaylit/ organization.
 
   - id: hf.boffire.kabyle-piper-22khz
     name: Kabyle Piper TTS dataset, 22 kHz
@@ -1365,3 +1360,19 @@ sources:
       OPUS NLLB en-kab filtered with GlotLID v3 at 0.95 confidence plus character
       normalisation of non-standard Kabyle Latin. Neither this nor the boffire
       sibling reports precision; treat both as candidate pools, never as gold.
+
+  - id: hf.agbalu.kabliterary
+    name: agbalu/KabLiterary — Kabyle literary translations & classical prose corpus
+    modality: text
+    tier: supplementary
+    access: hf
+    uri: https://huggingface.co/datasets/agbalu/KabLiterary
+    licence: cc-by-sa-4.0
+    languages: [kab]
+    size: { rows: 28907, bytes: 14948170 }
+    retrieved: 2026-09-21
+    notes: >-
+      Eleven works of classical world literature in canonical Kabyle Latin orthography,
+      spanning epic poetry, 19th-century novels, gothic fiction, and philosophical prose.
+      Published by AƔBALU under CC-BY-SA-4.0.
+

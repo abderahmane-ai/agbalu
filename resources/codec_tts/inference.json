@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "sampling": {"temperature": 0.8, "top_p": 0.8, "top_k": 30, "max_new_positions": 1500, "seed": 20261102},
+  "decoding": {"alignment_strength": 0, "plausible_tokens": 25, "recover_loops": false},
+  "adapter_multiplier": 1,
+  "candidates": 6,
+  "max_segment_characters": 160,
+  "max_cer": 0.2,
+  "content_tolerance": 0.08,
+  "min_voice_cosine": 0.21693290024995804,
+  "min_predicted_mos": 3.5,
+  "quality_tolerance": 0.25,
+  "timeout_s": 840,
+  "fallback_candidates": 2,
+  "max_duration_ratio": 3,
+  "min_generation_s": 10,
+  "strategies": [
+    {"adapter_multiplier": 1, "decoding": {"alignment_strength": 0, "plausible_tokens": 25, "recover_loops": false}},
+    {"adapter_multiplier": 0.65, "decoding": {"alignment_strength": 0, "plausible_tokens": 25, "recover_loops": false}},
+    {"adapter_multiplier": 1, "decoding": {"alignment_strength": 1, "plausible_tokens": 25, "recover_loops": false}}
+  ]
+}

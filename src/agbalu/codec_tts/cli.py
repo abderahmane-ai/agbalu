@@ -4,19 +4,20 @@ from __future__ import annotations
 
 import argparse
 import gc
+import hashlib
 import json
+import logging
 from importlib.metadata import version
 from pathlib import Path
 
-import numpy as np
-import soundfile as sf
 import torch
 from huggingface_hub import snapshot_download
+from safetensors.torch import load_file
 from transformers import AutoTokenizer
 
 from agbalu.codec_tts.adaptation import inject_adapter, restore_adapter
-from agbalu.codec_tts.artifacts import atomic_binary, digest_file, provenance, write_json
-from agbalu.codec_tts.audio import decode_audio, prepare_audio, prepare_pairs, source_files
+from agbalu.codec_tts.artifacts import digest_file, provenance, write_json
+from agbalu.codec_tts.audio import prepare_audio, prepare_pairs, source_files
 from agbalu.codec_tts.backbone import Generator, load_generator
 from agbalu.codec_tts.checkpoint import (
     Pointer,
@@ -40,12 +41,9 @@ from agbalu.codec_tts.evaluation import (
     measure_speech,
     selection_report,
 )
-from agbalu.codec_tts.inference import Sampling, generate_codes
 from agbalu.codec_tts.language import observe_languages
-from agbalu.codec_tts.layout import prompt_layout
 from agbalu.codec_tts.smoke import PARTS, SMOKE_UPDATES, admit_training, run_smoke
 from agbalu.codec_tts.training import TrainingRun
-from agbalu.codec_tts.waveforms import resample_waveform
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -68,6 +66,8 @@ def build_parser() -> argparse.ArgumentParser:
             "select",
             "synthesize",
             "export",
+            "stage",
+            "verify-stage",
         ),
     )
     parser.add_argument("--config", type=Path, default=DEFAULT_RECIPE)
@@ -86,6 +86,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", type=Path)
     parser.add_argument("--evaluation", type=Path)
     parser.add_argument("--review-file", type=Path)
+    parser.add_argument(
+        "--inference-config", type=Path, default=Path("resources/codec_tts/inference.json")
+    )
     return parser
 
 
@@ -101,6 +104,9 @@ def native_model(recipe: Recipe, device: torch.device) -> Generator:
     geometry = Geometry.model_validate_json(path.read_bytes()) if path.is_file() else Geometry()
     model, _ = load_generator(recipe.base_directory / "model.safetensors", geometry, device)
     inject_adapter(model)
+    adapter = recipe.base_directory / "adapter.safetensors"
+    if adapter.is_file():
+        restore_adapter(model, load_file(str(adapter)))
     return model
 
 
@@ -208,41 +214,37 @@ def synthesize(
     if not text.strip():
         message = f"empty synthesis text at {args.text_file}"
         raise ValueError(message)
+    from agbalu.codec_tts.synthesis import InferenceSettings, SpeechRequest, SpeechSynthesis
+    from agbalu.codec_tts.verification import SpeechVerifier
+
+    logging.basicConfig(format="%(message)s")
+    logging.getLogger("agbalu.codec_tts.synthesis").setLevel(logging.INFO)
+    settings = InferenceSettings.model_validate_json(args.inference_config.read_bytes())
+    if args.reference is None or args.reference_text_file is None:
+        message = (
+            "verified synthesis requires a reference and its exact original-language transcript"
+        )
+        raise ValueError(message)
     codec, _ = load_codec(
         recipe.base_directory / "model.safetensors",
         recipe.codec_configuration,
         model.audio_embedding.weight.device,
     )
-    reference = None
-    reference_text: list[int] = []
-    if args.reference is not None:
-        samples, rate_hz = decode_audio(Path(args.reference).read_bytes())
-        reference = codec.encode(resample_waveform(samples, rate_hz))
-        if args.reference_text_file is not None:
-            reference_text = tokenizer.encode(
-                Path(args.reference_text_file).read_text(encoding="utf-8"), add_special_tokens=False
-            )
-    prompt = prompt_layout(
-        tokenizer.get_added_vocab(),
-        tokenizer.encode(text, add_special_tokens=False),
-        reference,
-        reference_text,
+    checkpoint = getattr(args, "checkpoint_sha256", None)
+    if checkpoint is None:
+        checkpoint = digest_file(recipe.base_directory / "model.safetensors")
+        adapter = recipe.base_directory / "adapter.safetensors"
+        if adapter.is_file():
+            checkpoint = hashlib.sha256((checkpoint + digest_file(adapter)).encode()).hexdigest()
+    request = SpeechRequest(
+        text=text,
+        reference=args.reference,
+        reference_text=args.reference_text_file.read_text(encoding="utf-8"),
+        checkpoint_sha256=checkpoint,
     )
-    codes, trace = generate_codes(model, prompt, Sampling())
-    waveform = np.asarray(codec.decode(codes).numpy(), dtype=np.float32)
-    output = args.output or Path("artifacts/codec_tts/synthesis.wav")
-    with atomic_binary(output) as stream:
-        sf.write(stream, waveform, 24000, format="WAV", subtype="FLOAT")
-    report = {
-        **provenance(recipe.digest),
-        **trace,
-        "waveform_sha256": digest_file(output),
-        "output": str(output),
-        "reference_sha256": digest_file(args.reference) if args.reference else None,
-        "reference_transcript_provided": bool(reference_text),
-    }
-    write_json(output.with_suffix(".stats.json"), report)
-    return report
+    return SpeechSynthesis(
+        model, codec, tokenizer, SpeechVerifier(model.audio_embedding.weight.device)
+    ).synthesize(request, settings, args.output or Path("artifacts/codec_tts/synthesis.wav"))
 
 
 def execute_model_action(
@@ -259,16 +261,27 @@ def execute_model_action(
     model = native_model(recipe, device)
     if args.action == "synthesize":
         if args.run:
-            restore_selected(model, recipe, run_directory(args.run), args.role)
+            selected = restore_selected(model, recipe, run_directory(args.run), args.role)
+            args.checkpoint_sha256 = digest_file(selected / "training.pt")
         return synthesize(args, recipe, model, tokenizer)
     root = run_directory(args.run)
-    if args.action in {"select", "export"}:
+    if args.action in {"select", "export", "stage"}:
         selected = restore_selected(model, recipe, root, args.role)
         if args.action == "select":
             if args.evaluation is None or args.review_file is None:
                 message = "selection requires --evaluation and --review-file"
                 raise ValueError(message)
             return select_review(root, selected, args.evaluation, args.review_file)
+        if args.action == "stage":
+            from agbalu.codec_tts.release import stage_model
+
+            return stage_model(
+                model,
+                recipe,
+                args.output or root / "stage",
+                args.inference_config,
+                digest_file(selected / "training.pt"),
+            )
         from tools.export_checkpoint import export_codec_tts
 
         if args.role != "best_speech":
@@ -309,6 +322,14 @@ def execute_model_action(
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.action == "verify-stage":
+        from agbalu.codec_tts.release import verify_stage
+
+        if args.output is None:
+            message = "verify-stage requires --output"
+            raise ValueError(message)
+        print(json.dumps(verify_stage(args.output)))
+        return 0
     if args.steps is not None and args.action != "smoke":
         message = "--steps is only valid for smoke; train uses the prepared exposure schedule"
         raise ValueError(message)
@@ -316,6 +337,14 @@ def main(argv: list[str] | None = None) -> int:
         message = "--stop-after must be nonnegative and is only valid for train"
         raise ValueError(message)
     recipe = read_recipe(args.config)
+    if (args.config.parent / "export.stats.json").is_file():
+        recipe = Recipe.model_validate(
+            {
+                **recipe.model_dump(),
+                "base_directory": args.config.parent.resolve(),
+                "codec_configuration": args.config.parent.resolve() / "codec.json",
+            }
+        )
     torch.manual_seed(recipe.seed)
     device = torch.device(args.device)
     if args.action == "environment":
@@ -339,7 +368,22 @@ def main(argv: list[str] | None = None) -> int:
         report = observe_languages(recipe, device)
     else:
         report = execute_model_action(args, recipe, device)
-    print(json.dumps(report, ensure_ascii=False, allow_nan=False))
+    printable = report
+    if args.action == "synthesize":
+        printable = {
+            key: report[key]
+            for key in (
+                "complete",
+                "output",
+                "audit",
+                "duration_s",
+                "attempts_this_run",
+                "cached_attempts_this_run",
+                "output_sha256",
+            )
+            if key in report
+        }
+    print(json.dumps(printable, ensure_ascii=False, allow_nan=False))
     number = report.get("signal")
     return 128 + number if isinstance(number, int) else 0
 

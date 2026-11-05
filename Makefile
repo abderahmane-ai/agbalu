@@ -1,6 +1,8 @@
 .DEFAULT_GOAL := help
 PY ?= python3
-SRC := src tests tools modal_app
+HF ?= $(firstword $(wildcard /home/jovyan/envs/agbalu-hf/bin/hf) hf)
+CODEC_PY ?= $(firstword $(wildcard /home/jovyan/envs/agbalu-codec/bin/python) $(PY))
+SRC := src tests tools modal_app stubs
 
 export PYDANTIC_DISABLE_PLUGINS := 1
 export PYTEST_DISABLE_PLUGIN_AUTOLOAD := 1
@@ -26,6 +28,12 @@ help: ## Show this help
 install: ## Editable install with dev extras
 	$(PY) -m pip install -e ".[dev]"
 
+hf-cli: ## Install the pinned publishing CLI in an isolated HPC environment
+	@test -x /home/jovyan/envs/agbalu-codec/bin/python || { echo "Run this target on the HPC."; exit 1; }
+	/home/jovyan/envs/agbalu-codec/bin/python -m venv /home/jovyan/envs/agbalu-hf
+	/home/jovyan/envs/agbalu-hf/bin/python -m pip install --timeout 20 --retries 3 --require-hashes -r requirements/hf_cli.lock
+	/home/jovyan/envs/agbalu-hf/bin/hf version
+
 lint: ## ruff check + format check
 	ruff check $(SRC)
 	ruff format --check $(SRC)
@@ -49,13 +57,17 @@ dead: ## Detect unused code across all source directories
 registry: ## Validate the corpus registry. SIBLINGS=1 validates the Berber sibling registry
 	$(call cli,registry) $(if $(SIBLINGS),--siblings resources/sibling_registry.yaml,resources/corpus_registry.yaml)
 
-codec-tts: ## Codec speech commands. TASK=inventory|prepare|language|partition|encode|synthesize|select|export CONFIG=path
-	$(call cli,codec_tts) $(if $(TASK),$(TASK),) $(if $(CONFIG),--config $(CONFIG),) \
+codec-quantize: ## Qualify speech quantization. TASK=benchmark|merge|merge-hf|convert|inspect FORMAT=bf16|nf4|int8|q8_0|q4_k BACKEND=transformers|audiocpp
+	$(PY) -m tools.quantize_speech $(if $(TASK),--task $(TASK),) $(if $(FORMAT),--format $(FORMAT),) $(if $(BACKEND),--backend $(BACKEND),) $(if $(TARGET),--target $(TARGET),) $(if $(MODEL),--model $(MODEL),) $(if $(OUTPUT),--output $(OUTPUT),) $(if $(EXPORT),--export,)
+
+codec-tts: ## Codec speech commands. TASK=synthesize|stage|verify-stage|inventory|prepare|language|partition|encode|select|export CONFIG=path
+	$(if $(filter hpc,$(TARGET)),$(PY) -m tools.launch $(TASK) --family codec_tts,$(call cli,codec_tts) $(if $(TASK),$(TASK),)) $(if $(CONFIG),--config $(CONFIG),) \
 		$(if $(RUN),--run $(RUN),) $(if $(DEVICE),--device $(DEVICE),) \
 		$(if $(TEXT_FILE),--text-file $(TEXT_FILE),) $(if $(REFERENCE),--reference $(REFERENCE),) \
 		$(if $(REFERENCE_TEXT_FILE),--reference-text-file $(REFERENCE_TEXT_FILE),) \
 		$(if $(OUTPUT),--output $(OUTPUT),) $(if $(ROLE),--role $(ROLE),) \
-		$(if $(EVALUATION),--evaluation $(EVALUATION),) $(if $(REVIEW_FILE),--review-file $(REVIEW_FILE),)
+		$(if $(EVALUATION),--evaluation $(EVALUATION),) $(if $(REVIEW_FILE),--review-file $(REVIEW_FILE),) \
+		$(if $(INFERENCE_CONFIG),--inference-config $(INFERENCE_CONFIG),)
 
 acquire: acquire-$(or $(TASK),fetch) ## Fetch sources. TASK=fetch|plan|verify|flores|siblings
 
@@ -519,6 +531,16 @@ HF_jugurtha-4bit := models  agbalu/Jugurtha-4B-MLX-4bit $(RELEASE)/Jugurtha-4B-M
 HF_jugurtha-2-9b := models  agbalu/Jugurtha-2-9B    $(RELEASE)/Jugurtha-2-9B    $(CARDS)/jugurtha-2-9b.md
 HF_jugurtha-2-9b-gguf := models agbalu/Jugurtha-2-9B-GGUF $(RELEASE)/Jugurtha-2-9B-GGUF $(CARDS)/jugurtha-2-9b-gguf.md
 HF_jugurtha-2-9b-4bit := models agbalu/Jugurtha-2-9B-MLX-4bit $(RELEASE)/Jugurtha-2-9B-MLX-4bit $(CARDS)/jugurtha-2-9b-4bit.md
+HF_matoub-4b := models agbalu/Matoub-4B $(RELEASE)/Matoub-4B $(CARDS)/matoub4b.md
+HF_matoub-4b-gguf := models agbalu/Matoub-4B-GGUF $(RELEASE)/Matoub-4B-GGUF $(CARDS)/matoub4b-gguf.md
+
+release-matoub-4b:
+	PYTHONPATH=src $(CODEC_PY) -m tools.stage_speech --kind bf16
+
+release-matoub-4b-gguf:
+	PYTHONPATH=src $(CODEC_PY) -m tools.stage_speech --kind gguf $(if $(FORMAT),--format $(FORMAT),)
+
+HF_INCLUDE_matoub-4b-gguf = $(if $(FORMAT),--include "Matoub-4B-$(FORMAT).gguf" --include "Matoub-4B-$(FORMAT).stats.json" --include README.md --include LICENSE --include NOTICE,)
 
 ALL_REPOS := kabbench kablex kabsentiment kabinflect kabtifinagh kabpunct kabg2p \
 	kabstandard kabliterary encoder tokenizer mt juba fadhma belaid boulifa matoub \
@@ -536,8 +558,9 @@ push: ## Restage and upload one repo. REPO=<any name `make release` takes>. Need
 	@test -n "$(REPO)" || { echo "REPO= is required, e.g. make push REPO=feraoun"; exit 1; }
 	@test -n "$(HF_$(REPO))" || { echo "no Hub repository registered for REPO=$(REPO)"; exit 1; }
 	$(MAKE) release-$(REPO)
-	hf upload $(word 2,$(HF_$(REPO))) $(word 3,$(HF_$(REPO))) . \
+	$(HF) upload $(word 2,$(HF_$(REPO))) $(word 3,$(HF_$(REPO))) . \
 		--repo-type=$(patsubst %s,%,$(word 1,$(HF_$(REPO)))) \
+		$(HF_INCLUDE_$(REPO)) \
 		$(foreach glob,$(HF_DELETE_$(REPO)),--delete "$(glob)")
 	@echo "pushed $(word 2,$(HF_$(REPO))) — now diff the deployed card against docs/cards/"
 
@@ -572,7 +595,7 @@ hub_url = https://huggingface.co/$(if $(filter datasets,$(word 1,$(HF_$(1)))),da
 
 push-card-%:
 	@test -f $(word 4,$(HF_$*)) || { echo "no card at $(word 4,$(HF_$*))"; exit 1; }
-	@hf upload $(word 2,$(HF_$*)) $(word 4,$(HF_$*)) README.md \
+	@$(HF) upload $(word 2,$(HF_$*)) $(word 4,$(HF_$*)) README.md \
 		--repo-type=$(patsubst %s,%,$(word 1,$(HF_$*))) >/dev/null
 	@curl -sfL $(call hub_url,$*)/resolve/main/README.md | diff -q - $(word 4,$(HF_$*)) >/dev/null \
 		&& echo "  $(word 2,$(HF_$*)) matches $(word 4,$(HF_$*))" \

@@ -14,6 +14,51 @@ from agbalu.llm.decontaminate import FLORES_CORRECTED
 
 
 class TestCommands:
+    def test_teacher_staging_preserves_checkpoint_run_and_separate_logs(self) -> None:
+        args = launch.build_parser().parse_args(
+            [
+                "stage",
+                "--family",
+                "codec_tts",
+                "--run",
+                "teacher",
+                "--output",
+                "artifacts/runs/teacher-stage/model",
+                "--role",
+                "best_ce",
+            ]
+        )
+        run, command, log, _ = launch.job(args)
+        assert run == "teacher-stage"
+        assert command[:4] == ["__codec_tts__", "stage", "--run", "teacher"]
+        assert "--role" in command
+        assert log == "teacher-stage/log.txt"
+        assert launch.module(command).startswith("timeout")
+
+    def test_teacher_synthesis_syncs_only_inputs_and_rejects_unsafe_paths(self) -> None:
+        args = launch.build_parser().parse_args(
+            [
+                "synthesize",
+                "--family",
+                "codec_tts",
+                "--run",
+                "teacher",
+                "--text-file",
+                "target.txt",
+                "--reference",
+                "voice.wav",
+                "--reference-text-file",
+                "voice.txt",
+                "--output",
+                "artifacts/speech.wav",
+            ]
+        )
+        assert launch.speech_input_paths(args) == ["target.txt", "voice.wav", "voice.txt"]
+        assert launch.job(args)[0] == "teacher-synthesis"
+        args.output = "../outside.wav"
+        with pytest.raises(launch.LaunchError, match="relative to the project"):
+            launch.job(args)
+
     def test_codec_family_routes_without_qwen_defaults(self) -> None:
         args = launch.build_parser().parse_args(
             ["train", "--family", "codec_tts", "--run", "codec-r32"]

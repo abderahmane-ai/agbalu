@@ -37,6 +37,7 @@ class AdaptedLinear(nn.Module):
         )
         nn.init.kaiming_uniform_(self.factor_a, a=math.sqrt(5))
         self.is_enabled = True
+        self.inference_scale = 1.0
 
     def forward(self, inputs: Tensor) -> Tensor:
         output: Tensor = self.original(inputs)
@@ -45,10 +46,10 @@ class AdaptedLinear(nn.Module):
         adapted = functional.linear(
             functional.linear(inputs.to(self.factor_a.dtype), self.factor_a), self.factor_b
         )
-        return output + (adapted * SCALE).to(output.dtype)
+        return output + (adapted * (SCALE * self.inference_scale)).to(output.dtype)
 
     def merged_weight(self) -> Tensor:
-        delta = self.factor_b.float() @ self.factor_a.float() * SCALE
+        delta = self.factor_b.float() @ self.factor_a.float() * (SCALE * self.inference_scale)
         return (self.original.weight.float() + delta).to(self.original.weight.dtype)
 
 
@@ -101,8 +102,7 @@ def merge_adapter(model: Generator) -> None:
     for name, layer in tuple(model.named_modules()):
         if isinstance(layer, AdaptedLinear):
             with torch.no_grad():
-                delta = layer.factor_b.float() @ layer.factor_a.float() * SCALE
-                layer.original.weight.add_(delta.to(layer.original.weight.dtype))
+                layer.original.weight.copy_(layer.merged_weight())
             parent, attribute = name.rsplit(".", 1)
             model.get_submodule(parent).set_submodule(attribute, layer.original)
 
@@ -119,3 +119,25 @@ def disabled_adapter(model: Generator) -> Iterator[None]:
     finally:
         for layer, previous in layers:
             layer.is_enabled = previous
+
+
+@contextmanager
+def scaled_adapter(model: Generator, multiplier: float) -> Iterator[None]:
+    if not math.isfinite(multiplier) or multiplier < 0:
+        message = f"adapter multiplier must be finite and nonnegative, got {multiplier!r}"
+        raise ValueError(message)
+    layers = [
+        (layer, layer.inference_scale)
+        for layer in model.modules()
+        if isinstance(layer, AdaptedLinear)
+    ]
+    if not layers and multiplier != 1:
+        message = "adapter scaling requires unmerged adapter weights"
+        raise ValueError(message)
+    try:
+        for layer, _ in layers:
+            layer.inference_scale = multiplier
+        yield
+    finally:
+        for layer, previous in layers:
+            layer.inference_scale = previous

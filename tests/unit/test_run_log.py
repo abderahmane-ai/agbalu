@@ -4,11 +4,63 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from tools.run_log import Printer, Rendered, View, bar, summary
 
 
 def event(kind: str, **values: object) -> str:
     return json.dumps({"event": kind, "time": 1792049375.85, **values})
+
+
+@pytest.mark.parametrize("eta_s", [None, 3600])
+def test_student_alignment_reports_representation_without_fabricating_ce(
+    eta_s: int | None,
+) -> None:
+    rendered = View().render(
+        event(
+            "step",
+            family="codec_student",
+            stage="alignment",
+            step=1,
+            total_steps=20,
+            representation_loss=0.4,
+            audio_ce_nats=None,
+            kd_nats=None,
+            lr=1e-4,
+            grad_norm=1.0,
+            supervised_tokens_per_s=100,
+            target_audio_s_per_s=2,
+            eta_s=eta_s,
+        )
+    )
+    assert rendered is not None
+    assert "representation 0.40000" in rendered.text
+    assert "CE" not in rendered.text
+
+
+def test_student_distillation_shows_both_losses_and_weighted_ce() -> None:
+    rendered = View().render(
+        event(
+            "step",
+            family="codec_student",
+            stage="distillation",
+            step=2,
+            total_steps=20,
+            representation_loss=None,
+            audio_ce_nats=2.0,
+            kd_nats=0.3,
+            loss_numerator=20.0,
+            supervised_tokens=10,
+            lr=1e-4,
+            grad_norm=1.0,
+            supervised_tokens_per_s=100,
+            target_audio_s_per_s=2,
+            eta_s=None,
+        )
+    )
+    assert rendered is not None
+    assert "CE 2.0000 + KD 0.3000" in rendered.text
+    assert "weighted 2.0000" in rendered.text
 
 
 def test_codec_loss_window_is_weighted_by_supervised_decisions() -> None:

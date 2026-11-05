@@ -106,3 +106,11 @@ paper/**/*.fls
 
 .agents/
 paper/
+
+# Shelved student experiment; retain local source and artifacts for possible recovery.
+/src/agbalu/codec_student/
+/tests/unit/codec_student/
+/tests/integration/codec_student/
+/resources/codec_student/
+/requirements/codec_student.lock
+/docs/cards/matoub800m.md
