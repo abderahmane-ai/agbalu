@@ -18,6 +18,8 @@ pipeline_tag: text-to-speech
 
 # Matoub-82M
 
+> **A more powerful successor is available.** [**Matoub-4B**](https://huggingface.co/agbalu/Matoub-4B) is a 4.2B-parameter codec-language model with selectable reference voices, cross-lingual voice cloning, and significantly higher naturalness. This repository remains permanently published and is the right choice when a lightweight StyleTTS2 inference path is needed. For new deployments, Matoub-4B is recommended.
+
 A text-to-speech model for **Kabyle** (Taqbaylit, `kab`): an 82M-parameter StyleTTS2 fine-tune of [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) trained on 21,953 restored Common Voice Kabyle clips from a fifties male speaker. It synthesises 24 kHz speech that reproduces the gemination, spirantisation, emphatics, and pharyngeals of Kabyle phonology in a native speaker voice — twice the sample rate of `mms-tts-kab`, the incumbent Kabyle TTS model, and under a licence that permits commercial use where that one does not.
 
 The work that makes it Kabyle is the front end. Kokoro's token table maps 114 symbols and carries none of `ˤ ʕ ħ` — pharyngealisation, and the letters `ɛ` and `ḥ` — while its G2P is built with `unk=''` and drops a phoneme it cannot represent rather than raising, which would have deleted three consonants from every training target behind a healthy loss curve. The 42-symbol Kabyle inventory was diffed against that table, the three missing symbols assigned to unused embedding rows and trained, the affricate tie bar folded onto `ʧ` and `ʤ`, and the front end made to validate against the vocabulary and raise. That is why the emphatics and pharyngeals survive to the decoder.

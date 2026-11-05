@@ -543,7 +543,7 @@ release-matoub-4b-gguf:
 HF_INCLUDE_matoub-4b-gguf = $(if $(FORMAT),--include "Matoub-4B-$(FORMAT).gguf" --include "Matoub-4B-$(FORMAT).stats.json" --include README.md --include LICENSE --include NOTICE,)
 
 ALL_REPOS := kabbench kablex kabsentiment kabinflect kabtifinagh kabpunct kabg2p \
-	kabstandard kabliterary encoder tokenizer mt juba fadhma belaid boulifa matoub \
+	kabstandard kabliterary encoder tokenizer mt juba fadhma belaid boulifa matoub matoub-4b matoub-4b-gguf \
 	feraoun feraoun-pro simohand dihya dihya-22m masinissa-sentiment jugurtha jugurtha-gguf jugurtha-4bit \
 	jugurtha-2-9b jugurtha-2-9b-gguf
 
