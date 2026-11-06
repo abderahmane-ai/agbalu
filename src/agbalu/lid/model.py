@@ -240,7 +240,10 @@ class CharClassifier(nn.Module):
     def forward(
         self, input_ids: Tensor, pad_mask: Tensor | None = None, labels: Tensor | None = None
     ) -> Output:
-        hidden = self.stem(self.embed(input_ids))
+        if pad_mask is None:
+            pad_mask = input_ids != 0
+        embedded = self.embed(input_ids).masked_fill(~pad_mask.unsqueeze(-1), 0.0)
+        hidden = self.stem(embedded)
         for layer in self.layers:
             hidden = layer(hidden, self.rope_freqs, mask=pad_mask)
         pooled = self.pool(self.final_norm(hidden), pad_mask=pad_mask)

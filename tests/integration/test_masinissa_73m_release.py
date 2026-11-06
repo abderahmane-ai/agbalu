@@ -47,12 +47,15 @@ def test_masinissa_73m_transformers_loading() -> None:
     model = AutoModelForMaskedLM.from_pretrained(str(RELEASE_DIR), trust_remote_code=True)
     model.eval()
 
-    text = "Axxam n [MASK] meqqer."
+    text = "Tamaziɣt d [MASK] n imezwura-nneɣ."
     encoded = tokenizer(text, return_tensors="pt")
     with torch.inference_mode():
         logits = model(**encoded).logits
 
     assert logits.shape == (1, encoded["input_ids"].shape[1], 16000)
+    mask_pos = (encoded["input_ids"][0] == tokenizer.mask_token_id).nonzero()[0, 0]
+    top_token = str(tokenizer.decode([int(logits[0, mask_pos].argmax().item())])).strip()
+    assert top_token == "tayemmat"
 
     # Base AutoModel test
     base = AutoModel.from_pretrained(str(RELEASE_DIR), trust_remote_code=True)

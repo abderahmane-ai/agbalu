@@ -1,4 +1,4 @@
-"""Configuration for the Dihya-5M Berber language identifier."""
+"""Configuration for the Dihya byte-level language identifier."""
 
 from __future__ import annotations
 

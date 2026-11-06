@@ -1,11 +1,11 @@
-"""Dihya-5M: byte-level Berber language identification.
+"""Dihya: byte-level Berber and North African language identification.
 
 Module attribute names are the published checkpoint's state_dict keys. Renaming one
 breaks `from_pretrained` for everybody who downloaded the release.
 
-The contrastive projection head the model was trained with is not here. It shapes the
-trunk during training and is never read at inference, so shipping it would hand every
-downloader 98,304 parameters that no forward pass touches.
+The contrastive projection and auxiliary heads the model was trained with are not here.
+They shape the trunk during training and are never read at inference, so shipping them
+would hand every downloader parameters that no forward pass touches.
 """
 
 from __future__ import annotations
@@ -231,8 +231,13 @@ class DihyaForSequenceClassification(DihyaPreTrainedModel):
         return_dict: bool | None = None,
         **kwargs: Any,
     ) -> SequenceClassifierOutput | tuple[Tensor, ...]:
-        mask = attention_mask.bool() if attention_mask is not None else None
-        hidden = self.stem(self.embed(input_ids))
+        mask = (
+            attention_mask.bool()
+            if attention_mask is not None
+            else input_ids != self.config.pad_token_id
+        )
+        embedded = self.embed(input_ids).masked_fill(~mask.unsqueeze(-1), 0.0)
+        hidden = self.stem(embedded)
         freqs = rope_freqs(
             self.config.head_size,
             input_ids.size(1),

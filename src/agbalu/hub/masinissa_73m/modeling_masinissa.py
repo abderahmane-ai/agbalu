@@ -44,24 +44,22 @@ class RMSNorm(nn.Module):
 
     def forward(self, x: Tensor) -> Tensor:
         norm = torch.rsqrt(x.float().square().mean(dim=-1, keepdim=True) + self.epsilon)
-        return (x.float() * norm).to(x.dtype) * self.weight
+        return (x.float() * norm).to(x.dtype) * self.weight.to(x.dtype)
 
 
 class DepthAttention(nn.Module):
     def __init__(self, width: int, epsilon: float = 1e-6) -> None:
         super().__init__()
-        self.query = nn.Parameter(torch.empty(width))
+        self.query = nn.Parameter(torch.zeros(width))
         self.norm = RMSNorm(width, epsilon)
-        self.scale = 1.0 / math.sqrt(width)
 
     def forward(self, blocks: list[Tensor], partial: Tensor | None) -> Tensor:
         candidates = [*blocks, *([] if partial is None else [partial])]
         stacked = torch.stack(candidates, dim=0)  # [num_candidates, batch, length, width]
         normed = self.norm(stacked)
-        # Compute projection: [num_candidates, batch, length]
-        scores = functional.linear(normed, self.query) * self.scale
-        weights = functional.softmax(scores, dim=0).unsqueeze(-1)
-        return (stacked * weights).sum(dim=0)
+        weights = (normed.float() * self.query.float()).sum(dim=-1).softmax(dim=0).to(stacked.dtype)
+        out: Tensor = (weights.unsqueeze(-1) * stacked).sum(dim=0)
+        return out
 
 
 class Attention(nn.Module):
@@ -77,7 +75,6 @@ class Attention(nn.Module):
         self.output = nn.Linear(width, width, bias=False)
         self.q_norm = RMSNorm(self.head_size, config.layer_norm_eps)
         self.k_norm = RMSNorm(self.head_size, config.layer_norm_eps)
-        self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
     def forward(
         self,
@@ -96,12 +93,10 @@ class Attention(nn.Module):
 
         position_q, position_k = relative  # [heads, 2*buckets-1, head_size]
 
-        # Content-to-content scores: [batch, heads, length, length]
-        c2c = torch.matmul(q.float(), k.float().transpose(-1, -2))
-
-        # Relative position terms
         positions = torch.arange(length, device=hidden.device)
-        distance = positions.unsqueeze(1) - positions.unsqueeze(0)  # [length, length]
+        qi = positions[:, None]
+        ki = positions[None, :]
+        distance = qi - ki  # [length, length]
         forward_buckets = log_bucket_indices(
             distance, self.config.position_buckets, self.config.max_position_embeddings
         )
@@ -109,28 +104,37 @@ class Attention(nn.Module):
             -distance, self.config.position_buckets, self.config.max_position_embeddings
         )
 
-        # c2p: q * position_k[forward] -> [heads, length, 2*buckets-1]
-        c2p_table = torch.matmul(q[0].float(), position_k.float().transpose(-1, -2))
-        p2c_table = torch.matmul(k[0].float(), position_q.float().transpose(-1, -2))
+        valid = (
+            attention_mask.bool()
+            if attention_mask is not None
+            else torch.ones((batch, length), dtype=torch.bool, device=hidden.device)
+        )
 
-        # Gather along length x length: [heads, length, length]
-        c2p = c2p_table[:, torch.arange(length)[:, None], forward_buckets]
-        p2c = p2c_table[:, torch.arange(length)[:, None], reverse_buckets]
+        with torch.autocast(hidden.device.type, enabled=False):
+            # Content-to-content scores: [batch, heads, length, length]
+            c2c = torch.matmul(q.float(), k.float().transpose(-1, -2))
 
-        scores = (c2c + c2p.unsqueeze(0) + p2c.unsqueeze(0)) * self.scale
+            # Positional score tables per batch item: [batch, heads, length, 2*buckets-1]
+            c2p_table = torch.matmul(q.float(), position_k.float().unsqueeze(0).transpose(-1, -2))
+            p2c_table = torch.matmul(k.float(), position_q.float().unsqueeze(0).transpose(-1, -2))
 
-        if attention_mask is not None:
-            # attention_mask: [batch, length]
-            mask_expanded = attention_mask[:, None, None, :].bool()
-            scores = torch.where(mask_expanded, scores, float("-inf"))
+            # Gather along query/key indices: [batch, heads, length, length]
+            c2p = c2p_table[:, :, qi, forward_buckets]
+            p2c = p2c_table[:, :, ki, reverse_buckets]
 
-        probs = functional.softmax(scores, dim=-1).to(hidden.dtype)
-        probs = self.dropout(probs)
+            scores = (c2c + c2p + p2c) * self.scale
 
-        context = torch.matmul(probs, v)  # [batch, heads, length, head_size]
+            real_pairs = valid[:, None, :, None] & valid[:, None, None, :]
+            safe_pad = (~valid[:, None, :, None]) & (qi == ki)[None, None, :, :]
+            allowed = real_pairs | safe_pad
+            scores = torch.where(allowed, scores, float("-inf"))
+
+            probs = functional.softmax(scores, dim=-1)
+            context = torch.matmul(probs, v.float()).to(hidden.dtype)
+
         context = context.permute(0, 2, 1, 3).contiguous().reshape(batch, length, -1)
         projected: Tensor = self.output(context)
-        return projected
+        return projected * valid.unsqueeze(-1).to(projected.dtype)
 
 
 class Layer(nn.Module):
@@ -189,6 +193,10 @@ class MasinissaModel(PreTrainedModel):
             nn.init.trunc_normal_(module.weight, std=std, a=-2 * std, b=2 * std)
             if getattr(module, "bias", None) is not None and module.bias is not None:
                 nn.init.zeros_(module.bias)
+        elif isinstance(module, MasinissaModel):
+            nn.init.trunc_normal_(module.relative, std=std, a=-2 * std, b=2 * std)
+        elif isinstance(module, DepthAttention):
+            nn.init.zeros_(module.query)
 
     def get_input_embeddings(self) -> nn.Embedding:
         return self.embedding
@@ -218,12 +226,12 @@ class MasinissaModel(PreTrainedModel):
         all_hidden_states: list[Tensor] | None = [embedded] if output_hidden_states else None
 
         head_shape = (
-            self.config.num_attention_heads,
             2 * self.config.position_buckets - 1,
+            self.config.num_attention_heads,
             self.config.head_size,
         )
-        pq = self.position_q(self.relative).view(head_shape)
-        pk = self.position_k(self.relative).view(head_shape)
+        pq = self.position_q(self.relative).view(head_shape).transpose(0, 1)
+        pk = self.position_k(self.relative).view(head_shape).transpose(0, 1)
         relative = (pq, pk)
 
         for index, layer in enumerate(self.layers):
@@ -286,7 +294,7 @@ class MasinissaForMaskedLM(PreTrainedModel):
             return_dict=True,
         )
         hidden_states = outputs.last_hidden_state
-        projected = self.head_norm(self.head(hidden_states))
+        projected = self.head_norm(functional.gelu(self.head(hidden_states)))
         # Tied prediction logits
         logits = functional.linear(projected, self.masinissa.embedding.weight, self.vocabulary_bias)
 

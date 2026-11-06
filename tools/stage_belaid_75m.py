@@ -183,17 +183,18 @@ def apply_case(word: str, label: int | tuple[int, ...]) -> str:
 
 
 def log_bucket_position(offsets: Tensor, buckets: int, max_distance: int) -> Tensor:
-    sign = torch.sign(offsets)
-    distance = torch.abs(offsets)
-    mid = buckets // 2
-    boundary = float(max_distance - 1)
-    scaled = torch.clamp(distance, min=1).float()
-    log_bucket = (
-        torch.ceil(torch.log(scaled / mid) / math.log(boundary / mid) * (mid - 1)).long() + mid
+    middle = buckets // 2
+    distance = offsets.abs().clamp(min=middle, max=max_distance - 1)
+    logarithmic = (
+        middle
+        + torch.ceil(
+            torch.log(distance.float() / middle)
+            / math.log((max_distance - 1) / middle)
+            * (middle - 1)
+        ).long()
     )
-    clipped = torch.clamp(log_bucket, max=buckets - 1)
-    bucket = torch.where(distance < mid, distance, clipped)
-    return buckets - 1 + bucket * sign
+    signed = torch.where(offsets.abs() <= middle, offsets, logarithmic * offsets.sign())
+    return signed + buckets - 1
 
 
 class RMSNorm(nn.Module):
@@ -424,12 +425,11 @@ class BelaidForTokenClassification(PreTrainedModel):
         types = self.punctuation(boundary)
         struct = self.structure(boundary)
 
-        case_starts, case_ends = case_spans.unbind(-1)
-        c_first = hidden[case_starts]
+        _, case_ends = case_spans.unbind(-1)
         c_last = hidden[(case_ends - 1).clamp(min=0)]
         word_ctx = words[case_words]
         case_input = torch.cat(
-            (c_first + c_last, word_ctx, case_features.to(hidden.dtype)), dim=-1
+            (c_last, word_ctx, case_features.to(hidden.dtype)), dim=-1
         )
         cases = self.casing(case_input)
 
@@ -449,7 +449,7 @@ class BelaidForTokenClassification(PreTrainedModel):
                 results.append("")
                 continue
 
-            # Encode subwords
+            # Encode subwords and align hyphen/apostrophe components to subword spans
             sub_ids: list[int] = []
             word_sub_spans: list[tuple[int, int]] = []
             case_sub_spans: list[tuple[int, int]] = []
@@ -458,24 +458,56 @@ class BelaidForTokenClassification(PreTrainedModel):
 
             for w_idx, word in enumerate(words):
                 w_start_sub = len(sub_ids) + 1  # account for BOS
-                encoded_w = tokenizer.encode(word.lower(), add_special_tokens=False)
+                lower = word.lower()
+                offsets: list[tuple[int, int]] | None = None
+                if callable(tokenizer):
+                    try:
+                        tok_out = tokenizer(
+                            lower, add_special_tokens=False, return_offsets_mapping=True
+                        )
+                        encoded_w = list(tok_out["input_ids"])
+                        offsets = [
+                            (int(s), int(e)) for s, e in tok_out.get("offset_mapping", [])
+                        ]
+                    except Exception:
+                        encoded_w = list(tokenizer.encode(lower, add_special_tokens=False))
+                else:
+                    encoded_w = list(tokenizer.encode(lower, add_special_tokens=False))
                 if not encoded_w:
                     encoded_w = [1]  # UNK
+                    offsets = [(0, len(lower))]
                 sub_ids.extend(encoded_w)
                 w_end_sub = len(sub_ids) + 1
                 word_sub_spans.append((w_start_sub, w_end_sub))
 
-                # Components
                 matches = list(CASE_COMPONENT.finditer(word))
-                c_total = len(matches)
-                for c_idx, match in enumerate(matches):
-                    # byte offsets approx to subword span
-                    c_span_start = w_start_sub
-                    c_span_end = w_end_sub
+                w_char_len = float(max(1, len(lower)))
+                for match in matches:
+                    first_char = len(word[: match.start()].lower())
+                    last_char = len(word[: match.end()].lower())
+                    if offsets and len(offsets) == len(encoded_w):
+                        matched_indices = [
+                            idx
+                            for idx, (s, e) in enumerate(offsets)
+                            if s < last_char and e > first_char
+                        ]
+                    else:
+                        matched_indices = []
+                    if matched_indices:
+                        c_span_start = w_start_sub + matched_indices[0]
+                        c_span_end = w_start_sub + matched_indices[-1] + 1
+                    else:
+                        c_span_start = w_start_sub
+                        c_span_end = w_end_sub
                     case_sub_spans.append((c_span_start, c_span_end))
                     case_word_idx.append(w_idx)
-                    inv_c = 1.0 / max(1, c_total)
-                    case_feats.append([c_idx * inv_c, (c_idx + 1) * inv_c, inv_c])
+                    case_feats.append(
+                        [
+                            first_char / w_char_len,
+                            last_char / w_char_len,
+                            (last_char - first_char) / w_char_len,
+                        ]
+                    )
 
             full_ids = [2, *sub_ids, 3]  # BOS, ..., EOS
             input_ids = torch.tensor(full_ids, dtype=torch.long, device=device)
@@ -504,6 +536,7 @@ class BelaidForTokenClassification(PreTrainedModel):
             p_np = p.float().cpu().numpy()
             t_np = types.float().cpu().numpy()
             c_np = cases.float().cpu().numpy() if cases.size(0) > 0 else np.zeros((0, 3))
+            s_np = struct.float().cpu().numpy()
 
             # Joint logits
             log_present = -np.logaddexp(0, -p_np)
@@ -514,6 +547,7 @@ class BelaidForTokenClassification(PreTrainedModel):
                 (log_none[:, None], log_present[:, None] + log_types), axis=1
             )
             marks_pred = joint.argmax(-1)
+            struct_pred = [self.config.templates[int(v)] for v in s_np.argmax(-1)]
 
             # Assign case predictions per word
             c_preds = c_np.argmax(-1) if c_np.size > 0 else np.zeros((0,), dtype=int)
@@ -532,14 +566,42 @@ class BelaidForTokenClassification(PreTrainedModel):
                 else:
                     word_cases.append(0)
 
-            # Render text
+            # Render text with structure templates
+            stack: list[str] = []
+
+            def constrain(val: str) -> str:
+                out_chars: list[str] = []
+                for ch in val:
+                    c = ("»" if stack and stack[-1] == "»" else "«") if ch == '"' else ch
+                    if c in OPENERS:
+                        stack.append(OPENERS[c])
+                    elif c in OPENERS.values():
+                        if not stack or stack[-1] != c:
+                            continue
+                        stack.pop()
+                    out_chars.append(c)
+                return "".join(out_chars)
+
+            def render_gap(val: str, initial: bool) -> str:
+                if not val:
+                    return "" if initial else " "
+                opener = next(
+                    (i for i, ch in enumerate(val) if ch in OPENERS or ch in "—–-"), None
+                )
+                if opener is None:
+                    return val + " "
+                before, after = val[:opener], val[opener:]
+                return (
+                    before
+                    + (" " if before or not initial else "")
+                    + after
+                    + (" " if after[-1:] in "—–-" else "")
+                )
+
             pieces: list[str] = []
             for index, word in enumerate(words):
-                mark_before = MARKS[marks_pred[index]]
-                if mark_before:
-                    pieces.append(mark_before + " ")
-                elif index > 0:
-                    pieces.append(" ")
+                gap_val = struct_pred[index].replace(PRIMARY, MARKS[marks_pred[index]])
+                pieces.append(render_gap(constrain(gap_val), initial=(index == 0)))
 
                 w_case = word_cases[index]
                 if marks_pred[index] in TERMINAL_LABELS:
@@ -550,9 +612,8 @@ class BelaidForTokenClassification(PreTrainedModel):
 
                 pieces.append(apply_case(word, w_case))
 
-            final_mark = MARKS[marks_pred[-1]]
-            if final_mark:
-                pieces.append(final_mark)
+            terminal = struct_pred[-1].replace(PRIMARY, MARKS[marks_pred[-1]])
+            pieces.append(constrain(terminal))
 
             results.append("".join(pieces).strip())
 

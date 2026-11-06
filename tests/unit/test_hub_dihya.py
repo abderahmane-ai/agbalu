@@ -15,6 +15,8 @@ import pytest
 import torch
 from tools.stage_hub import BYTE_VALUES, build_byte_tokenizer, byte_to_character
 
+from agbalu.dihya.config import ModelConfig as Dihya22MConfig
+from agbalu.dihya.model import Classifier
 from agbalu.hub.dihya.configuration_dihya import CLASSES, DihyaConfig
 from agbalu.hub.dihya.modeling_dihya import DihyaForSequenceClassification
 from agbalu.lid.config import BYTE_OFFSET, PAD_ID, UNK_ID, ModelConfig
@@ -204,3 +206,42 @@ def test_identify_handles_an_empty_batch_and_a_bare_string() -> None:
     assert model.identify([]) == []
     assert len(model.identify("azul")) == 1
     assert len(model.identify(["azul", ""])) == 2
+
+
+def test_dihya_22m_padding_values_and_missing_mask_do_not_change_logits() -> None:
+    """Masked embeddings are zeroed before ConvStem, and omitted attention_mask
+    defaults to `input_ids != pad_token_id` just like `agbalu.dihya.model.Classifier`."""
+    torch.manual_seed(0)
+    m_cfg = Dihya22MConfig(embed_dim=16, num_heads=2, num_layers=1, intermediate_dim=32, conv_dim=8)
+    trained = Classifier(m_cfg).eval()
+    released = DihyaForSequenceClassification(
+        DihyaConfig(
+            vocab_size=m_cfg.vocab_size,
+            hidden_size=m_cfg.embed_dim,
+            intermediate_size=m_cfg.intermediate_dim,
+            num_attention_heads=m_cfg.num_heads,
+            num_hidden_layers=m_cfg.num_layers,
+            conv_kernels=list(m_cfg.conv_kernels),
+            conv_dim=m_cfg.conv_dim,
+            max_position_embeddings=m_cfg.max_length,
+            dropout_prob=0.0,
+            logit_scale=m_cfg.scale,
+            classes=list(m_cfg.classes),
+        )
+    ).eval()
+    released.load_state_dict(trained.state_dict(), strict=False)
+
+    tokens = torch.tensor([[3, 5, 7]])
+    padded_zeros = torch.tensor([[3, 5, 7, 0, 0, 0], [3, 8, 4, 6, 5, 7]])
+    padded_nonzero = torch.tensor([[3, 5, 7, 99, 100, 101], [3, 8, 4, 6, 5, 7]])
+    mask = torch.tensor([[1, 1, 1, 0, 0, 0], [1, 1, 1, 1, 1, 1]])
+
+    with torch.inference_mode():
+        expected = trained(tokens).logits[0]
+        alone = released(tokens).logits[0]
+        no_mask = released(padded_zeros).logits[0]
+        masked_nonzero = released(padded_nonzero, attention_mask=mask).logits[0]
+
+    assert torch.allclose(expected, alone, atol=1e-5, rtol=1e-5)
+    assert torch.allclose(alone, no_mask, atol=1e-5, rtol=1e-5)
+    assert torch.allclose(alone, masked_nonzero, atol=1e-5, rtol=1e-5)
