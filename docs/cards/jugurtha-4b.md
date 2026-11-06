@@ -105,7 +105,7 @@ model-index:
 
 # Jugurtha-4B
 
-A 4.2B-parameter generative model for **Kabyle** (Taqbaylit, `kab`, Latin script) with native
+A 4.2B-parameter (4,205,751,296 text tower / 4,539,265,536 total) generative model for **Kabyle** (Taqbaylit, `kab`, Latin script) with native
 chain-of-thought reasoning in Taqbaylit. It is, as far as we can establish, **the first
 general-purpose generative model to produce verified, orthographically correct Kabyle** across
 conversation, translation, and multi-step reasoning.

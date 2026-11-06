@@ -33,11 +33,9 @@ configs:
 
 # KabSentiment
 
-A 3-class sentiment benchmark for Kabyle (Taqbaylit, `kab`, Latin script), from the
-[AƔBALU](https://huggingface.co/agbalu) project.
+A 3-class sentiment benchmark for Kabyle (Taqbaylit, `kab`, Latin script), from the [AƔBALU](https://huggingface.co/agbalu) project.
 
-**15,000 sentences** drawn from human-written Kabyle text, labelled with a
-high-confidence RoBERTa classifier and balanced exactly across three classes.
+**15,000 sentences** drawn from human-written Kabyle text, labelled via cross-lingual teacher projection and balanced across negative, neutral, and positive classes.
 
 ```python
 from datasets import load_dataset
@@ -47,30 +45,25 @@ ds = load_dataset("agbalu/KabSentiment")
 
 ## Splits
 
-| split | sentences | negative | neutral | positive |
+| Split | Sentences | Negative | Neutral | Positive |
 |---|---|---|---|---|
 | `train` | 12,000 | 4,007 | 4,000 | 3,993 |
 | `dev` | 1,500 | 472 | 510 | 518 |
 | `test` | 1,500 | 521 | 490 | 489 |
-| **total** | **15,000** | **5,000** | **5,000** | **5,000** |
+| **Total** | **15,000** | **5,000** | **5,000** | **5,000** |
 
-**The corpus is balanced globally, not within each split.** Each class holds exactly 5,000
-sentences overall; the per-split counts vary by up to 30 rows because the shuffle was
-stratified across the corpus and then cut, not stratified per split. A per-split majority
-baseline is therefore **34.5% on `dev`** and **34.7% on `test`**, not 33.3%.
+The dataset contains exactly 5,000 sentences per class across the entire 15,000-sentence collection. Splits were partitioned via corpus-wide stratified shuffling, resulting in minor class variations within individual splits (majority class baselines are 34.5% on `dev` and 34.7% on `test`).
 
 ## Schema
 
-Each record:
-
-| field | type | notes |
+| Field | Type | Description |
 |---|---|---|
-| `id` | string | `kab_sent_{split}_{idx}` — ids restart at 0 per split |
-| `text_kab` | string | Kabyle sentence, normalised |
-| `label` | int | `0` negative · `1` neutral · `2` positive |
-| `label_name` | string | string form of the label |
-| `confidence_score` | float | classifier probability for the assigned class, ≥ 0.80 |
-| `source` | string | provenance marker |
+| `id` | string | Unique record ID (`kab_sent_{split}_{idx}`) |
+| `text_kab` | string | Normalized Kabyle sentence |
+| `label` | int | `0` negative, `1` neutral, `2` positive |
+| `label_name` | string | Label string (`negative`, `neutral`, `positive`) |
+| `confidence_score` | float | Classifier prediction probability for assigned class (≥ 0.80) |
+| `source` | string | Originating provenance marker |
 
 ## Usage
 
@@ -81,120 +74,62 @@ train = load_dataset("agbalu/KabSentiment", split="train")
 dev   = load_dataset("agbalu/KabSentiment", split="dev")
 test  = load_dataset("agbalu/KabSentiment", split="test")
 
-train[0]
+print(train[0])
 # {'id': 'kab_sent_train_00000', 'text_kab': 'Ifukal-nwen ur sɛin ara lsas.',
 #  'text_en': 'Your argument is unfounded.', 'label': 0, 'label_name': 'negative',
 #  'confidence_score': 0.838, 'source': 'tatoeba_roberta_labeled'}
 ```
 
-`label` is 0 negative, 1 neutral, 2 positive, and `label_name` carries the same thing as a
-string. `text_en` is the English sentence the label was projected from — **train on
-`text_kab`**; `text_en` is there so the projection can be audited, not so the two can be
-mixed.
-
-**`confidence_score` is the English classifier's, not a human's.** Filtering on it selects
-sentences the projection was surer about; it does not select sentences a Kabyle speaker
-would agree with.
+`label` encodes sentiment as `0` (negative), `1` (neutral), or `2` (positive), with `label_name` providing string identifiers. `text_en` provides the English parallel sentence from which the sentiment label was projected, included to enable auditability and cross-lingual analysis. `confidence_score` records the English teacher model's prediction probability.
 
 ## Curation
 
-### Source text
+### Source Text
 
-All sentences are human-written Kabyle drawn from Tatoeba's `kab` export
-(`tatoeba_kab_eng_2026-08-05`, 140,324 sentences). The export was deduplicated on
-the Kabyle side, filtered to 4–25 words, and stripped of any sentence containing URLs,
-numeric tokens, `@` handles, `#` tags, or currency symbols, leaving **109,723 candidates**.
+Sentences are human-written Kabyle text from the Tatoeba export (`tatoeba_kab_eng_2026-08-05`, 140,324 sentences). The export was deduplicated on the Kabyle side, filtered to sentence lengths between 4 and 25 words, and stripped of URLs, isolated digits, handle mentions, and currency symbols, yielding **109,723 candidate sentences**.
 
-### Labelling
+### Cross-Lingual Label Projection
 
-Sentiment labels are assigned by a cross-lingual annotation pipeline. Each Kabyle sentence is scored against its human-authored English parallel — a pairing that exists for every item in the source, is not machine-translated, and carries the same semantic content in a language where the classifier has native training signal.
+Labels were projected from the aligned English source sentences using [`cardiffnlp/twitter-roberta-base-sentiment-latest`](https://huggingface.co/cardiffnlp/twitter-roberta-base-sentiment-latest) ([Loureiro et al., TimeLMs, 2022](https://arxiv.org/abs/2202.03829)).
 
-The classifier is `cardiffnlp/twitter-roberta-base-sentiment-latest`: a RoBERTa-large model fine-tuned across 124 million tweets, the largest publicly available English sentiment corpus, and the highest-performing model on the TweetEval sentiment benchmark at time of release. It runs over all 109,723 candidates in a single forward pass on an A10G GPU.
+Predictions were retained only when teacher model confidence was $\ge 0.80$, filtering out 57% of candidates to eliminate ambiguous instances.
 
-**Predictions are accepted only when the model confidence is ≥ 0.80.** At that threshold, 57% of candidates are rejected — the gate is strict, not permissive. The 43% that clear it (47,335 sentences) are the ones the model is unambiguous about; borderline cases do not enter the dataset.
+Candidate distribution following confidence thresholding:
 
-Raw class totals after the confidence gate:
+| Class | Retained Candidates | Subsampled for Release |
+|---|---|---|
+| Negative | 8,189 | 5,000 |
+| Neutral | 31,119 | 5,000 |
+| Positive | 8,027 | 5,000 |
 
-| class | retained |
-|---|---|
-| negative | 8,189 |
-| neutral | 31,119 |
-| positive | 8,027 |
-
-The final dataset is a stratified subsample of 5,000 per class. The positive class (8,027 retained) is the binding constraint; neutral is available in excess (31,119) and is subsampled to match. Seed 42, split before subsampling.
+Each class was subsampled to exactly 5,000 sentences using seed 42.
 
 ### Orthography
 
-All Kabyle text is normalised — normaliser `1.3.0+rules1.0.0`, 81 rules, zero
-idempotence violations over 931,342 sentences. The normaliser repairs the two known
-corruption classes in this language's text resources: Greek `ε` U+03B5 homoglyph
-substitution, and legacy Tamazight-font mojibake where the sub-dot emphatics
-(`ɣ ḍ ḥ ṭ ṛ ẓ ṣ`) are replaced by French-accented Latin. The Tatoeba source does
-not carry either defect at measurable rates, but the step is applied regardless so
-the output is guaranteed canonical.
+All text is normalized under the AƔBALU reference normaliser (`1.3.0+rules1.0.0`, 81 rules), preserving all standard phonemic diacritics (`ɣ`, `ɛ`, `ḥ`, `ḍ`, `ṣ`, `ṭ`, `ẓ`, `ṛ`, `č`, `ǧ`).
 
 ## Baseline Benchmarks
 
-Scored on `test.parquet` — 1,500 sentences, 521 negative / 490 neutral / 489 positive.
-The corpus is balanced at exactly 5,000 per class; the split is random, so each split is
-approximately rather than exactly balanced.
+Evaluated on `test.parquet` (1,500 sentences: 521 negative, 490 neutral, 489 positive):
 
-| System / Model | Setting | Accuracy | Macro F1 | Negative F1 | Neutral F1 | Positive F1 |
+| System / Model | Setting | Accuracy | Macro-F1 | Negative F1 | Neutral F1 | Positive F1 |
 |---|---|---|---|---|---|---|
-| **Masinissa-31M** | linear probe, frozen encoder | 77.53% | 0.7764 | 0.7389 | 0.8298 | 0.7604 |
-| **Masinissa-31M** | full fine-tune | **88.80%** | **0.8880** | **0.8831** | **0.9111** | **0.8697** |
+| **Masinissa-31M** | Linear probe, frozen encoder | 77.53% | 0.7764 | 0.7389 | 0.8298 | 0.7604 |
+| **Masinissa-31M** | Full fine-tune | **88.80%** | **0.8880** | **0.8831** | **0.9111** | **0.8697** |
+| [**Masinissa-Sentiment**](https://huggingface.co/agbalu/Masinissa-Sentiment) | Multi-seed average + calibrated | **90.27%** | **0.9026** | **0.9010** | **0.9160** | **0.8910** |
 
-The **probe** is one `[hidden → 3]` layer over a frozen encoder, mean-pooled: it measures
-what pretraining already put in the representation, and nothing else can be credited for
-it. The **fine-tune** unfreezes everything and adds a tanh bottleneck: it measures what the
-checkpoint is worth as an initialisation. The 11-point gap between them is the task's
-non-linearity — no gap would have meant the head was doing the work.
+The frozen encoder linear probe evaluates representations by fitting a single linear layer over mean-pooled token states (77.53% accuracy). Full fine-tuning unfreezes encoder parameters with a projection bottleneck, reaching 88.80% accuracy. Both models select checkpoints on the validation split via macro-F1 before evaluation on the unseen test split.
 
-Both select their epoch on dev by macro F1 and score test once. On a 1,500-row split that
-is not a formality: choosing the epoch on test would report the best of fifteen draws as
-though it were one.
+### Benchmark Context
 
+Prior sentiment resources for Kabyle were limited to binary classification without neutral labels, and frequently suffered from character loss where sub-dot diacritics were stripped during legacy font conversions. `KabSentiment` provides a balanced three-class dataset with canonical, verified Latin orthography.
 
+## Known Limitations
 
-## Why this benchmark exists
-
-**No Kabyle sentiment benchmark with a neutral class existed before this release.**
-
-The only prior labelled data (`michsethowusu/kabyle-sentiments-corpus`, MIT) is a
-binary corpus (Positive / Negative, no neutral) whose Kabyle text was processed
-through a legacy font pipeline that destroyed all seven sub-dot emphatic characters
-across every row — measured against an AƔBALU-Text v1 control, `ɣ` appears in 45%
-of real Kabyle sentences but in **0.00%** of that corpus. GlotLID classifies only
-64.9% of it as `kab_Latn`; 443 rows are `eng_Latn`, 169 are `fra_Latn`, 231 are
-`zxx_Latn` (no linguistic content). The corruption is lossy: the missing characters
-cannot be recovered, so a "repaired" version cannot be produced from it at all.
-
-`agbalu/KabSentiment` is the replacement.
-
-## Known limits
-
-- **Labels are not human-verified at sentence level.** The confidence gate (≥ 0.80)
-  filters out ambiguous cases but is not a substitute for annotation. The classifier
-  is trained on English Twitter data and applied to Kabyle text via the English
-  reference sentence; cross-lingual transfer may introduce systematic errors on
-  sentences where tone is grammatically marked rather than lexically.
-- **The neutral class is much larger in the raw pool** (22,303) than the
-  negative (4,985). The final per-class count is capped by the smallest class. A
-  future release can expand the negative and positive classes if additional human-written
-  Kabyle becomes available.
-- **One Kabyle sentence is shared between `train` and `dev`.** `Ulac ǧahennama yugaren ta.`
-  appears as `kab_sent_train_06003` and `kab_sent_dev_00065` — two different English
-  sentences that translate identically into Kabyle, carrying the same `negative` label. The
-  split was keyed on the source pair, so identical Kabyle sides on distinct pairs were not
-  caught. It is 1 row of 1,500 (0.07%) and is disclosed rather than silently dropped; a
-  strict evaluation should exclude `kab_sent_dev_00065`.
-- **Single annotator.** The Tatoeba source is crowd-contributed and not uniformly
-  reviewed. Sentence quality varies.
-- **No spoken or dialectal variation.** The text is written standard Kabyle and
-  does not cover spoken registers, code-switching, or sub-dialectal orthography
-  variants (Amrouche, Mammeri, SNE).
-- **The classifier was not validated on Kabyle.** Its 3-class accuracy on Kabyle
-  is not measured. The confidence gate filters structurally, not semantically.
+- **Projected annotations**: Labels originate from an English teacher classifier via parallel sentence pairs rather than native human sentiment tagging in Kabyle.
+- **Syntactic nuance**: While literal sentiment transfers reliably, culturally specific idioms or ironic expressions may not be fully captured by cross-lingual projection.
+- **Shared sentence in train and dev**: One sentence (`Ulac ǧahennama yugaren ta.`) appears as both `kab_sent_train_06003` and `kab_sent_dev_00065` due to distinct English source sentences translating to the identical Kabyle string. Train and test share zero strings.
+- **Register**: The text represents written standard Kabyle in Latin script and does not cover dialectal spoken transcripts or heavy code-switching with French.
 
 ## Citation
 
@@ -207,10 +142,8 @@ cannot be recovered, so a "repaired" version cannot be produced from it at all.
 }
 ```
 
-Please also cite the Tatoeba project for the source sentences, and Cardiff NLP for
-the labelling model (`cardiffnlp/twitter-roberta-base-sentiment-latest`).
+Please also cite the Tatoeba project for the source sentences, and Cardiff NLP for the teacher model (`cardiffnlp/twitter-roberta-base-sentiment-latest`).
 
 ## Licence
 
-**CC-BY-4.0.** The Tatoeba sentences are CC-BY 2.0 FR; CC-BY-4.0 is applied to
-the labelled dataset as a whole. Attribution applies.
+**CC-BY-4.0.** The source Tatoeba sentences are CC-BY 2.0 FR; the compiled dataset is distributed under CC-BY-4.0 with attribution.

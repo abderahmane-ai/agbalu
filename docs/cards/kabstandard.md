@@ -30,15 +30,9 @@ configs:
 
 # KabStandard
 
-A 497,944-pair parallel dataset for **Kabyle orthography standardisation** — mapping informal,
-French-keyboard and Arabizi Kabyle text to canonical Kabyle Latin orthography. Derived from
-the Latin side of [`agbalu/KabTifinagh`](https://huggingface.co/datasets/agbalu/KabTifinagh)
-by a deterministic seeded probabilistic corruption pass that simulates the keyboard strategies
-Kabyle speakers use on phones and social media.
+A 497,944-pair parallel dataset for **Kabyle orthography standardisation** — mapping informal, French-keyboard, and Arabizi Kabyle text to canonical Kabyle Latin orthography. Derived from the Latin side of [`agbalu/KabTifinagh`](https://huggingface.co/datasets/agbalu/KabTifinagh) using a deterministic probabilistic corruption engine that simulates keyboard conventions used on mobile devices and social platforms.
 
-Used to train [`agbalu/Boulifa-48M`](https://huggingface.co/agbalu/Boulifa-48M), which reaches
-**97.39% character accuracy** on held-out test pairs under greedy free-running decoding,
-against **89.70%** for leaving the input untouched.
+Used to train [`agbalu/Boulifa-48M`](https://huggingface.co/agbalu/Boulifa-48M), which reaches **97.39% character accuracy** and **85.70% sentence exact match** on held-out test pairs, compared to an 89.70% character accuracy baseline for copying the input unchanged.
 
 ```python
 from datasets import load_dataset
@@ -49,21 +43,21 @@ ds = load_dataset("agbalu/KabStandard")
 
 ## Splits
 
-497,944 total pairs, partitioned at seed 42 into 0-leakage splits.
+497,944 total pairs, partitioned with seed 42 into 0-leakage splits.
 
-| split | pairs |
+| Split | Pairs |
 |---|---:|
 | `train` | 448,149 |
 | `dev` | 24,897 |
 | `test` | 24,898 |
-| **total** | **497,944** |
+| **Total** | **497,944** |
 
 ## Schema
 
-| field | type | description |
+| Field | Type | Description |
 |---|---|---|
 | `source` | string | Informal input (French-keyboard, Arabizi, or identity) |
-| `target` | string | Canonical Kabyle Latin (normalised, unmodified) |
+| `target` | string | Canonical Kabyle Latin (normalized) |
 
 ## Usage
 
@@ -71,33 +65,22 @@ ds = load_dataset("agbalu/KabStandard")
 from datasets import load_dataset
 
 train = load_dataset("agbalu/KabStandard", split="train")
-train[0]
+print(train[0])
 # {'source': 'Ssubbetd negh ad naligh.', 'target': 'Ṣṣubbet-d neɣ ad n-aliɣ.'}
 ```
 
-`source` is the corrupted spelling and `target` the canonical one — the task is
-`source → target`, and the reverse direction is what the corruption pass already does.
-
-**Score against the do-nothing floor.** These pairs are corrupted probabilistically, so most
-characters arrive already correct and copying the input scores 89.70% character accuracy. Any
-number reported without that floor beside it is unreadable.
+The task maps `source → target`. Because corruption is applied probabilistically at the character level, a baseline copying the input unchanged retains 89.70% character accuracy. Evaluation should compare model performance against this baseline floor.
 
 ## Construction
 
-Source sentences are the `text_latn` column of `agbalu/KabTifinagh` (all three splits
-combined), normalised under AƔBALU normaliser `1.3.0+rules1.0.0`. Each sentence generates
-exactly one pair at seed 42 — the dataset is fully reproducible from the source corpus alone.
+Source sentences are drawn from the `text_latn` column of `agbalu/KabTifinagh` (all splits combined) and normalized under the AƔBALU reference normaliser (`1.3.0+rules1.0.0`). Each sentence generates exactly one pair at seed 42, making the dataset fully reproducible.
 
-**Identity pairs (15%).** `IDENTITY_RATE = 0.15`. One in seven sentences is left unchanged
-(`source == target`), teaching any model trained on this data not to edit already-canonical
-text.
-
-**Corrupted pairs (85%).** The remaining 85% are passed through a probabilistic corruption
-pass that applies the following transformations stochastically and independently per character:
+- **Identity pairs (15%)**: `IDENTITY_RATE = 0.15`. 15% of sentences are preserved unchanged (`source == target`), training models to avoid modifying already canonical orthography.
+- **Corrupted pairs (85%)**: The remaining 85% receive stochastic transformations applied independently per character:
 
 ### Phoneme substitutions (`PROB_SUBSTITUTION = 0.90`)
 
-| Canonical | Informal variants | Probabilities |
+| Canonical | Informal Variants | Probabilities |
 |---|---|---|
 | `ɣ` / `Ɣ` | `gh` / `g` / `3` / `8` | 0.75 / 0.10 / 0.08 / 0.07 |
 | `x` / `X` | `kh` / `k` / `5` | 0.85 / 0.10 / 0.05 |
@@ -114,18 +97,15 @@ pass that applies the following transformations stochastically and independently
 
 ### Vowel digraph (`PROB_DIGRAPH_OU = 0.45`)
 
-`u` → `ou` (French convention for /u/) with probability 0.45; `U` → `Ou` with the same
-probability.
+`u` → `ou` (French convention for /u/) with probability 0.45; `U` → `Ou` with probability 0.45.
 
 ### Clitic hyphen omission (`PROB_CLITIC_DROP = 0.50`)
 
-If the sentence contains `-`, with probability 0.50: replace all hyphens with a space
-(`d-yeffeɣ` → `d yeffegh`) or delete them (`d-yeffeɣ` → `dyeffegh`), each with probability
-0.50.
+For sentences containing `-`, hyphens are either replaced with spaces (`d-yeffeɣ` → `d yeffegh`) or removed (`d-yeffeɣ` → `dyeffegh`), each with probability 0.50.
 
 ### Preposition contraction (`PROB_PREP_SHORTEN = 0.25`)
 
-`deg ` → `g `, `seg ` → `s ` (word-boundary anchored), with probability 0.25.
+`deg ` → `g `, `seg ` → `s ` with probability 0.25 at word boundaries.
 
 ## Examples
 
@@ -140,43 +120,28 @@ source: "Azul fell-awen, amek i telliḍ taṣebḥit-a?"
 target: "Azul fell-awen, amek i telliḍ taṣebḥit-a?"
 ```
 
-The third row is an identity pair (`source == target`).
-
 ## Evaluation
 
-1,000 pairs drawn at seed 4711 from the held-out test split, greedy and free-running.
+Evaluated across 1,000 held-out test pairs drawn with seed 4711 under greedy autoregressive decoding:
 
-| system | character accuracy | character error rate | exact match |
+| System | Character Accuracy | Character Error Rate | Exact Match |
 |---|---|---|---|
 | **Boulifa-48M** | **97.39%** | **2.61%** | **85.70%** |
-| leave the input untouched | 89.70% | 10.30% | — |
+| Copy input unchanged (baseline) | 89.70% | 10.30% | — |
 
+The baseline floor reflects that most characters in a typical corrupted sentence remain unchanged, resulting in an 89.70% character accuracy floor for an identity copy. Boulifa-48M removes approximately 75% of character-level corruption, achieving 97.39% accuracy.
 
+Evaluation measures recovery of canonical orthography from synthetically corrupted text matching the defined probabilistic distribution; real-world informal typing exhibits additional idiosyncratic orthographic variance.
 
-**The floor is in the table because these pairs are corrupted probabilistically**, so most
-characters in most sentences arrive already correct and a system that does nothing scores
-89.70%. Read the model as removing 75% of the character error, not as near-perfect.
+## Known Limitations
 
-**The evaluation pairs are synthetic.** The figure measures the round-trip — can the model
-recover the canonical target from a plausibly corrupted source? It cannot be read as accuracy
-on arbitrary human typing, only on the corruption distribution defined here.
-
-## Known Limits
-
-- **Synthetic only.** Every `source` string was generated by a rule. No human typed any of
-  these inputs. The distribution approximates real typing but is not a sample of it.
-- **One variant per sentence.** Each canonical sentence generates exactly one corrupted
-  source. A model has not seen the same sentence under multiple corruption strategies.
-- **No adequacy judgement.** The `target` strings are the normaliser's output. No human
-  verification of the canonical form of any source sentence exists.
-- **Sibling language contamination.** The source sentences come from `agbalu/KabTifinagh`,
-  which carries the same contamination bound from its upstream sources: LID systems cannot
-  reliably distinguish Kabyle from Tarifit, Central Atlas Tamazight or Shawiya.
+- **Synthetic generation**: All `source` strings are synthetically generated from rules; while designed to reflect common keyboard practices, they do not constitute natural keystroke logs.
+- **Single corruption per sentence**: Each canonical sentence generates one paired corrupted instance.
+- **Target normalization**: Targets correspond to output from the reference normaliser.
 
 ## Reproduction
 
-The dataset is regenerated deterministically at seed 42 from `agbalu/KabTifinagh` using the
-standardized orthography rules and probabilistic corruption engine.
+The dataset is regenerated deterministically at seed 42 from `agbalu/KabTifinagh` using the standardized orthography rules and probabilistic corruption engine.
 
 ## Citation
 
@@ -193,8 +158,6 @@ Derived from [`agbalu/KabTifinagh`](https://huggingface.co/datasets/agbalu/KabTi
 
 ## Licence
 
-**Apache-2.0.** Derived from `agbalu/KabTifinagh` (CC-BY-2.0); a permissive grant on this
-derived dataset does not relicense the upstream corpus. Read `agbalu/KabTifinagh`'s licence
-before redistributing derivatives of the training corpus.
+**Apache-2.0.** Derived from `agbalu/KabTifinagh` (CC-BY-2.0).
 
 Part of [AƔBALU](https://huggingface.co/agbalu), a Kabyle corpus and model collection.

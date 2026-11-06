@@ -37,18 +37,9 @@ configs:
 
 # KabPunct
 
-A punctuation and capitalisation restoration corpus for Kabyle (Taqbaylit, `kab`, Latin
-script), from the [AƔBALU](https://huggingface.co/agbalu) project.
+A punctuation and capitalisation restoration corpus for Kabyle (Taqbaylit, `kab`, Latin script), from the [AƔBALU](https://huggingface.co/agbalu) project.
 
-**1,318,707 word-labelled sentences** drawn from the full AƔBALU-Text v1 corpus and
-speaker-disjoint Common Voice Kabyle splits. Every sentence is broken into lowercased ASR
-tokens with two parallel label sequences: which punctuation mark follows each word, and how
-the word is capitalised. It is the training and evaluation corpus for
-[`agbalu/Belaid-31M`](https://huggingface.co/agbalu/Belaid-31M), which restores punctuation
-at **0.793 macro-F1** on the held-out `test` split.
-
-It is, as far as we can establish, **the first labelled punctuation restoration corpus for
-Kabyle or any Berber language.**
+**1,318,707 word-labelled sentences** drawn from the AƔBALU-Text v1 corpus and speaker-disjoint Common Voice Kabyle splits. Every sentence is tokenized into lowercased ASR words with two parallel label sequences: the trailing punctuation mark following each word, and the word's capitalization state. It serves as the training and evaluation corpus for [`agbalu/Belaid-31M`](https://huggingface.co/agbalu/Belaid-31M) (**0.793 macro-F1** on the held-out `test` split).
 
 ```python
 from datasets import load_dataset
@@ -77,30 +68,29 @@ print(restore(row))
 
 ## Splits
 
-| split | config | rows | words | description |
+| Split | Config | Rows | Words | Description |
 |---|---|---|---|---|
 | `train` | `default` | 1,262,922 | 12,101,835 | Text corpus + Common Voice train |
 | `dev` | `default` | 5,597 | 29,280 | Common Voice dev, decontaminated |
 | `test` | `default` | 5,160 | 26,969 | Common Voice test, decontaminated |
-| `ood` | `ood` | 45,028 | 1,001,370 | Long-form prose (HCA), held out of training entirely |
+| `ood` | `ood` | 45,028 | 1,001,370 | Continuous prose (HCA), held out of training |
 
 ## Schema
 
-| field | type | description |
+| Field | Type | Description |
 |---|---|---|
-| `words` | `list[str]` | Lowercased, unpunctuated word tokens — the form an ASR system emits |
-| `punctuation` | `list[str]` | Per-word punctuation label: `NONE`, `COMMA`, `PERIOD`, `QUESTION`, or `COLON` |
+| `words` | `list[str]` | Lowercased, unpunctuated word tokens (raw ASR format) |
+| `punctuation` | `list[str]` | Per-word trailing punctuation mark: `NONE`, `COMMA`, `PERIOD`, `QUESTION`, `COLON` |
 | `case` | `list[str]` | Per-word casing label: `LOWER` or `UPPER_INIT` |
-| `source` | `str` | Provenance tag: which corpus this sentence came from |
+| `source` | `str` | Provenance source identifier |
 
-Every list is the same length (one entry per word). Labels align to words, not subwords:
-`words[i]` takes mark `punctuation[i]` and initial casing `case[i]`.
+Labels align to whitespace-delimited words: `words[i]` takes trailing mark `punctuation[i]` and capitalization `case[i]`.
 
 ## Label Scheme
 
 ### Punctuation
 
-| label | character | support in `test` |
+| Label | Mark | Support in `test` |
 |---|---|---|
 | `NONE` | — | 20,904 |
 | `PERIOD` | `.` | 4,357 |
@@ -108,40 +98,33 @@ Every list is the same length (one entry per word). Labels align to words, not s
 | `COMMA` | `,` | 804 |
 | `COLON` | `:` | 43 |
 
-`!` and `;` fold into `PERIOD`. Together they account for 0.41% of tokens, and the corpus
-contains identical sentences under both marks — the distinction is not recoverable from text
-alone, and collapsing them costs less than carrying a class that cannot be learned.
+`!` and `;` fold into `PERIOD` during training, as together they account for 0.41% of tokens and represent terminal pauses.
 
 ### Casing
 
-| label | meaning |
+| Label | Meaning |
 |---|---|
 | `LOWER` | Word begins lowercase |
-| `UPPER_INIT` | First character is uppercase (sentence-initial or proper noun) |
+| `UPPER_INIT` | Initial character is uppercase (sentence-initial or proper noun) |
 
-`ALL_CAPS` was trialled as a third class. It occurs once in dev and three times in test —
-too few to learn without spurious generalisation. The model that carried it emitted fourteen
-all-capitals words for the three real ones. Restoring an acronym to full capitals is out
-of scope, and the class is absent.
+`ALL_CAPS` is excluded from the single-utterance configuration because acronyms occur too infrequently in isolated Common Voice sentences (1 instance in dev, 3 in test) for robust sentence-level supervision. Full-discourse acronym restoration is addressed in [`agbalu/Belaid-75M`](https://huggingface.co/agbalu/Belaid-75M).
 
 ## Usage
-
-Labels are **per word**, three parallel lists of equal length.
 
 ```python
 from datasets import load_dataset
 
 train = load_dataset("agbalu/KabPunct", split="train")
-train[0]
+print(train[0])
 # {'words': ['tecfiḍ', 'fell-i'],
 #  'punctuation': ['NONE', 'QUESTION'],
 #  'case': ['UPPER_INIT', 'LOWER'],
 #  'source': 'hf.abdelhaqueidali.kab-latn-tfng'}
 
-ood = load_dataset("agbalu/KabPunct", "ood", split="ood")   # multi-sentence records
+ood = load_dataset("agbalu/KabPunct", "ood", split="ood")
 ```
 
-Reconstruct the surface form by applying `case` then appending `punctuation`:
+Surface text reconstruction helper:
 
 ```python
 MARK = {"NONE": "", "COMMA": ",", "PERIOD": ".", "QUESTION": "?", "COLON": ":"}
@@ -152,56 +135,39 @@ def render(row):
         for word, mark, case in zip(row["words"], row["punctuation"], row["case"])
     )
 
-render(train[0])   # 'Tecfiḍ fell-i?'
+print(render(train[0]))  # 'Tecfiḍ fell-i?'
 ```
 
-**Score on `ood` as well as `test`, or the number is a training-domain number.** `test` is
-Common Voice, where every record is one sentence; `ood` carries 1.75 sentence-final marks per
-record and is where a model that learned "one period, at the end" shows it.
+Evaluating on both `test` and `ood` provides a comprehensive assessment: `test` consists of single-utterance Common Voice sentences, while `ood` contains continuous multi-sentence literary prose averaging 1.75 sentence-final marks per record.
 
 ## Decontamination
 
-**58.2% of Common Voice Kabyle transcripts also appear in AƔBALU-Text v1**, because the
-majority are Tatoeba sentences and Tatoeba is in the corpus. Every clip whose text is found
-in the text corpus is removed from `dev` and `test`. This simultaneously decontaminates the
-`Masinissa-31M` encoder used by `Belaid-31M`, which was pretrained on the same file. The
-rows in the `Belaid-31M` evaluation are unseen by both the punctuation heads and the backbone.
+58.2% of Common Voice Kabyle transcripts appear in the general web crawl via Tatoeba. All utterances sharing strings with the training corpus were removed from `dev` and `test` splits.
 
-A transcript without a sentence-final mark is dropped rather than labelled `NONE`. Those
-transcripts carry neither punctuation nor capitals — transcriber habit, not Kabyle grammar.
+Transcripts lacking sentence-final punctuation were removed from the corpus to prevent unpunctuated transcription artifacts from biasing label statistics.
 
-`opus.nllb-kab` (871,663 records) is excluded from training entirely. Its record boundaries
-were chosen by a bitext miner rather than a writer; a record can end mid-sentence, and
-sentence-final punctuation is the predicted label.
+`opus.nllb-kab` (871,663 records) was excluded from training entirely because automated bitext-mined segment boundaries frequently truncate sentences mid-clause.
 
 ## Out-of-Domain Split (`ood`)
 
-The `ood` split is `hf.imsidag.kabyle-corpus-hca` — 45,028 records of continuous long-form
-Kabyle prose, held out of training entirely. Common Voice records are one sentence each;
-HCA records average 22 words across several sentences.
+The `ood` split comprises 45,028 continuous prose paragraphs from `hf.imsidag.kabyle-corpus-hca`, held out completely from training. While Common Voice utterances contain a single sentence per record, HCA records average 22 words across multiple clauses and sentences.
 
-The `Belaid-31M` card reports this split explicitly alongside `test`. A model evaluated only
-in its training domain has not been evaluated.
+The `Belaid-31M` evaluation reports metrics across both `test` (in-domain single utterances) and `ood` (out-of-domain continuous prose).
 
 ## Composition
 
-| source id | type | train rows |
+| Source ID | Type | Train Rows |
 |---|---|---|
-| `hf.abdelhaqueidali.kab-latn-tfng` | text corpus | 647,039 |
-| `hf.imsidag.kabyle-corpus-ummto` | text corpus | 136,799 |
-| `hf.imsidag.kabyle-raw-text` | text corpus | 121,338 |
-| `hf.imsidag.kabyle-corpus-ubouira` | text corpus | 76,336 |
-| `hf.boffire.kab-en-toponyms-sentences` | text corpus | 30,584 |
+| `hf.abdelhaqueidali.kab-latn-tfng` | Text corpus | 647,039 |
+| `hf.imsidag.kabyle-corpus-ummto` | Text corpus | 136,799 |
+| `hf.imsidag.kabyle-raw-text` | Text corpus | 121,338 |
+| `hf.imsidag.kabyle-corpus-ubouira` | Text corpus | 76,336 |
+| `hf.boffire.kab-en-toponyms-sentences` | Text corpus | 30,584 |
 | `speech.train` | Common Voice 22.0 train | 151,100 |
-| others (28 sources) | text corpus | 99,726 |
-| `opus.nllb-kab` | **excluded** (miner-cut boundaries) | — |
+| Others (28 sources) | Text corpus | 99,726 |
+| `opus.nllb-kab` | Excluded (automated bitext boundaries) | — |
 
-The `ood` config contains `hf.imsidag.kabyle-corpus-hca` exclusively (45,028 rows).
-
-## Reproduction
-
-The corpus is assembled from AƔBALU-Text v1 and the Common Voice
-speech splits, with decontamination applied before the splits are written.
+The `ood` split contains `hf.imsidag.kabyle-corpus-hca` exclusively (45,028 rows).
 
 ## Citation
 
@@ -216,14 +182,7 @@ speech splits, with decontamination applied before the splits are written.
 
 ## Licence
 
-**Apache-2.0** for the label annotations and the dataset release. The underlying sentences
-retain their upstream licences:
-
-- Common Voice train/dev/test clips: **CC0-1.0** (Mozilla Foundation).
-- Text corpus sentences: **mixed** — see the composition table above. Every share-alike source
-  (`opus.nllb-kab`, ODbL-licensed rows) was excluded before publication. No row in any
-  published split imposes a redistribution obligation on downstream users.
-- The label sequences (`punctuation`, `case`) are this project's annotation and are
-  **Apache-2.0**.
-
-Part of [AƔBALU](https://huggingface.co/agbalu), a Kabyle corpus and model collection.
+**Apache-2.0** for dataset annotations and release format. Underlying text retains source licensing:
+- Common Voice clips: **CC0-1.0** (Mozilla Foundation).
+- Text corpus sentences: Mixed permissive sources (all share-alike and ODbL sources excluded prior to publication).
+- Label sequences (`punctuation`, `case`): **Apache-2.0**.

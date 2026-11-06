@@ -65,7 +65,7 @@ model-index:
 
 # Jugurtha-2-9B
 
-An 8.95B-parameter sovereign foundation model for **Kabyle** (Taqbaylit, `kab`, Latin script) with native
+An 8.95B-parameter (8,953,803,264 text tower) sovereign foundation model for **Kabyle** (Taqbaylit, `kab`, Latin script) with native
 chain-of-thought reasoning in Taqbaylit. **Jugurtha-2-9B is the second-generation successor and a major
 scale-up of [`Jugurtha-4B`](https://huggingface.co/agbalu/Jugurtha-4B)**, more than doubling the parameter
 scale from 4.2B to 8.95B parameters.

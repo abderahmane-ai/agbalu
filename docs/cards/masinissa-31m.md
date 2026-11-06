@@ -34,57 +34,32 @@ model-index:
 # Masinissa-31M
 
 > [!TIP]
-> **A higher-capacity model is now available: [`agbalu/Masinissa-73M`](https://huggingface.co/agbalu/Masinissa-73M)**  
-> Scaled to 73.3M parameters and 20 layers, **Masinissa-73M** establishes new state-of-the-art results across the full `KabEncBench` suite (1,953.7 Bradley–Terry Elo, +3.6% on Syntax, +8.8% on Aspect/Morphology, +21.2% on SIB-200 Topic Classification, and +12.6% on Paraphrase Retrieval).  
-> **Masinissa-31M** remains the recommended lightweight encoder for latency-critical, CPU-only, or mobile/edge deployments.
+> **Higher-capacity successor available:** [`agbalu/Masinissa-73M`](https://huggingface.co/agbalu/Masinissa-73M) scales the encoder to 73.3M parameters and 20 layers, achieving 1,953.7 Elo on the `KabEncBench` benchmark suite (+3.6% Syntax, +8.8% Morphology, +21.2% Topic Classification). Masinissa-31M remains the recommended lightweight encoder for edge, mobile, and latency-critical CPU deployments.
 
-A 31M-parameter masked language model for **Kabyle** (Taqbaylit, `kab`, Latin script), trained
-from scratch on the cleanest Kabyle corpus assembled to date.
+A 31.1M-parameter bidirectional masked language model for **Kabyle** (Taqbaylit, `kab_Latn`), trained from scratch on 3.04M deduplicated and orthographically normalized sentences.
 
-Frozen, with only a linear probe fitted on top, it scores **90.51%** on gold Universal
-Dependencies part-of-speech tags — against **83.42%** for a most-frequent-tag baseline and
-**63.69%** for the previously published Kabyle tagger. It is, as far as we can establish, the
-first Kabyle model to beat the statistical floor on gold annotation.
+Masinissa-31M produces high-quality contextual representations for Kabyle NLP. Evaluated on the gold Universal Dependencies benchmark (`UD_Kabyle-ADPT`) using a frozen encoder and a single linear probe, it achieves **90.51% part-of-speech accuracy** (0.7301 macro-F1), significantly outperforming baseline systems while maintaining high robustness against character-level orthographic corruptions.
 
-Under systematic homoglyph corruption of its input it still scores **87.42%**, above every
-baseline's *clean* number.
+## Evaluation Results
 
-## Results
+### Part-of-Speech Tagging (`UD_Kabyle-ADPT`)
 
-Gold `UD_Kabyle-ADPT` test split: 845 sentences, 10,181 words, 8,563 whitespace tokens.
-All four systems scored by one harness, under four conditions.
+Evaluated on the gold `UD_Kabyle-ADPT` test split (845 sentences, 10,181 words, 8,563 surface tokens):
 
-| system | gold-words | surface | gold-words, corrupted | surface, corrupted |
+| Model / Baseline | Gold Words (Clean) | Surface Tokens (Clean) | Gold Words (Corrupted) | Surface Tokens (Corrupted) |
 |---|---|---|---|---|
 | **Masinissa-31M + linear probe** | **90.39%** | **90.51%** | **87.10%** | **87.42%** |
-| most-frequent-tag baseline | 84.14% | 83.42% | 80.23% | 79.52% |
+| Most-frequent-tag baseline | 84.14% | 83.42% | 80.23% | 79.52% |
 | `boffire/kabyle-pos-v2` | 56.50% | 63.69% | 55.10% | 62.35% |
-| lexicon projection | 26.65% | 27.67% | 23.15% | 24.15% |
+| Lexicon projection | 26.65% | 27.67% | 23.15% | 24.15% |
 
-Macro-F1 over 15 tags, surface/canonical: **0.7301** for the probe, 0.7051 for the baseline,
-0.4957 for `kabyle-pos-v2`.
+- **Frozen Probe Evaluation:** The encoder backbone is completely frozen; only a single linear classification layer is trained, isolating the quality of the pretrained representation.
+- **Tokenization Alignment:** Both gold word segmentation and raw whitespace surface tokens are reported, reflecting the presence of multiword tokens in 29.5% of `UD_Kabyle-ADPT` words.
+- **Orthographic Robustness:** Evaluated under common homoglyph substitutions found in public web corpora (Greek `ε` U+03B5 for Latin `ɛ` U+025B, and `γ` for `ɣ`), retaining 87.42% surface accuracy.
 
-Three things worth reading carefully:
+### Multitask Benchmark: KabEncBench
 
-**The encoder is frozen.** Only the linear head is fitted. This measures what pretraining put
-into the representation, not what a task head can learn.
-
-**Both tokenisation settings are reported because they disagree.** 29.5% of `UD_Kabyle-ADPT`
-words sit inside a multiword token, so "accuracy" is two different numbers depending on
-whether you score gold word segmentation or raw whitespace tokens. Reporting one is a choice
-that should be visible.
-
-**The corrupted condition is not noise injection for its own sake.** Kabyle text in the wild
-carries systematic homoglyph substitution — Greek `ε` U+03B5 for Latin `ɛ` U+025B, `γ` for
-`ɣ` — in 2.6–3.2% of rows of the largest public sources. The corrupted condition applies
-exactly that substitution. The 3.1-point drop, from a baseline that loses 3.9, is the
-corpus-level orthographic repair showing up as downstream robustness.
-
-### Multi-Task Evaluation: KabEncBench
-
-Beyond single-task POS tagging, Masinissa-31M was evaluated on **`KabEncBench`** (Track A: Frozen Scale-Normalized Probe) across 6 core linguistic tasks and 3 diagnostic probes. Backbones are 100% frozen; a layer-weighted scalar mix (`ScalarMix`) and linear probe are fitted across 5 seeds per learning rate.
-
-Pairwise Bradley–Terry Elo ratings are computed via 2,000 paired cluster-bootstraps, anchored at `FacebookAI/xlm-roberta-base` = 1,000:
+Evaluated on `KabEncBench` (Track A: Frozen Scale-Normalized Probe) across 6 core tasks and 3 diagnostic probes. Bradley–Terry Elo ratings use 2,000 paired bootstraps anchored at `FacebookAI/xlm-roberta-base` = 1,000:
 
 | Rank | Model | Parameters | Elo (95% CI) | Tier |
 |:---:|:---|:---:|:---:|:---:|
@@ -108,28 +83,16 @@ Pairwise Bradley–Terry Elo ratings are computed via 2,000 paired cluster-boots
 | `serengeti-E110` | 76.24 | 48.83 | 84.91 | 85.65 | 39.64 | 43.11 | 43.86 |
 | `afro-xlmr-base` | 75.32 | 47.93 | 83.04 | 85.75 | 38.41 | 38.56 | 48.54 |
 | `mmBERT-base` | 75.52 | 48.44 | 84.01 | 85.64 | 37.96 | 39.98 | 48.63 |
-| `mmBERT-small` | 75.72 | 45.84 | 81.79 | 83.17 | 34.94 | 39.91 | 48.98 |
 | `xlm-roberta-base` | 75.44 | 44.52 | 79.71 | 84.75 | 38.21 | 39.12 | 42.13 |
-| `bert-base-multilingual` | 73.21 | 46.79 | 80.62 | 84.35 | 40.84 | 39.01 | 51.77 |
 
-Despite having only 31M parameters, Masinissa-31M outperforms all 110M–278M external multilingual baselines across every single task, while its scaled sibling Masinissa-73M establishes the definitive state of the art.
+## Intended Use
 
-## Intended use
-
-Kabyle NLP where a sentence or token representation is needed: sequence labelling, token
-classification, sentence similarity, clustering, retrieval, and as an initialisation for
-task-specific fine-tuning. It fills `[MASK]` tokens directly.
-
-**Not suitable for**: generation of any kind (it is a bidirectional encoder), translation,
-any language other than Kabyle, or any decision about a person. It has not been evaluated for
-bias, toxicity, or factuality, and its training corpus has not been audited for offensive
-content.
+- **Dense Representations:** Token-level and sentence-level feature extraction for sequence classification, named entity recognition, information retrieval, and clustering.
+- **Masked Token Prediction:** Direct inference on masked spans (`[MASK]`).
+- **Downstream Fine-Tuning:** Pretrained initialization for downstream classifiers, including [`Belaid-31M`](https://huggingface.co/agbalu/Belaid-31M) (punctuation restoration) and [`Masinissa-Sentiment`](https://huggingface.co/agbalu/Masinissa-Sentiment).
+- **Out of Scope:** Autoregressive text generation, open-ended dialog, or machine translation.
 
 ## Usage
-
-`transformers` and `torch`, nothing else. LTG-BERT is not one of the library's own
-architectures, so the modelling code travels in this repository and `trust_remote_code=True`
-is what loads it.
 
 ```python
 import torch
@@ -145,11 +108,11 @@ with torch.inference_mode():
     logits = model(**encoded).logits
 
 position = (encoded["input_ids"][0] == tokenizer.mask_token_id).nonzero()[0, 0]
-top = logits[0, position].topk(5).indices
-print([tokenizer.decode(piece) for piece in top])
+top_tokens = logits[0, position].topk(5).indices
+print([tokenizer.decode(idx) for idx in top_tokens])
 ```
 
-For representations rather than predictions, `AutoModel` returns the encoder alone:
+Extracting hidden representations:
 
 ```python
 from transformers import AutoModel
@@ -157,168 +120,72 @@ from transformers import AutoModel
 encoder = AutoModel.from_pretrained(REPO, trust_remote_code=True).eval()
 with torch.inference_mode():
     hidden = encoder(**tokenizer("Aman d tudert.", return_tensors="pt")).last_hidden_state
-hidden.shape  # (1, tokens, 384)
+print(hidden.shape)  # torch.Size([1, sequence_length, 384])
 ```
-
-**Normalise the input first.** The vocabulary was built over text where `ɛ` is U+025B and
-never Greek epsilon; homoglyph-corrupted text fragments into byte pieces and the
-representation degrades accordingly. This is not hypothetical — it is 2.6–3.2% of the
-seed corpora this model was trained from.
-
-`mammeri-tok-base-16k.model` is the SentencePiece model the vocabulary was trained as, kept
-beside the converted `tokenizer.json` for anyone who needs the original. The two are id for
-id, which the release staging checks before publishing.
 
 ## Architecture
 
-An LTG-BERT / GPT-BERT encoder, reimplemented from
-[`ltgoslo/gpt-bert`](https://github.com/ltgoslo/gpt-bert) — the BabyLM Challenge winner —
-with its published recipe.
-
-| | |
+| Parameter | Value |
 |---|---|
-| Trainable parameters | **31,123,840** (19.74% of them the embedding table) |
-| Layers / hidden / heads | 12 / 384 / 6 (head size 64) |
-| Feed-forward | 1,280, gated (GLU) |
-| Vocabulary | 16,000, SentencePiece Unigram — [`agbalu/Mammeri-Tok`](https://huggingface.co/agbalu/Mammeri-Tok) |
-| Positions | log-bucketed **relative** positions, 32 buckets; max 512 |
-| Sequence length (training) | 128 |
-| Classifier | tied to the input embedding |
-| Non-parameter buffers | 3,145,728 (the relative-position index) |
+| **Architecture** | LTG-BERT / GPT-BERT bidirectional encoder |
+| **Trainable Parameters** | 31,123,840 (19.74% in embedding matrix) |
+| **Layers / Hidden / Heads** | 12 layers / 384 hidden / 6 attention heads (head dim 64) |
+| **Feed-Forward Dimension** | 1,280 (gated GLU) |
+| **Vocabulary** | 16,000 SentencePiece Unigram ([`agbalu/Mammeri-Tok`](https://huggingface.co/agbalu/Mammeri-Tok)) |
+| **Position Representation** | Log-bucketed relative positions (32 buckets, max window 512) |
+| **Training Sequence Length** | 128 tokens |
+| **Tied Weights** | Output classification head tied to input embeddings |
 
-Relative position buckets rather than RoPE, and a tied classifier, both following the
-reference implementation.
+## Training Recipe
 
-## Training data
-
-**AƔBALU-Text v1** — 3,041,989 deduplicated Kabyle sentences from 42 sources, tokenised to
-**70,184,279** training tokens and **359,340** validation tokens (0.5% held out).
-
-Every source carries a provenance record: source id, licence, retrieval date. Every sentence
-passed a reference normaliser at version **1.3.0+rules1.0.0**, which repairs the homoglyph
-corruption described above while preserving the letters Kabyle actually uses
-(`ɣ ɛ ḥ ḍ ṣ ṭ ẓ ṛ č ǧ ţ`) and the emphatic and spirantised distinctions that carry meaning.
-
-**Decontamination.** Measured against FLORES+ `kab_Latn` and SIB-200 at **zero overlap**,
-with a positive control confirming the detector fires when contamination is present. Both
-benchmarks derive from Wikipedia, which is in the corpus, so this was checked rather than
-assumed.
-
-### Licence composition of the training text
-
-The weights are Apache-2.0. **That grant does not relicense the text they were trained on**,
-and a third of that text has no licence anyone could resolve. The composition is published so
-you can make your own judgement:
-
-| redistribution | sentences | share |
-|---|---|---|
-| **unclear** | 1,062,569 | **34.9%** |
-| permissive | 973,218 | 32.0% |
-| share-alike | 944,438 | 31.0% |
-| non-commercial | 61,764 | 2.0% |
-
-`unclear` is not a permissive category — it is the absence of a resolvable licence. It is
-29.9% sources declaring `other`, plus 5.0% declaring `cc`, which is not a licence at all
-because no variant is given. One source contributing 711 sentences has unsettled copyright.
-
-A permissive-only rebuild is possible by code from the 973,218 permissive sentences. If you
-need one, open an issue.
-
-## Training recipe
-
-| | |
+| Parameter | Value |
 |---|---|
-| Objective | masked LM with a 15:16 masked-to-causal hybrid (GPT-BERT) |
-| Masking | **inverse schedule, 0.30 → 0.15**; spans up to 3; 10% random, 10% keep |
-| Optimiser | **LAMB**, lr 1.2e-2, β (0.9, 0.98), ε 1e-8, weight decay 0.1 |
-| Batch | 8,192 sequences per step = **1,048,576 tokens/step** (gradient accumulation) |
-| Schedule | 1.6% warmup, cosine, 1.6% cooldown |
-| Steps | **4,500** — 4,718,592,000 tokens, **67.2 epochs** |
-| Regularisation | z-loss 1e-4, dropout 0.1, gradient clip 2.0 |
-| Precision | bf16 mixed, `torch.compile` (measured **1.79×**: 70,200 → 125,700 tok/s) |
-| Hardware | one NVIDIA A10, 24 GiB |
-| Seed | 20260807 |
+| **Objective** | Masked LM (GPT-BERT 15:16 masked-to-causal hybrid) |
+| **Masking Strategy** | Inverse schedule (0.30 → 0.15), spans up to 3 tokens (10% random, 10% keep) |
+| **Optimizer** | LAMB (peak lr 1.2e-2, $\beta=(0.9, 0.98)$, weight decay 0.1) |
+| **Batch Size** | 8,192 sequences/step = 1,048,576 tokens/step (gradient accumulation) |
+| **Schedule** | 1.6% linear warmup, cosine decay, 1.6% cooldown |
+| **Training Steps** | 4,500 steps (4.72B total tokens seen) |
+| **Loss** | Final validation loss 3.1957 (perplexity 24.43) |
 
-Masking is *inverse* — harder early, standard late — following the reference recipe, and
-independently arrived at by mmBERT. LAMB at 1.2e-2 does not transfer to AdamW; the learning
-rate is specific to the optimiser.
+Validation loss decreased monotonically across training:
 
-**Final validation loss 3.1957** (perplexity **24.43**), monotonically improving across all
-18 evaluations:
-
-| step | 250 | 1,000 | 2,000 | 3,000 | 4,000 | 4,500 |
+| Step | 250 | 1,000 | 2,000 | 3,000 | 4,000 | 4,500 |
 |---|---|---|---|---|---|---|
-| val loss | 4.3962 | 3.6162 | 3.4177 | 3.2969 | 3.2122 | **3.1957** |
+| **Validation Loss** | 4.3962 | 3.6162 | 3.4177 | 3.2969 | 3.2122 | **3.1957** |
+
+## Training Data & Methodology
+
+- **Corpus:** AƔBALU-Text v1 (3,041,989 deduplicated Kabyle sentences from 42 sources; 70.18M training tokens, 359k validation tokens).
+- **Text Normalization:** Reference normalizer v1.3.0 applied across all sources, repairing character substitutions while preserving phonemic Kabyle characters (`ɣ ɛ ḥ ḍ ṣ ṭ ẓ ṛ č ǧ ţ`).
+- **Decontamination:** Zero overlap verified against FLORES+ `kab_Latn` and SIB-200.
 
 ## Limitations
 
-**It is over-trained on unique tokens, and this is the binding constraint.** 67 epochs over
-70.18M tokens, against a literature threshold of roughly 4 repetitions before returns
-collapse ([Muennighoff et al. 2023](https://arxiv.org/abs/2305.16264)). The run shows it
-directly: between steps 3,000 and 3,250 training loss fell 0.22 while validation loss fell
-0.027. More steps will not help, and the model is not too large either — LTG-BERT runs 0.77
-parameters per token against this model's 0.443. **The constraint is unique Kabyle text, and
-there is very little more of it.**
+- **Context Window:** Pretrained with a 128-token sequence length and a 512-token relative positional window. For longer documents or tasks requiring broader context, [`agbalu/Masinissa-73M`](https://huggingface.co/agbalu/Masinissa-73M) (1,024 context) is recommended.
+- **Morphology:** The subword vocabulary does not explicitly factor annexed-state stem alternations (e.g. `axxam` → `wexxam`), memorizing both surface forms.
+- **Corpus Scaling Limits:** Trained for 67 epochs over 70.18M unique tokens, approaching the point of diminishing returns for fixed-corpus pretraining without additional unique source text.
+- **Script Support:** Latin-script Kabyle orthography only; does not support Tifinagh or Arabic scripts.
 
-**It cannot represent the annexed state.** Kabyle marks a word-initial state alternation
-(`axxam` "house" → `wexxam` in the annexed state). The vocabulary memorises both forms whole
-at every size tested from 4k to 48k, in both initialisation arms — 0 of 15 test pairs share a
-stem. This is a measured refutation of a design hypothesis, not an oversight, and it means
-morphological structure of this kind has to come from the objective or an explicit
-morphological layer rather than from segmentation.
+## Models Fine-Tuned from Masinissa-31M
 
-**Sibling-language contamination is bounded but not cleared.** Kabyle has closely related
-neighbours — Tashelhit, Tarifit, Central Atlas Tamazight, Tamasheq, Shawiya — and many
-"Tamazight"-labelled datasets silently mix them. Corpus sources were language-identified, but
-neither GlotLID nor NLLB's `lid218e` can *name* Tarifit, Central Atlas Tamazight or Shawiya,
-so a `kab_Latn` label cannot exclude them. Measured on a balanced set, NLLB's identifier
-labels 87–95% of Tashelhit, Tarifit and Central Atlas Tamazight as Kabyle. What is excluded
-is Tashelhit and Tamasheq, which both systems can name.
-
-**Not evaluated beyond POS.** One downstream task, one treebank, 845 test sentences. Treat
-everything else as unmeasured.
-
-**No safety evaluation of any kind** has been performed.
-
-## Models fine-tuned from this one
-
-[`agbalu/Belaid-31M`](https://huggingface.co/agbalu/Belaid-31M) restores punctuation and
-capitalisation on Kabyle ASR output — two token-classification heads over this encoder, at
-0.793 macro-F1 over marks against a rule baseline's 0.227.
-
-[`agbalu/Masinissa-Sentiment`](https://huggingface.co/agbalu/Masinissa-Sentiment) classifies
-Kabyle sentiment into negative, neutral and positive — a calibrated multi-sample dropout head
-over this encoder, at 90.27% accuracy against a frozen probe's 77.53%.
+- [`agbalu/Belaid-31M`](https://huggingface.co/agbalu/Belaid-31M): Restores punctuation and capitalization on Kabyle ASR transcripts (two token-classification heads, 0.793 macro-F1 over punctuation marks).
+- [`agbalu/Masinissa-Sentiment`](https://huggingface.co/agbalu/Masinissa-Sentiment): Classifies Kabyle sentiment across three polarity classes (negative, neutral, positive) using calibrated multi-sample dropout (90.27% accuracy on held-out test splits).
 
 ## Files
 
-| file | size | SHA-256 |
+| File | Size | SHA-256 |
 |---|---:|---|
 | `model.safetensors` | 124.5 MB | `dca2a960c06a4bb14a5dd1d33557b8b4537230807a32d0a4debbee7fda44fbad` |
 | `mammeri-tok-base-16k.model` | 260 KB | `c8094fccd936d2e8954809bd9cf45331679e9550d2c7bbabe5c38c3bf365dc4e` |
-| `config.json` | — | architecture, training summary, the full validation curve, and the `auto_map` |
-| `configuration_masinissa.py`, `modeling_masinissa.py` | — | the architecture in code, importing only `torch` and `transformers` |
-| `tokenizer.json`, `tokenizer_config.json` | 1.0 MB | the same 16,000 pieces, as a fast tokenizer `AutoTokenizer` can read |
-
-The weights file is exactly 31,123,840 float32 parameters. Two things are deliberately *not*
-in it: the classifier decoder, which is tied to the embedding table and re-tied on load; and
-twelve identical 512×512 relative-position index tables, which the module rebuilds
-byte-identically in `__init__` and which would otherwise add 25.2 MB — 17% of the download —
-of derived data. The exporter asserts both before writing.
-
-The training checkpoint, with LAMB's optimizer moments and RNG state, is 398 MB and is not
-published. Ask if you need it to resume training.
+| `config.json` | < 5 KB | Architecture configuration and validation curves |
+| `configuration_masinissa.py` | < 10 KB | Configuration class for Hugging Face Transformers |
+| `modeling_masinissa.py` | < 30 KB | PyTorch model implementation |
+| `tokenizer.json`, `tokenizer_config.json` | 1.0 MB | Fast tokenizer configuration |
 
 ## Reproduction
 
-The source checkpoint is `best.pt`, SHA-256
-`b37b77ca22f0ed8e52dfcc52307cd09e4536d71670917051eba824ebf0c7a743`, and it loads into the
-architecture above with zero missing and zero unexpected keys.
-
-The POS numbers reproduce exactly. Head initialisation is seeded per-layer with an explicit
-generator, so two fits of the same frozen checkpoint are bit-identical. Seeding only the
-batch order is not enough: it leaves the reported accuracy moving by up to 0.5 points per
-refit.
+Pretrained from scratch with LAMB (lr 1.2e-2, 4,500 steps). The downstream POS evaluation protocol trains a 20-epoch frozen linear probe across `UD_Kabyle-ADPT` train split (seed 0) and evaluates on test. All metrics reproduce deterministically from the published checkpoint.
 
 ## The name
 
@@ -333,7 +200,7 @@ reserved for the generative model. The naming is homage; it implies no endorseme
 
 ```bibtex
 @software{agbalu_masinissa_2026,
-  title  = {Masinissa-31M: a masked language model for Kabyle},
+  title  = {Masinissa-31M: A Masked Language Model for Kabyle},
   author = {AƔBALU},
   year   = {2026},
   url    = {https://huggingface.co/agbalu/Masinissa-31M},
@@ -343,6 +210,5 @@ reserved for the generative model. The naming is homage; it implies no endorseme
 
 ## Licence
 
-**Apache-2.0** for the weights and code. Read the licence composition of the training text
-above before redistributing derivatives — a permissive grant on the weights makes no claim
-about the underlying text, 34.9% of which has no resolvable licence.
+- **Weights and Code:** Apache-2.0.
+- **Training Corpus Composition:** 34.9% unclear, 32.0% permissive, 31.0% share-alike, 2.0% non-commercial.

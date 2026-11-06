@@ -21,7 +21,7 @@ tags:
 
 # Matoub-4B
 
-A 4B-parameter text-to-speech model for **Kabyle** (Taqbaylit, `kab`, Latin script), trained on 384,960 curated speech pairs from Common Voice Kabyle. It synthesises broadcast-quality **24 kHz audio** from Kabyle text. Voice cloning is a feature of that model: a short reference recording, with its transcript kept in the original language, sets the speaker.
+A 4.11B-parameter (4,109,540,864) text-to-speech model for **Kabyle** (Taqbaylit, `kab`, Latin script), trained on 384,960 curated speech pairs from Common Voice Kabyle. It synthesises broadcast-quality **24 kHz audio** from Kabyle text, supporting zero-shot voice cloning and cross-lingual speaker conditioning from short reference audio recordings.
 
 The reference can be Kabyle or another language. `generate()` produces one utterance at the trained adapter scale, for every reference language. An 8-codebook discrete audio representation carries Kabyle's phonology, including spirantised, pharyngealised, emphatic, and geminated consonants.
 

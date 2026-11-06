@@ -98,9 +98,9 @@ configs:
 
 # KabEncBench: The Kabyle Representation Learning Benchmark
 
-**`KabEncBench`** is the standard multi-task evaluation suite for contextual text representations and neural encoders in **Kabyle** (Taqbaylit, `kab`, Latin script).
+**`KabEncBench`** is a unified multi-task evaluation benchmark for contextual text representations and neural encoders in **Kabyle** (Taqbaylit, `kab`, Latin script).
 
-Spanning **100,609 annotated items** across **six core linguistic tasks** and **three diagnostic probes**, `KabEncBench` isolates what pretrained language models understand about Kabyle phonology, morphology, syntax, semantics, and discourse—without allowing deep task heads to mask representational failure.
+Spanning **100,609 annotated items** across **six core linguistic tasks** and **three diagnostic probes**, `KabEncBench` evaluates contextual representations across Kabyle phonology, morphology, syntax, semantics, and discourse using frozen backbones and standardized linear probes to directly measure representation quality.
 
 Every task is evaluated under **Track A: Frozen Scale-Normalized Probe**, scoring models through a unified Bradley–Terry Elo tournament with 2,000 paired cluster-bootstraps anchored at `FacebookAI/xlm-roberta-base` = 1,000.
 

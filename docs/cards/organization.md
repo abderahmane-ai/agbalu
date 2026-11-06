@@ -9,147 +9,87 @@ pinned: false
 
 # AƔBALU
 
-**Aɣbalu** (ⴰⵖⴱⴰⵍⵓ) is Kabyle for *the source* — a spring, the place water comes from.
+**Aɣbalu** (ⴰⵖⴱⴰⵍⵓ) is Kabyle for *the source* — a natural spring where water originates.
 
-This organization builds NLP resources for **Kabyle** (Taqbaylit, `kab`, Latin script), a
-Northern Berber language of Kabylia, Algeria, spoken by 5–7 million people. Kabyle is
-unusual among low-resource languages: it has a *disproportionately large* speech resource
-and a thin, noisy text resource. Its entire filtered web crawl — FineWeb-2 and HPLT v2
-together — is 13.8M words, and the corpus underneath these models, deduplicated across 42
-sources, is 34.9M words.
-
-The first artifact is not a model. It is the corpus.
-
-The speech model is where that asymmetry pays: Kabyle has 571 validated hours of audio and
-roughly 70 million unique tokens of text, and transcription is what turns the abundant
-resource into the scarce one.
+This organization develops open-source NLP and speech resources for **Kabyle** (Taqbaylit, `kab`, Latin script), a Northern Berber language spoken by 5–7 million people in Kabylia, Algeria. While public web crawls for Kabyle are relatively scarce (FineWeb-2 and HPLT v2 total approximately 13.8M words), the language possesses extensive speech resources, including over 571 validated hours in Mozilla Common Voice. The AƔBALU project builds foundational datasets, models, and benchmarks to expand Kabyle language technology from curated corpora to high-capacity foundation models.
 
 ## Models
 
-| | | |
+| Model | Task & Capacity | Description |
 |---|---|---|
-| [**Jugurtha-2-9B**](https://huggingface.co/agbalu/Jugurtha-2-9B) | sovereign foundation & reasoning LLM, 8.95B | Second-generation sovereign foundation model for Kabyle. Lifts **SIB-200 topic classification to 80.81%** (first Amazigh LLM > 80%), **FLORES+ kab→eng to 49.45 chrF++ / 27.86 BLEU**, and **eng→kab to 30.80 chrF++ / 7.62 BLEU** with zero orthography gap (0.00). Native chain-of-thought in Taqbaylit (`<think>` blocks). Also available in [**GGUF**](https://huggingface.co/agbalu/Jugurtha-2-9B-GGUF) (Q4_K_M, Q5_K_M, Q6_K, Q8_0, Q3_K_M for Ollama & LM Studio) and [**MLX**](https://huggingface.co/agbalu/Jugurtha-2-9B-MLX-4bit) (4-bit for Apple Silicon) |
-| [**Jugurtha-4B**](https://huggingface.co/agbalu/Jugurtha-4B) | foundation & reasoning LLM, 4.2B | The first sovereign Kabyle generative model with native step-by-step reasoning (`<think>` blocks). 800M token CPT and SFT on curated Kabyle dialogues. **100.0% NIAH** at 32,768 context, **80.89% GSM8K**, **62.86% MMLU-Pro**, **54.16% IFEval**, **73.74% SIB-200** topic classification on Kabyle, **46.17 chrF++ / 23.79 BLEU** kab→eng and **28.77 chrF++ / 6.73 BLEU** eng→kab on FLORES+. Also provided in [**GGUF**](https://huggingface.co/agbalu/Jugurtha-4B-GGUF) (for Ollama & LM Studio) and [**MLX**](https://huggingface.co/agbalu/Jugurtha-4B-MLX-4bit) (4-bit for Apple Silicon) |
-| [**Amrouche-1.3B**](https://huggingface.co/agbalu/Amrouche-1.3B) | translation, 1.3B | Beats NLLB-200-1.3B in **all four directions**, and by the widest margin into Kabyle: **36.34 chrF++** and **10.86 BLEU** on English→Kabyle, against 31.53 and 7.74 for the base model on the same harness |
-| [**Fadhma-300M**](https://huggingface.co/agbalu/Fadhma-300M) | speech recognition, 300M | **8.01% character error rate** and **25.65% word error rate** on 15,003 utterances from **888 speakers it has never heard** — as far as we can establish, the first Kabyle speech recognition system published with an error rate measured on a speaker-disjoint split, and the first CTC result for the language at any size |
-| [**Belaid-75M**](https://huggingface.co/agbalu/Belaid-75M) | discourse punctuation & truecasing, 75M | **0.630 period F1, 0.623 comma F1, and 94.0% word casing accuracy**, with **0.755 acronym F1 at 0.971 precision**, across continuous multi-sentence Kabyle. A 1,024-token window over Masinissa-73M that puts internal sentence boundaries, commas, questions, colons and acronyms back into running prose |
-| [**Belaid-31M**](https://huggingface.co/agbalu/Belaid-31M) | punctuation and casing, 31M | **0.793 macro-F1** and **86.3% of sentences exactly right** on 5,160 held-out utterances, against **0.227** for the rule a system without a model uses. The utterance restorer behind Fadhma: it puts back the punctuation a CTC vocabulary cannot emit, and it never rewrites a word |
-| [**Matoub-4B**](https://huggingface.co/agbalu/Matoub-4B) | speech synthesis, 4.2B | The most capable Kabyle TTS system published. A Higgs Audio codec-language model with a Qwen3-4B backbone and an 8-codebook 24 kHz discrete audio tokenizer, fine-tuned with LoRA rank 32 on Common Voice Kabyle. Supports selectable reference voices and cross-lingual voice cloning. All 528 codec tensors pinned to FP32 for audio fidelity. Also available in [**GGUF**](https://huggingface.co/agbalu/Matoub-4B-GGUF) (BF16, Q8_0, Q4_K — Q4_K halves RTF to 0.138 with 4.7 GB VRAM) |
-| [**Matoub-82M**](https://huggingface.co/agbalu/Matoub-82M) | speech synthesis, 82M | Speaks Kabyle at **24 kHz** — twice the incumbent `mms-tts-kab`, and Apache-2.0 where that one is non-commercial — over a **42-symbol Kabyle phoneme inventory** the base model's token table could not represent until three embedding rows were assigned and trained for `ˤ ʕ ħ`, which its own G2P would otherwise have dropped in silence. One voice published. The incumbent baseline, **+3.56 Cycle-CER**, was itself unscored by anyone until this project measured it. Superseded by **Matoub-4B** for new deployments |
-| [**Boulifa-48M**](https://huggingface.co/agbalu/Boulifa-48M) | orthography standardisation, 48M | **97.39% character accuracy and 85.70% sentences exactly right** converting informal French-keyboard and Arabizi Kabyle into canonical Kabyle Latin, against **89.70%** character accuracy for leaving the input untouched — as far as we can establish, the first orthography standardisation model published for any Berber language. Resolves Arabizi digits, digraphs, clitic hyphens and preposition contractions in one pass, where each is ambiguous on its own |
-| [**Juba-27M**](https://huggingface.co/agbalu/Juba-27M) | transliteration, 27M | **94.22% sentence exact match** converting Tifinagh to Kabyle Latin, against **1.16%** for the character table that was the only prior tool — because Kabyle Tifinagh omits the vowel `e`, and where it belongs has to be predicted from the consonants around it |
-| [**Feraoun-Pro**](https://huggingface.co/agbalu/Feraoun-Pro) | document OCR, 51M | **7.34% Latin and 0.91% Neo-Tifinagh character error rate, 81.77% line exact match** over 30,000 held-out rendered lines. A second architecture for Feraoun-36M's task: one CTC forward pass per line instead of one decoder step per character, a canvas that follows the line to 1,024 px instead of squeezing it, and **`ţ` and `Ţ`** — Boulifa's transcription convention, which has never had a slot in an OCR alphabet before |
-| [**Feraoun-36M**](https://huggingface.co/agbalu/Feraoun-36M) | document OCR, 36M | **2.85% character error rate and 70.20% line exact match** over 1,000 held-out lines of printed Kabyle, reading Latin and Neo-Tifinagh from one 171-symbol character alphabet — the first OCR model trained for the language, and the first that keeps the sub-dot on `ḍ ḥ ṛ ṣ ṭ ẓ` instead of normalising it away |
-| [**SiMohand-278M**](https://huggingface.co/agbalu/SiMohand-278M) | sentence embeddings and retrieval, 278M | **97.0% Recall@1** and **0.9833 MRR** finding the right Kabyle passage among 499 distractors — against **63.8%** for the multilingual backbone it was fine-tuned from, which maps five Kabyle consonant characters to `<unk>` and collapses the language into one cone. Its 64-dimension Matryoshka slice, a 12× compression, scores the same 97.0% |
-| [**Masinissa-73M**](https://huggingface.co/agbalu/Masinissa-73M) | flagship encoder, 73M | **1,953.7 Bradley–Terry Elo** across nine models on `KabEncBench`, leading all external multilingual models by +753+ Elo points; **80.59%** UPOS Macro-F1 (94.08% surface accuracy) on gold UD POS, **57.91%** Aspect Macro-F1, **64.87%** SIB-200 Topic, **64.38%** TaPaCo Paraphrase retrieval |
-| [**Masinissa-31M**](https://huggingface.co/agbalu/Masinissa-31M) | lightweight encoder, 31M | **1,708.4 Bradley–Terry Elo** on `KabEncBench` (#2 overall, outperforming every 278M external baseline); **90.51%** surface accuracy on gold UD POS tags and **87.42%** under homoglyph corruption |
-| [**Masinissa-Sentiment**](https://huggingface.co/agbalu/Masinissa-Sentiment) | sentiment, 31M | **90.27% accuracy and 0.9026 macro-F1** over negative, neutral and positive — the first sentiment classifier published for any Berber language, against 88.80% for an ordinary fine-tune of the same encoder and 77.53% for a linear probe on it, all three scored on the same 1,500 rows. Its labels are projected from the English side of a Tatoeba pair, and the transfer is measured rather than assumed: accuracy rises monotonically with the *English* classifier's own confidence — **87.85%** on the 889 rows it was least sure about, 95.00% on the 40 it was surest of. **Total homoglyph corruption moves it not at all**, because the repair is inside the inference path. Returns a conformal **set** of labels on the 12.53% of sentences where the polarity is in the situation rather than the words |
-| [**Dihya-22M**](https://huggingface.co/agbalu/Dihya-22M) | Pan-Berber & Maghrebi language identification, 22M | Extends language identification across the entire Berber dialect continuum in Latin and Neo-Tifinagh, North African Arabic dialects in Arabic script and Arabizi, Modern Standard Arabic, and world languages: **22 classes across 5 scripts**. **91.90% accuracy and 0.9180 macro-F1** over 14,247 held-out sentences. Cuts sibling leakage into Kabyle across the board (Central Atlas Tamazight falls from 16.0% to **2.58%**, Tarifit from 6.7% to **1.38%**, Tamasheq to **0.16%**; Neo-Tifinagh cross-leakage $\le 2.12\%$). Ships with calibrated split-conformal prediction sets ($\hat{q} = 0.9526$, **98.28% empirical coverage**) |
-| [**Dihya-5M**](https://huggingface.co/agbalu/Dihya-5M) | lightweight language identification, 5M | Separates six Latin-script Amazigh varieties (`kab`, `shi`, `rif`, `taq`, `tzm`, `shy`) and rejects non-Berber: **85.52% over the seven classes**. On the six Berber classes, scored beside the public identifiers in one pass over the same rows, **84.44% against GlotLID's 41.78% and NLLB `lid218e`'s 28.33%** — and where those send **96.0% of Shawiya and 90.0% of Tarifit** into Kabyle, this sends 19.3% and 6.7%. That absorption is what `lid218e` did to the 90.1% of AƔBALU-Parallel it mined. **Tarifit, Central Atlas Tamazight and Shawiya have no label at all in either public identifier**, so their recall here — 0.873, 0.660, 0.687 — is the first that exists. Returns a conformal **set** of labels where the text is genuinely ambiguous. Superseded by Dihya-22M for multi-script and full continuum coverage |
-| [**Mammeri-Tok**](https://huggingface.co/agbalu/Mammeri-Tok) | tokenizer | Ten Unigram vocabularies, 8k–32k, two initialisation arms. The sweep settles two open questions about Kabyle segmentation |
+| [**Jugurtha-2-9B**](https://huggingface.co/agbalu/Jugurtha-2-9B) | Sovereign foundation & reasoning LLM, 8.95B | Second-generation sovereign foundation model for Kabyle. Achieves **80.81% on SIB-200 topic classification**, **49.45 chrF++ / 27.86 BLEU** on FLORES+ kab→eng, and **30.80 chrF++ / 7.62 BLEU** on eng→kab with zero orthography gap (0.00). Native chain-of-thought in Taqbaylit (`<think>` blocks). Also available in [**GGUF**](https://huggingface.co/agbalu/Jugurtha-2-9B-GGUF) and [**MLX**](https://huggingface.co/agbalu/Jugurtha-2-9B-MLX-4bit) |
+| [**Jugurtha-4B**](https://huggingface.co/agbalu/Jugurtha-4B) | Foundation & reasoning LLM, 4.2B | Sovereign Kabyle generative model with native step-by-step reasoning (`<think>` blocks). Continued pretraining on 800M tokens and SFT on curated Kabyle dialogues. **100.0% NIAH** at 32,768 context, **80.89% GSM8K**, **62.86% MMLU-Pro**, **54.16% IFEval**, **73.74% SIB-200** topic classification on Kabyle. Available in [**GGUF**](https://huggingface.co/agbalu/Jugurtha-4B-GGUF) and [**MLX**](https://huggingface.co/agbalu/Jugurtha-4B-MLX-4bit) |
+| [**Amrouche-1.3B**](https://huggingface.co/agbalu/Amrouche-1.3B) | Machine translation, 1.3B | Vocabulary-trimmed translation model outperforming NLLB-200-1.3B across all four directions (36.34 chrF++ / 10.86 BLEU on English→Kabyle vs. 31.53 / 7.74 for the baseline) |
+| [**Fadhma-300M**](https://huggingface.co/agbalu/Fadhma-300M) | Speech recognition, 300M | Acoustic CTC model achieving **8.01% character error rate** and **25.65% word error rate** on 15,003 utterances across 888 unseen speakers in Common Voice Kabyle |
+| [**Belaid-75M**](https://huggingface.co/agbalu/Belaid-75M) | Discourse punctuation & truecasing, 75M | Restores punctuation and truecasing across continuous multi-sentence discourse using a 1,024-token context window over Masinissa-73M (**0.630 period F1, 0.623 comma F1, 94.0% word casing accuracy, 0.755 acronym F1**) |
+| [**Belaid-31M**](https://huggingface.co/agbalu/Belaid-31M) | Utterance punctuation & casing, 31M | Sentence-level punctuation and casing restoration for ASR transcripts (**0.793 macro-F1** and **86.3% exact sentence match** across 5,160 held-out utterances) |
+| [**Matoub-4B**](https://huggingface.co/agbalu/Matoub-4B) | Speech synthesis, 4.2B | Neural codec language model with an 8-codebook 24 kHz audio tokenizer fine-tuned on Common Voice Kabyle. Supports zero-shot voice cloning and cross-lingual reference conditioning. Also available in [**GGUF**](https://huggingface.co/agbalu/Matoub-4B-GGUF) |
+| [**Matoub-82M**](https://huggingface.co/agbalu/Matoub-82M) | Speech synthesis, 82M | 24 kHz neural TTS model with a 42-phoneme Kabyle inventory including dedicated embeddings for `ˤ`, `ʕ`, and `ħ`. Shipped with single voice checkpoint |
+| [**Boulifa-48M**](https://huggingface.co/agbalu/Boulifa-48M) | Orthography standardisation, 48M | Converts informal French-keyboard input and Arabizi into canonical Kabyle Latin (**97.39% character accuracy, 85.70% sentence exact match**) |
+| [**Juba-27M**](https://huggingface.co/agbalu/Juba-27M) | Transliteration, 27M | Transliterates vowel-less Neo-Tifinagh to canonical Kabyle Latin with learned schwa placement (**94.22% sentence exact match, 96.06% schwa F1**) |
+| [**Feraoun-Pro**](https://huggingface.co/agbalu/Feraoun-Pro) | Document OCR, 51M | Vision-encoder CTC document OCR with variable-width canvas up to 1,024 px and 173-character alphabet including `ţ` / `Ţ` (**7.34% Latin CER, 0.91% Neo-Tifinagh CER, 81.77% exact line match**) |
+| [**Feraoun-36M**](https://huggingface.co/agbalu/Feraoun-36M) | Document OCR, 36M | Vision transformer OCR reading Latin and Neo-Tifinagh across a 171-character alphabet (**2.85% CER and 70.20% line exact match** on held-out printed lines) |
+| [**SiMohand-278M**](https://huggingface.co/agbalu/SiMohand-278M) | Sentence embeddings & retrieval, 278M | Kabyle passage retrieval model fine-tuned with Matryoshka representations (**97.0% Recall@1, 0.9833 MRR**; 64-dimensional slice retains 97.0% Recall@1) |
+| [**Masinissa-73M**](https://huggingface.co/agbalu/Masinissa-73M) | Flagship encoder, 73M | High-capacity masked language model leading all models on `KabEncBench` (**1,953.7 Bradley–Terry Elo**; 94.08% surface POS accuracy, 80.59% UPOS macro-F1) |
+| [**Masinissa-31M**](https://huggingface.co/agbalu/Masinissa-31M) | Lightweight encoder, 31M | Efficient bidirectional encoder (**1,708.4 Bradley–Terry Elo** on `KabEncBench`, #2 overall; 90.51% gold POS surface accuracy) |
+| [**Masinissa-Sentiment**](https://huggingface.co/agbalu/Masinissa-Sentiment) | Sentiment classification, 31M | Three-class sentiment classifier with split-conformal prediction (**90.27% accuracy, 0.9026 macro-F1, 94.00% conformal coverage** at 1.13 mean set size) |
+| [**Dihya-22M**](https://huggingface.co/agbalu/Dihya-22M) | Pan-Berber & Maghrebi LID, 22M | Language identification across 22 classes and 5 scripts, covering Berber varieties in Latin and Neo-Tifinagh, Maghrebi Arabic dialects, MSA, and world languages (**91.90% accuracy, 0.9180 macro-F1**) |
+| [**Dihya-5M**](https://huggingface.co/agbalu/Dihya-5M) | Lightweight language identification, 5M | Distinguishes six Latin-script Amazigh varieties and rejects non-Berber text (**85.52% overall accuracy, 84.44% on Berber classes**) |
+| [**Mammeri-Tok**](https://huggingface.co/agbalu/Mammeri-Tok) | Tokenizer collection | Ten SentencePiece Unigram vocabularies (8k–32k) across standard and lexicon-seeded initialization arms |
 
 ## Interactive Spaces
 
-| | | |
+| Space | Focus | Description |
 |---|---|---|
-| [**KabEncBench-Leaderboard**](https://huggingface.co/spaces/agbalu/KabEncBench-Leaderboard) | representation benchmark & leaderboard | Pairwise Bradley–Terry Elo tournament (2,000 bootstraps), multi-model polar radar chart comparisons, and item-level win-rate matrices across 9 foundation encoders on Kabyle |
-| [**Jugurtha-Chat**](https://huggingface.co/spaces/agbalu/Jugurtha-Chat) | conversational AI interface | Official sovereign Taqbaylit chat interface powered by `Jugurtha-2-9B`, featuring native chain-of-thought (`<think>` blocks) and fast streaming |
+| [**KabEncBench-Leaderboard**](https://huggingface.co/spaces/agbalu/KabEncBench-Leaderboard) | Benchmark leaderboard | Pairwise Bradley–Terry Elo tournament (2,000 bootstraps), radar chart comparisons, and win-rate matrices across 9 foundation encoders on Kabyle |
+| [**Jugurtha-Chat**](https://huggingface.co/spaces/agbalu/Jugurtha-Chat) | Conversational AI interface | Interactive chat interface powered by `Jugurtha-2-9B`, supporting native chain-of-thought (`<think>` blocks) and streaming generation |
 
 ## Datasets
 
-| | | |
+| Dataset | Domain | Description |
 |---|---|---|
-| [**KabEncBench**](https://huggingface.co/datasets/agbalu/KabEncBench) | multi-task representation benchmark | 100,609 annotated instances across 6 core tasks (Syntax UPOS, Aspect Morphology, Named Entity Recognition, 3-way Sentiment, SIB-200 Topic Classification, Punctuation Restoration) and 3 diagnostic probes (Clitic Alternation, Paraphrase Retrieval, Spelling Minimal Pairs) under Track A: Frozen Scale-Normalized Probe |
-| [**KabBench**](https://huggingface.co/datasets/agbalu/KabBench) | evaluation | A **repaired** Kabyle MT reference — 326 of its 2,009 sentences were corrupt in the public original and have never been fixed upstream — plus a balanced six-language set for telling Kabyle from its Berber siblings |
-| [**KabLex**](https://huggingface.co/datasets/agbalu/KabLex) | lexicon | 366,892 permissive lexical entries (licence-cut by code from 395,834 with per-row `source` and `licence`) over 17,090 lemmas, with morphological features, and 25,642 word–pronunciation pairs in IPA |
-| [**KabInflect**](https://huggingface.co/datasets/agbalu/KabInflect) | morphology | 336,151 inflected verb form entries across 13,226 lemmas, partitioned by verb lemma into sealed splits (0 paradigm leakage; copying the lemma unchanged scores 4.07%), plus 6,198 full verb conjugation paradigms |
-| [**KabTifinagh**](https://huggingface.co/datasets/agbalu/KabTifinagh) | transliteration | 497,944 parallel sentences matching vowel-less Kabyle Neo-Tifinagh to canonical Kabyle Latin, plus 123,852 English and 205,637 French trilingual sentence alignments |
-| [**KabStandard**](https://huggingface.co/datasets/agbalu/KabStandard) | orthography standardisation | 497,944 parallel pairs mapping informal French-keyboard and Arabizi Kabyle to canonical Kabyle Latin — training and evaluation corpus for Boulifa-48M. Fully synthetic and reproducible at seed 42 from `agbalu/KabTifinagh` |
-| [**KabPunct**](https://huggingface.co/datasets/agbalu/KabPunct) | punctuation restoration | 1,318,707 word-labelled sentences with per-token punctuation (`NONE`, `COMMA`, `PERIOD`, `QUESTION`, `COLON`) and casing (`LOWER`, `UPPER_INIT`) labels — the training and evaluation corpus for Belaid-31M, and as far as we can establish the first labelled punctuation restoration corpus for any Berber language |
-| [**KabG2P**](https://huggingface.co/datasets/agbalu/KabG2P) | phonetics / G2P | 25,634 Kabyle word forms with IPA transcriptions recovered at 99.53% alignment rate from 292,921 aligned tokens — zero ambiguity, 42-symbol phonetic inventory, and per-entry spirantisation and vowel-backing annotations; the pronunciation dictionary for Matoub-82M and any downstream Kabyle TTS or ASR system |
-| [**KabSentiment**](https://huggingface.co/datasets/agbalu/KabSentiment) | sentiment | 15,000 human-written Kabyle sentences, labelled by projection from their English parallels and balanced across three classes — the first Kabyle sentiment set that covers *neutral*, and the first whose text preserves Kabyle orthography (the prior binary corpus retains 0.00% of `ɣ`, against 45% in real text). Its 12,000 training rows are what Masinissa-Sentiment is fitted on |
-| [**KabLiterary**](https://huggingface.co/datasets/agbalu/KabLiterary) | literary corpus | 28,907 paragraphs / 657,713 words of classical world literature in canonical Kabyle Latin — ten translated works plus the oral poetry of Si Mohand u Mhand as transcribed by Mammeri. Book-boundary splits: 9 books in `train`, *The Prophet* in `dev`, *Alice in Wonderland* in `test` |
+| [**KabEncBench**](https://huggingface.co/datasets/agbalu/KabEncBench) | Multi-task evaluation | 100,609 annotated instances across 6 core tasks (Syntax UPOS, Aspect Morphology, NER, Sentiment, SIB-200 Topic, Punctuation) and 3 diagnostic probes |
+| [**KabBench**](https://huggingface.co/datasets/agbalu/KabBench) | Evaluation benchmark | Audited and orthographically corrected Kabyle MT reference (correcting homoglyph corruption in 326 sentences), plus a balanced six-language Amazigh discrimination set |
+| [**KabLex**](https://huggingface.co/datasets/agbalu/KabLex) | Lexicon & pronunciation | 366,892 permissive lexical entries over 17,090 lemmas with morphological features, and 25,642 word–pronunciation pairs in IPA |
+| [**KabInflect**](https://huggingface.co/datasets/agbalu/KabInflect) | Morphology | 336,151 inflected verb forms across 13,226 lemmas partitioned into lemma-disjoint splits, plus 6,198 complete verb conjugation paradigms |
+| [**KabTifinagh**](https://huggingface.co/datasets/agbalu/KabTifinagh) | Transliteration | 497,944 parallel sentences pairing vowel-less Neo-Tifinagh with canonical Kabyle Latin, plus English and French trilingual alignments |
+| [**KabStandard**](https://huggingface.co/datasets/agbalu/KabStandard) | Orthography | 497,944 parallel sentence pairs mapping informal keyboard and Arabizi text to canonical Kabyle Latin |
+| [**KabPunct**](https://huggingface.co/datasets/agbalu/KabPunct) | Punctuation restoration | 1,318,707 word-labelled sentences with per-token punctuation and casing labels |
+| [**KabG2P**](https://huggingface.co/datasets/agbalu/KabG2P) | Phonetics & G2P | 25,634 Kabyle word forms with validated IPA transcriptions across a 42-symbol phonetic inventory |
+| [**KabSentiment**](https://huggingface.co/datasets/agbalu/KabSentiment) | Sentiment | 15,000 human-written Kabyle sentences balanced across three sentiment classes, labelled via cross-lingual teacher projection |
+| [**KabLiterary**](https://huggingface.co/datasets/agbalu/KabLiterary) | Literary corpus | 28,907 paragraphs (657,713 words) of translated world literature and oral poetry in canonical Kabyle Latin with book-boundary splits |
 
-**Every Kabyle BLEU score ever published is measured against a broken reference.** 16.2% of
-the Kabyle side of the standard MT benchmark carries homoglyph corruption, so a system that
-spells Kabyle correctly is penalised for it. `KabBench` is that reference, repaired.
+## Technical Principles
 
-## What makes these different
-
-**The orthography is repaired, not ignored.** Public Kabyle text carries systematic homoglyph
-corruption: Greek `ε` U+03B5 standing in for Latin `ɛ` U+025B, `γ` for `ɣ`, in 2.6–3.2% of
-rows of the largest sources. Published Kabyle tokenizers have baked this into their merges at
-a measured cost of **+17.8% to +21.3% tokens** on correctly spelled text. Every artifact here
-passes a versioned 81-rule normaliser first, and every artifact is stamped with its version.
-
-That repair shows up downstream as measurement rather than as a claim, twice. Under deliberate
-homoglyph corruption of its input, Masinissa-31M still scores **87.42%** — above every
-baseline's *clean* number. And Amrouche-1.3B's score is **identical** whether or not both sides
-are normalised before scoring — a gap of 0.00 into Kabyle, where the untuned base model gains
-0.17–0.19 — so the model has learned to spell Kabyle canonically.
-
-**Provenance is a precondition, not a footnote.** Every sentence in the training corpus
-carries a source id, a licence, and a retrieval date. A record whose origin cannot be named
-does not enter. The licence composition of the training text is published on every model
-card, including the uncomfortable part: **34.9% of it has no licence anyone could resolve.**
-A permissive grant on weights makes no claim about the text underneath them, and saying so
-is cheaper than pretending otherwise.
-
-**Evaluation reports what it measures.** FLORES+ `kab_Latn`, the benchmark every published
-Kabyle result is scored against, is **16.2% orthographically corrupt and has never been
-revised upstream** — which means 2.71 BLEU on its devtest is unreachable by a system that
-spells Kabyle correctly. Results here are scored twice, as-published and with both sides
-normalised, and the difference is reported. A published accuracy is a claim about a dataset,
-not about a task: one Kabyle model card's 94.8% is agreement with the lexicon projection that
-generated its own labels; on gold annotation it is 63.69%.
-
-**Decontamination is measured, with a positive control.** Zero overlap between the training
-corpus and all 2,009 FLORES+ `kab_Latn` sentences, which are also the text SIB-200 reuses.
-FLORES+ is built from Wikipedia, which is in the corpus, so this was checked rather than
-assumed, and the detector is positive-controlled against injected leaks — including one
-that differs only by the homoglyph corruption.
-
-**Representation learning is benchmarked on representation, not head capacity.** Multi-task
-evaluations often confound encoder quality with downstream fine-tuning hyperparameters and
-complex heads. In `KabEncBench`, backbones are 100% frozen, representations are pooled across
-all layers via a learnable `ScalarMix`, and a single linear probe is swept across identical
-learning rates and 5 seeds. Model rankings are established via a 2,000 paired cluster-bootstrap
-Bradley–Terry tournament on item-level wins, anchored at `XLM-RoBERTa = 1,000.0`.
+- **Orthographic consistency**: Public Kabyle text frequently exhibits systematic homoglyph substitutions (e.g. Greek `ε` U+03B5 for Latin `ɛ` U+025B, and `γ` for `ɣ`) in 2.6–3.2% of lines in raw web data. All AƔBALU datasets and models pass through a versioned 81-rule normaliser that standardises character representations while preserving contrastive spirantised and emphatic phonemes (`ɣ`, `ɛ`, `ḥ`, `ḍ`, `ṣ`, `ṭ`, `ẓ`, `ṛ`, `č`, `ǧ`, `ţ`).
+- **Provenance tracking**: Every sentence in the corpus carries traceable source identifiers, licensing metadata, and retrieval timestamps. The complete license distribution of training corpora is disclosed on each model card.
+- **Audited benchmarks**: Standard benchmarks with known upstream orthographic defects (such as the 16.2% homoglyph corruption in FLORES+ `kab_Latn`) are evaluated both in original and normalized forms to isolate model translation quality from benchmark encoding errors.
+- **Decontamination controls**: Training corpora are strictly decontaminated against benchmark evaluation splits (such as FLORES+ and SIB-200), verified through positive-control leak injection.
+- **Standardized representation benchmarking**: On `KabEncBench`, representation quality is evaluated with frozen backbones, layer-weighted `ScalarMix` pooling, and linear probes across identical hyperparameters, using 2,000 paired cluster-bootstrap tournament rounds to establish statistical significance.
 
 ## The names
 
-Each model is named for someone whose life was the work that model does, in two families.
+Each model is named in homage to a historical or cultural figure whose life and work reflect the function of that model.
 
-| model | does | name | |
+| Model | Task | Homage | Contribution |
 |---|---|---|---|
-| tokenizer | decides how Kabyle is written down | **Mammeri** | Mouloud Mammeri wrote the first Berber grammar written *in* Kabyle (1976), inventing the metalanguage to do it. The 1980 cancellation of his lecture on Kabyle poetry began the Berber Spring |
-| encoder | understands; one representation | **Masinissa** | first king of a united Numidia, r. 202–148 BCE — he brought the eastern and western tribes into one kingdom, as the encoder brings 42 sources into one representation |
-| sentence embeddings | recalls Kabyle exactly | **Si Mohand** | Si Mohand ou Mhand (1848–1905), master of the Kabyle *isefra*, who wrote none of them down — the verses survive because they were heard once and recalled intact |
-| translation | carries Kabyle out and back | **Amrouche** | Taos Amrouche sang exclusively in Kabyle and wrote in French — a life spent carrying one into the other |
-| transliteration | translates scripts and restores text | **Juba** | King Juba II (48 BCE – 23 CE) — the ancient Numidian scholar-king, linguist, and author whose life's work was the study and preservation of North African scripts and language |
-| speech recognition | hears Kabyle, writes it down | **Fadhma** | Fadhma Aït Mansour Amrouche, Taos's mother, who from 1930 began writing down the songs and tales inherited from her ancestors |
-| punctuation and casing | writes Kabyle as prose on a page | **Belaïd** | Belaïd At Ali (1909–1950), founder of written Kabyle prose. Asked to set down oral tales, he composed instead — *Les Cahiers de Belaïd*, the first Kabyle prose in Latin characters, and the first text whose author had to decide where a Kabyle sentence ends |
-| voice | speaks Kabyle | **Matoub** | Lounès Matoub (1956–1998) — recorded 36 albums in Kabyle at a time when the Algerian state was suppressing Berber language and culture, making the language audible to an entire generation. Assassinated on 25 June 1998, ten days before the Arabisation law he had spent years opposing took effect. His voice is inseparable from the survival of Kabyle as a spoken language in collective memory |
-| orthography standardisation | writes Kabyle correctly from any input | **Boulifa** | Si Amar ou Saïd Boulifa (1865–1931) — the first grammarian to systematically codify Kabyle Latin orthography. His *Recueil de poésies kabyles* (1904) set 555 pages of Kabyle in one consistent Latin notation, solving in print what this model solves from a keyboard |
-| document OCR | reads Kabyle from printed paper and books | **Feraoun** | Mouloud Feraoun (1913–1962), novelist and teacher who taught reading and transcribed the oral poetry of Si Mohand onto the printed page |
-| language identification | tells Kabyle from its siblings | **Dihya** | the Amazigh leader who fought the Umayyad conquest from the Aurès, died c. 703 CE — the Shawiya homeland, and Shawiya is the variety this model exists to stop being absorbed into Kabyle |
-| generative | generates; sovereign | **Jugurtha** | Masinissa's grandson, who fought Rome 111–104 BCE and was never taken in battle |
+| Tokenizer | Subword vocabulary | **Mammeri** | Mouloud Mammeri wrote the first Berber grammar written *in* Kabyle (1976), inventing the metalanguage to describe the language in its own words. The 1980 cancellation of his lecture on Kabyle poetry began the Berber Spring |
+| Encoder | Bidirectional representation | **Masinissa** | First king of a united Numidia (r. 202–148 BCE), who brought eastern and western territories into a single state |
+| Sentence embeddings | Exact passage retrieval | **Si Mohand** | Si Mohand ou Mhand (1848–1905), master of the Kabyle *isefra*, whose oral poetry survived intact through oral recitation and memory |
+| Translation | Cross-lingual transfer | **Amrouche** | Taos Amrouche sang exclusively in Kabyle and wrote in French, bridging oral Kabyle traditions and literature |
+| Transliteration | Script conversion | **Juba** | King Juba II (48 BCE – 23 CE), ancient Numidian scholar-king and author who studied and documented North African languages and scripts |
+| Speech recognition | Speech-to-text | **Fadhma** | Fadhma Aït Mansour Amrouche, Taos's mother, who began transcribing ancestral Kabyle songs and oral histories in the 1930s |
+| Punctuation & casing | Discourse structuring | **Belaïd** | Belaïd At Ali (1909–1950), author of *Les Cahiers de Belaïd*, the first continuous narrative prose written in Kabyle Latin orthography |
+| Speech synthesis | Voice generation | **Matoub** | Lounès Matoub (1956–1998), celebrated singer and poet who recorded 36 albums in Kabyle, defending the language and culture throughout his life |
+| Orthography standardisation | Text normalization | **Boulifa** | Si Amar ou Saïd Boulifa (1865–1931), author of *Recueil de poésies kabyles* (1904), who established early systematic conventions for Kabyle Latin orthography |
+| Document OCR | Document recognition | **Feraoun** | Mouloud Feraoun (1913–1962), novelist and educator who transcribed oral poetry onto the printed page |
+| Language identification | Sibling discrimination | **Dihya** | Queen Dihya, Amazigh historical leader from the Aurès region (c. 703 CE) |
+| Generative foundation | Generative reasoning | **Jugurtha** | King Jugurtha of Numidia (c. 160–104 BCE), grandson of Masinissa, who defended Numidian independence |
 
-Two lineages carry the design. **Masinissa and Jugurtha are grandfather and grandson**, so
-the smallest model and the largest are the founding of the kingdom and the refusal to
-surrender it. **Fadhma and Taos Amrouche are mother and daughter**, and they split the
-oral-tradition work exactly as their two models do: the mother heard the songs and wrote them
-down, which is speech recognition, and the daughter carried them into French while never
-singing in anything but Kabyle, which is translation. One of Taos's albums is called *Chants
-sauvés de l'oubli* — songs saved from oblivion.
+The model lineage reflects two historical and family relationships: **Masinissa and Jugurtha** represent the grandfather who unified Numidia and the grandson who defended its sovereignty, linking the foundational encoder and the generative model. **Fadhma and Taos Amrouche** are mother and daughter, reflecting the connection between transcribing spoken oral heritage into text (speech recognition) and translating across languages.
 
-Mammeri and Matoub stand alone, because what each of them did nobody shared: the grammar, and
-the voice.
-
-The naming is homage. It implies no endorsement by anyone, and none of these figures or their
-families are affiliated with this work.
+The naming is homage. It implies no endorsement by anyone, and none of these figures or their families are affiliated with this work.
 
 ## Licence
 
-Weights are **Apache-2.0**. The text they were trained on is not, and cannot be relicensed by
-that grant — each model card publishes the full composition so you can judge for yourself.
+Model weights and code are distributed under **Apache-2.0** (unless otherwise noted, such as Matoub-4B's non-commercial research license). Training data licensing distributions are disclosed on each respective model and dataset card.

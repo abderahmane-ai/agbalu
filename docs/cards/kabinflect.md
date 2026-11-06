@@ -46,11 +46,9 @@ configs:
 
 # KabInflect
 
-A morphological inflection and analysis benchmark for Kabyle (Taqbaylit, `kab`, Latin script), from the
-[AƔBALU](https://huggingface.co/agbalu) project.
+A morphological inflection and analysis benchmark for Kabyle (Taqbaylit, `kab`, Latin script), from the [AƔBALU](https://huggingface.co/agbalu) project.
 
-**336,151 inflected verb form entries** across **13,226 unique verb lemmas**, partitioned into
-paradigmatically sealed splits (0 paradigm leakage), plus **6,198 complete verb conjugation tables**.
+**336,151 inflected verb form entries** across **13,226 unique verb lemmas**, partitioned into lemma-disjoint splits (0 paradigm leakage), plus **6,198 complete verb conjugation tables**.
 
 ```python
 from datasets import load_dataset
@@ -62,37 +60,37 @@ paradigms = load_dataset("agbalu/KabInflect", "paradigms", split="train")
 
 ## `inflection`
 
-Morphological Inflection (Seq2Seq Morphological Generation): `(lemma, feats)` → `form`.
+Morphological Inflection (Seq2Seq Morphological Generation): `(lemma, feats) → form`.
 
 336,151 total entries across 13,226 verb lemmas.
 
-| split | lemmas | inflected forms |
+| Split | Lemmas | Inflected forms |
 |---|---|---|
 | `train` | 10,580 | 270,026 |
 | `dev` | 1,323 | 33,060 |
 | `test` | 1,323 | 33,065 |
-| **total** | **13,226** | **336,151** |
+| **Total** | **13,226** | **336,151** |
 
 ### Schema
 
-| field | type | description |
+| Field | Type | Description |
 |---|---|---|
-| `id` | string | `kab_inflect_{split}_{idx}` |
-| `lemma` | string | Base verb infinitif (canonical) |
-| `feats` | string | Universal Dependencies (UD) FEATS (e.g. `Aspect=Perf\|Gender=Masc\|Number=Sing\|Person=3`) |
-| `tense_raw` | string | Legacy source tense descriptor (e.g. `prétérit`, `aoriste intensif`) |
-| `person_raw` | string | Legacy source person descriptor (e.g. `3s_m`, `1p`) |
-| `form` | string | Inflected surface form, normalised; see Orthography — emphatic `ṛ` is unmarked |
+| `id` | string | Unique record ID (`kab_inflect_{split}_{idx}`) |
+| `lemma` | string | Base verb citation form (`infinitif`) |
+| `feats` | string | Universal Dependencies morphological features (e.g. `Aspect=Perf\|Gender=Masc\|Number=Sing\|Person=3`) |
+| `tense_raw` | string | Source tense descriptor (e.g. `prétérit`, `aoriste intensif`) |
+| `person_raw` | string | Source person descriptor (e.g. `3s_m`, `1p`) |
+| `form` | string | Normalized inflected surface form |
 
 ## `analysis`
 
-Morphological Analysis and Lemmatisation: `form` → `(lemma, feats)`.
+Morphological Analysis and Lemmatisation: `form → (lemma, feats)`.
 
-Same 336,151 entries, indexed by inflected surface form.
+336,151 entries indexed by inflected surface form, using the same lemma-disjoint split boundaries.
 
 ## `paradigms`
 
-6,198 full verb paradigms with French translations, irregularity indicators (`is_irregular`, `is_derived`), pattern verbs, and principal aspect stems (`imperative`, `aorist`, `preterite`, `negative_preterite`, `aorist_participle`, `preterite_participle`, `negative_preterite_participle`, `intensive_forms`).
+6,198 complete verb paradigms with French translations, irregularity flags (`is_irregular`, `is_derived`), pattern classifications, and principal aspect stems (`imperative`, `aorist`, `preterite`, `negative_preterite`, `aorist_participle`, `preterite_participle`, `negative_preterite_participle`, `intensive_forms`).
 
 ## Usage
 
@@ -100,84 +98,46 @@ Same 336,151 entries, indexed by inflected surface form.
 from datasets import load_dataset
 
 inflection = load_dataset("agbalu/KabInflect", "inflection", split="train")
-inflection[0]
+print(inflection[0])
 # {'id': 'kab_inflect_train_000000', 'lemma': 'ttemnunnuḍ',
 #  'feats': 'Aspect=Imp|VerbForm=Part', 'tense_raw': 'participe aoriste intensif',
 #  'person_raw': 'participe', 'form': 'ittemnunnuḍen'}
 
-analysis  = load_dataset("agbalu/KabInflect", "analysis",  split="test")   # form -> lemma
-paradigms = load_dataset("agbalu/KabInflect", "paradigms", split="train")  # whole tables
+analysis = load_dataset("agbalu/KabInflect", "analysis", split="test")
+paradigms = load_dataset("agbalu/KabInflect", "paradigms", split="train")
 ```
 
-The task is `(lemma, feats) -> form` for `inflection` and the reverse for `analysis`. The
-splits are **sealed on the paradigm**, so a lemma appearing in train appears in no other
-split — which is why the copy-the-lemma floor below is as low as it is.
+The inflection task maps `(lemma, feats) → form`, while morphological analysis performs the reverse mapping `form → (lemma, feats)`.
 
-## Paradigmatically Sealed Partitioning (Zero Paradigm Leakage)
+## Lemma-Disjoint Partitioning
 
-**Upstream datasets randomly split individual inflected forms across train and test.** That design flaw causes extreme data leakage: forms of the exact same verb (e.g. `awḍeɣ`, `tewḍeḍ`, `yeweḍ`) appear in both splits, so a test score measures simple paradigm memorisation rather than linguistic learning.
-
-`agbalu/KabInflect` fixes this:
-- Entries are grouped strictly by **verb lemma** (`infinitif`).
-- Splitting is performed at the **lemma level** with seed 42.
-- **0% lemma overlap**: all 1,323 verbs in `test` (33,065 forms) are completely unseen during training. A system must learn the underlying rules of Kabyle morphology to succeed.
+To prevent data leakage, dataset splits are partitioned strictly at the **verb lemma level** rather than splitting individual surface forms randomly:
+- Entries are grouped by base verb lemma (`infinitif`).
+- Splitting is performed across lemmas using seed 42.
+- **0% lemma overlap**: All 1,323 verb lemmas in `test` (33,065 forms) are completely unseen in the training split, requiring models to generalize morphological inflection rules to novel lexemes rather than memorizing attested paradigms.
 
 ## Orthography
 
-All Kabyle text is normalised under normaliser `1.3.0+rules1.0.0` (81 rules). The source
-text carries 0.00% homoglyph error and 0.00% legacy-font mojibake.
+All Kabyle text is normalized under the AƔBALU reference normaliser (`1.3.0+rules1.0.0`, 81 rules).
 
-**The emphatic `ṛ` is not represented, and this is a property of the source.** Measured
-over all 270,026 training forms, `ṛ` U+1E5B occurs **0 times**, while `ḍ` appears in 14.43%
-of forms, `ḥ` in 12.14%, `ṣ` in 3.36%, `ẓ` in 2.73% and `ṭ` in 4.37%. The upstream
-conjugation resource writes plain `r` throughout — its lemmas are `ruḥ`, `ṣber` and `ɛreḍ`,
-not `ṛuḥ`, `ṣbeṛ` and `ɛṛeḍ`.
-
-The normaliser did not remove it; there was never anything to preserve. **The `ṛ`/`r`
-contrast is therefore neutralised in this dataset**, and it is *not* neutralised in
-[`agbalu/KabLex`](https://huggingface.co/datasets/agbalu/KabLex), which carries both `ṛuḥ`
-and `ruḥ`. A model trained here will not produce emphatic `ṛ`, and scoring its output
-against text that marks it will count every such form wrong.
-
-Restoring it would mean deciding, for each `r`, whether the verb takes the emphatic — a
-lexical question this dataset has no evidence for. It is disclosed rather than guessed.
+In the underlying source verb resource, the emphatic `ṛ` (U+1E5B) is not distinguished from plain `r` (occurring 0 times across 270,026 training forms, whereas other emphatics like `ḍ`, `ḥ`, `ṣ`, `ṭ`, `ẓ` are fully marked). Consequently, the `r` vs. `ṛ` phonemic distinction is neutralized in this dataset. Models trained exclusively on KabInflect will not generate emphatic `ṛ`; when evaluating on corpora where `ṛ` is marked, references should be normalized accordingly to prevent spurious orthographic mismatches.
 
 ## Evaluation Protocol & Baseline Floor
 
 The benchmark evaluates morphological generation (`inflection`) and parsing (`analysis`) on **1,323 held-out test verb lemmas (33,065 unseen test forms)**.
 
-| task | system | exact match | CER |
+| Task | System / Baseline | Exact match | CER |
 |---|---|---|---|
-| inflection | copy the lemma unchanged | 4.07% | 30.73% |
+| Inflection | Copy lemma unchanged | 4.07% | 30.73% |
 
+Because the imperative singular serves as the citation form for many Kabyle verbs, a trivial baseline copying the lemma unchanged achieves 4.07% exact match (and 30.73% CER) across the test split.
 
+## Known Limitations
 
-**The floor is not zero, and that is why it is measured rather than assumed.** Kabyle's
-imperative singular *is* the citation form for most verbs, so a copy is correct in one cell
-of nearly every paradigm — 4.07% of 33,065 test forms. A headline exact match read against
-zero would be flattered by exactly that much.
-
-No system has yet been scored on the `analysis` direction.
-
-Because the splits are sealed by lemma, a model cannot reach the floor by memorising
-paradigms: no test verb appears in any training cell.
-
-## Known Limits
-
-- **No emphatic `ṛ`.** 0 occurrences in 270,026 forms: the upstream conjugator writes `ruḥ`
-  and `ṣber` rather than `ṛuḥ` and `ṣbeṛ`, so the distinction was never in the source to
-  preserve. It is the most consequential limit here and it is confined to one letter — `ḍ`
-  appears in 14.43% of forms and `ḥ` in 12.14%. Score on matched orthography, or normalise
-  both sides; a model trained here and evaluated against `ṛ`-marking text loses every such
-  form for a reason that is not the model's.
-- **Every form appears exactly once.** The raw shards repeat rows verbatim — one verb's
-  intensive stems can generate the same cell twice — so **8,594 identical rows were dropped**
-  (344,745 → 336,151) and no form is silently reweighted during training. Earlier revisions of
-  this dataset carried them; this one does not, and the baseline floor below was recomputed
-  after the rebuild rather than carried over.
-- **Verb-focused.** Covers Kabyle verbal morphology (the largest morphological paradigm family in the language); nominal annexed-state paradigms are covered separately in `agbalu/KabLex`.
-- **Gloss language.** Paradigm translations are French, reflecting the source dictionary.
-- **Standard orthography.** Uses standard Kabyle Latin script; does not cover dialectal spellings or Tifinagh (see `agbalu/KabTifinagh` for script conversion).
+- **Unmarked `ṛ`**: Emphatic `ṛ` is written as plain `r` throughout the upstream verbal database, neutralizing this contrast.
+- **Deduplication**: 8,594 redundant duplicate entries present in raw source tables were removed during curation (reducing 344,745 to 336,151 rows).
+- **Verbal domain**: Focuses on Kabyle verbal morphology; nominal state alternations are provided in `agbalu/KabLex`.
+- **Gloss language**: Translations and definitions within paradigm tables are in French.
 
 ## Citation
 

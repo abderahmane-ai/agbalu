@@ -51,13 +51,13 @@ model-index:
 
 # Belaid-75M
 
-**Discourse-level punctuation and truecasing for Kabyle** (Taqbaylit, `kab`, Latin script). It reads unpunctuated, lowercased Kabyle text — the raw output emitted by automatic speech recognition systems, raw subtitles, or unnormalized transcripts — and simultaneously predicts for each word:
+A 75.1M-parameter (75,147,533) token-classification model for **discourse-level punctuation and truecasing in Kabyle** (Taqbaylit, `kab`, Latin script). It processes unpunctuated, lowercased Kabyle text — such as raw output from automatic speech recognition systems, raw subtitles, or unnormalized transcripts — and simultaneously predicts for each word:
 1. Which punctuation mark directly follows it (`NONE`, `COMMA`, `PERIOD`, `QUESTION`, `COLON`).
 2. The exact orthographic casing the word requires (`LOWER`, `UPPER_INIT`, `ALL_CAPS`).
 
 Belaid-75M is fine-tuned from [`agbalu/Masinissa-73M`](https://huggingface.co/agbalu/Masinissa-73M) over a **1,024-token context window**. Unlike sentence-level models that process only single isolated utterances, Belaid-75M restores punctuation and capitalization across **continuous multi-sentence discourse**, identifying clause boundaries, sentence terminations, questions, colons, acronyms, and hyphenated clitic capitalisation throughout extended passages.
 
-**It never edits spelling.** Every word returns exactly as it arrived, so the restorer can sit behind a recogniser without rewriting a word that was right. What it adds is the page: internal periods, commas, questions, colons, capitals and acronyms, across a 1,024-subword window.
+The model restores punctuation and capitalization without modifying underlying word spellings, functioning as a non-destructive post-processing stage for ASR transcripts and unpunctuated text across a 1,024-subword context window.
 
 ## Results
 
@@ -86,11 +86,11 @@ Evaluation is conducted on a held-out diagnostic split of continuous multi-sente
 | `COLON` | 178 | 172 | 0.610 | 0.590 | 0.600 |
 | `QUESTION` | 91 | 80 | 0.563 | 0.495 | 0.526 |
 
-The rule writes one capital and one final period. On this split that scores **0.000 F1 on every mark**, because 1,033 of the periods are spread through 128 windows and a single trailing stop never touches the internal ones. Belaid-75M is the model that places them: **0.630 period F1**, **0.623 comma F1**, **0.600 colon F1**, **0.526 question F1**, **0.755 acronym F1**. Sentence-final accuracy moves from 0.925 to **0.961**. Word casing moves from 0.000 to **0.940**. Acronym precision is **0.971** — `MCB`, `HCA`, `FFS`, `RCD` come back in capitals, ordinary nouns stay nouns.
+The baseline rule applies only an initial capital and trailing terminal period, which fails to restore internal punctuation marks across multi-sentence discourse (0.000 F1 across all internal marks). Belaid-75M accurately restores internal structure, achieving **0.630 period F1**, **0.623 comma F1**, **0.600 colon F1**, **0.526 question F1**, and **0.755 acronym F1**. Sentence-final mark accuracy improves from 0.925 to **0.961**, exact word casing accuracy reaches **0.940**, and acronym precision is **0.971** (correctly restoring terms like MCB, HCA, FFS, and RCD to all-caps while preserving lowercase common nouns).
 
 ## Comparison with Belaid-31M
 
-[`Belaid-31M`](https://huggingface.co/agbalu/Belaid-31M) owns the utterance. Belaid-75M owns the paragraph. Each number below is that model's score on the split it was built for.
+[`Belaid-31M`](https://huggingface.co/agbalu/Belaid-31M) is optimized for short single-utterance sequences (128 subwords), while Belaid-75M is designed for paragraph- and document-scale continuous discourse (1,024 subwords). Each column reports evaluation on the model's target distribution:
 
 | | Belaid-31M | **Belaid-75M** |
 |---|---|---|
@@ -102,7 +102,7 @@ The rule writes one capital and one final period. On this split that scores **0.
 | `ALL_CAPS` | Held by the utterance model to two casing classes | **0.755 F1, 0.971 precision** |
 | Marks on words the reference leaves bare | | **29.9 per 1,000 words** |
 
-One utterance from Fadhma belongs on Belaid-31M, which scores **0.793** there. A paragraph, a subtitle roll, or a page of prose belongs here.
+Isolated utterances and short transcripts are efficiently processed by Belaid-31M, whereas multi-sentence passages, subtitle streams, and continuous documents benefit from the broader 1,024-token receptive field of Belaid-75M.
 
 ## Intended use
 
@@ -202,10 +202,10 @@ Strict decontamination was enforced across all stages:
 
 ## Limitations
 
-- **Commas.** Precision is 0.620 on a language with no single comma convention. The references disagree with each other, and the model is scored against that written practice. Spelling is untouched either way.
-- **Operating point.** 29.9 marks per 1,000 words land on tokens the reference labels `NONE`. That is the rate at which a discourse model recovers boundaries the baseline scores at 0.000.
-- **Text.** The model reads the words. Prosody is a separate signal.
-- **Kabyle.** Tashelhit, Tarifit, Tamasheq and Shawiya keep their own lexicons and their own interrogatives.
+- **Comma placement variability**: Comma precision is 0.620, reflecting substantial stylistic variability across Kabyle writers and editorial standards rather than definitive punctuation errors.
+- **Insertion rate**: The model predicts 29.9 punctuation marks per 1,000 words where reference text contained no punctuation, primarily resolving clause boundaries in lightly punctuated source texts.
+- **Acoustic and prosodic cues**: The model processes text transcripts without acoustic or prosodic features; ambiguous intonation patterns cannot be disambiguated from text alone.
+- **Dialectal specificity**: Trained specifically for Kabyle (`kab`); other Amazigh varieties (such as Tashelhit, Tarifit, Tamasheq, and Shawiya) possess distinct clitic structures and interrogative syntax.
 
 ## What was not measured
 

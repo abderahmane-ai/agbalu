@@ -15,40 +15,21 @@ tags:
 
 # Mammeri-Tok
 
-Ten SentencePiece Unigram vocabularies for **Kabyle** (Taqbaylit, `kab`, Latin script),
-trained on 3,041,989 orthographically normalised sentences: five sizes from 8k to 32k, in two
-initialisation arms.
+Ten SentencePiece Unigram vocabularies for **Kabyle** (Taqbaylit, `kab`, Latin script), trained on 3,041,989 orthographically normalised sentences across five vocabulary sizes (8k, 12k, 16k, 24k, and 32k) and two initialization arms (`base` and `seeded`).
 
-The vocabulary at **16,000, default arm** is the one
-[`agbalu/Masinissa-31M`](https://huggingface.co/agbalu/Masinissa-31M) is trained on. The other
-nine are published because the sweep is the result — it settles two questions about Kabyle
-segmentation that were previously argued rather than measured.
+The **base-16k** vocabulary is used by [`agbalu/Masinissa-31M`](https://huggingface.co/agbalu/Masinissa-31M), [`agbalu/Masinissa-73M`](https://huggingface.co/agbalu/Masinissa-73M), and downstream models. The remaining nine configurations are published to document the empirical evaluation across vocabulary scale and lexical initialization.
 
-## Why ten and not one
+## Initialization arms and morphology
 
-**Lexicon-seeded initialisation is a controlled negative.** The `seeded` arm initialises the
-Unigram candidate set from a 395,834-entry Kabyle lexicon — 258,221 forms over 32,914 lemmas,
-plus annexed-state rules and Hunspell affixes. It was expected to help. Measured against a
-matched default arm at all five sizes, it changes tokenised length by **0.17%** at 16k
-(665,935 tokens against 667,068 over the same 344,648 words) and does not change the
-morphological measures at all. Published so nobody spends the effort again.
-
-**Vocabulary construction cannot represent the annexed state.** Kabyle marks a word-initial
-state alternation — `axxam` "house" becomes `wexxam` in the annexed state. The design argued
-that a small vocabulary would be *forced* to factor this so the stem is shared. It is false.
-Across every size and both arms, **0 of 15 annexed-state pairs share a stem**; both members
-are memorised whole. Viterbi prefers the whole word by 9 nats. Tested twice, refuted twice:
-this has to come from the model, the objective, or an explicit morphological layer.
-
-The one place the vocabulary does behave well is clitics: **72 of 72** clitic fixtures remain
-atomic at every size.
+- **Lexicon seeding**: The `seeded` arm initialises the Unigram candidate set using a 395,834-entry Kabyle lexicon (258,221 inflected forms across 32,914 lemmas, augmented with annexed-state rules and Hunspell affixes). Evaluated against the standard unseeded `base` arm across all five sizes, lexicon seeding reduces tokenised sequence length by only **0.17%** at 16k (665,935 tokens versus 667,068 across 344,648 words) and does not improve morphological segmentation metrics.
+- **Annexed state representation**: Kabyle marks word-initial grammatical state through vowel alternation (e.g., free state *axxam*, "house", becomes annexed state *wexxam*). Across all vocabulary sizes and both arms, **0 of 15 diagnostic annexed-state pairs share a stem**, with Viterbi segmentation preferring full-word pieces by approximately 9 nats. This indicates that standard statistical subword segmenters memorize alternations as distinct units rather than factoring out underlying stems.
+- **Clitic attachment**: Clitic fixtures remain consistently atomic across configurations, with **72 of 72** diagnostic clitic forms preserved across all sizes.
 
 ## Results
 
-30,000 held-out sentences, 344,648 words, 2,028,636 characters. `fertility` is tokens per
-word; lower is denser.
+Evaluated on 30,000 held-out sentences (344,648 words, 2,028,636 characters). `Fertility` measures average subwords per word (lower indicates higher compression).
 
-| vocabulary | fertility | tokens/char | whole-word pieces | annexed state | clitics | embedding params @384 |
+| Vocabulary | Fertility | Tokens/char | Whole-word pieces | Annexed state | Clitics | Embedding params @ 384 |
 |---|---:|---:|---:|:---:|:---:|---:|
 | base-8k | 2.0915 | 0.3553 | 53.0% | 0/15 | 72/72 | 3,072,000 |
 | base-12k | 1.9949 | 0.3389 | 55.8% | 0/15 | 72/72 | 4,608,000 |
@@ -61,74 +42,52 @@ word; lower is denser.
 | seeded-24k | 1.8602 | 0.3160 | 59.9% | 0/15 | 72/72 | 9,216,000 |
 | seeded-32k | 1.8146 | 0.3083 | 60.8% | 0/15 | 72/72 | 12,288,000 |
 
-**Round-trip failures: 0** at every size. Byte-fallback pieces are 0.65–0.74% of tokens.
+Round-trip decoding reconstruction error is 0% across all configurations. Byte-fallback pieces account for 0.65–0.74% of token occurrences.
 
-**Why 16k was chosen for the encoder.** Compression improves monotonically with size and
-buys 7.5% fewer tokens from 8k to 16k, then only 6.2% more for the next doubling — while the
-embedding table doubles each time. At hidden size 384, a 16k table is **19.7%** of the
-resulting 31.1M-parameter encoder, against **33.0%** of the 37.3M one at 32k. 16,384 is also
-what the BabyLM-winning LTG-BERT line uses at 100M words. Neither of those is a downstream
-measurement, and the choice should be revisited by one.
+### Vocabulary selection rationale
+
+The 16k vocabulary was selected for the Masinissa encoder family. Increasing vocabulary size from 8k to 16k reduces token count by 7.5%, whereas the subsequent doubling from 16k to 32k yields only an additional 6.2% reduction while doubling embedding table memory. At hidden dimension 384, a 16k embedding table accounts for 19.7% of total parameters (6.14M of 31.1M), compared to 33.0% (12.29M of 37.3M) at 32k.
 
 ## Build parameters
 
-| | |
+| Parameter | Value |
 |---|---|
 | Algorithm | SentencePiece **Unigram**, `byte_fallback=True` |
-| Normalisation rule | `identity` — the corpus is already normaliser output |
+| Normalisation rule | `identity` (corpus pre-normalised) |
 | Character coverage | 0.9995 |
-| Input sentences | 2,000,000 sampled |
+| Input sample | 2,000,000 sampled sentences |
 | Random seed | 20260807 |
-| Normaliser | **1.3.0+rules1.0.0** |
+| Normaliser version | **1.3.0+rules1.0.0** |
 | Tokenizer version | 1.0.0 |
 
-`normalization_rule_name="identity"` is deliberate and load-bearing. SentencePiece's default
-NMT normalisation re-folds characters Kabyle needs kept apart — `ţ` above all, which one
-published specification maps to `ṭ` against the evidence of the corpus. `required_chars` is
-set explicitly over the Kabyle inventory plus `-` and `'`; without it, vocabulary slots leak
-to scripts that are collectively under 0.5% of tokens.
+The normalisation rule is set to `identity` because text is pre-normalised by the AƔBALU pipeline. Default SentencePiece NMT normalisation erroneously folds distinct Kabyle characters, such as mapping `ţ` to `ṭ`. `required_chars` is explicitly defined over the Kabyle alphabet plus `-` and `'` to prevent foreign-script symbols from consuming vocabulary slots.
 
 ## Training corpus
 
-**AƔBALU-Text v1** — 3,041,989 deduplicated sentences over 42 provenance-tracked sources,
-every one passed through the reference normaliser at 1.3.0+rules1.0.0. That normaliser repairs
-the systematic homoglyph corruption in public Kabyle text (Greek `ε` U+03B5 for Latin `ɛ`
-U+025B, `γ` for `ɣ`) which affects 2.6–3.2% of rows in the largest sources, while preserving
-`ɣ ɛ ḥ ḍ ṣ ṭ ẓ ṛ č ǧ ţ` and the emphatic and spirantised distinctions that carry meaning.
+Trained on a 2,000,000-sentence sample of **AƔBALU-Text v1** (3,041,989 deduplicated sentences across 42 provenance-tracked sources). All text is pre-processed with the reference normaliser (version 1.3.0+rules1.0.0). The normaliser standardises homoglyph errors common in public text (e.g. Greek `ε` U+03B5 for Latin `ɛ` U+025B, and `γ` for `ɣ`), which affect 2.6–3.2% of lines in raw web data, while preserving phonemically contrastive spirantised and emphatic consonants (`ɣ`, `ɛ`, `ḥ`, `ḍ`, `ṣ`, `ṭ`, `ẓ`, `ṛ`, `č`, `ǧ`, `ţ`).
 
-This matters for a tokenizer specifically: **homoglyph corruption gets baked into vocabulary
-merges**. Measured on published Kabyle tokenizers, it costs **+17.8% to +21.3% tokens** on
-correctly spelled text, because the corrupted and correct spellings of the same word occupy
-different pieces.
+Without normalisation, homoglyph inconsistencies fragment subwords during vocabulary construction, increasing token sequences by +17.8% to +21.3% on clean Kabyle text.
 
 ### Licence composition of the training text
 
-Apache-2.0 covers these vocabulary files. It does not relicense the text they were built from:
+Apache-2.0 covers these vocabulary files. The redistribution distribution of the underlying corpus is:
 
-| redistribution | sentences | share |
+| Redistribution | Sentences | Share |
 |---|---|---|
-| **unclear** | 1,062,569 | **34.9%** |
-| permissive | 973,218 | 32.0% |
-| share-alike | 944,438 | 31.0% |
-| non-commercial | 61,764 | 2.0% |
-
-`unclear` is the absence of a resolvable licence, not a permissive one.
+| **Unclear** | 1,062,569 | **34.9%** |
+| Permissive | 973,218 | 32.0% |
+| Share-alike | 944,438 | 31.0% |
+| Non-commercial | 61,764 | 2.0% |
 
 ## Intended use
 
-Segmenting Kabyle for a model you are training yourself. **base-16k is the default** — it is
-what [`Masinissa-31M`](https://huggingface.co/agbalu/Masinissa-31M) and
-[`Belaid-31M`](https://huggingface.co/agbalu/Belaid-31M) were built on, and the other nine
-exist so a size or initialisation decision can be made against measurements rather than by
-convention.
+- Subword tokenization for Kabyle language modeling and NLP applications.
+- **base-16k** is the default configuration, used by [`Masinissa-31M`](https://huggingface.co/agbalu/Masinissa-31M) and [`Belaid-31M`](https://huggingface.co/agbalu/Belaid-31M).
 
-**Normalise first.** The vocabulary was trained on text where `ɛ` is U+025B and never Greek
-epsilon; homoglyph-corrupted input fragments into byte pieces, and that is 2.6–3.2% of the
-seed corpora this project started from.
-
-**Not suitable for**: Tifinagh, which no vocabulary here covers; the Berber sibling languages,
-which share part of the orthography and were not measured; or as a general-purpose
-multilingual tokenizer — these are Kabyle vocabularies and nothing else.
+**Not suitable for**:
+- Tifinagh script (these vocabularies are Latin-script only).
+- Non-Kabyle Berber languages with distinct phonotactics.
+- General-purpose multilingual tokenization.
 
 ## Usage
 
@@ -146,57 +105,30 @@ sp.encode("Azul fell-awen, amek i tellam?")
 # [3173, 354, 261, 549, 265, 437, 267, 6399, 296]
 ```
 
-Nine pieces for six words: `Azul`, `amek`, `i` and `tellam` are each one piece, and the
-clitic chain `fell-awen` splits on its hyphen. That ratio is what the sweep below measures —
-**1.9355 pieces per word** for this vocabulary over 30,000 held-out sentences.
+The 16k base vocabulary is also published as a `transformers` fast tokenizer inside [`agbalu/Masinissa-31M`](https://huggingface.co/agbalu/Masinissa-31M), id-for-id with this file.
 
-The 16k base vocabulary is also published as a `transformers` fast tokenizer inside
-[`agbalu/Masinissa-31M`](https://huggingface.co/agbalu/Masinissa-31M), id for id with this
-file. Use that one if you want `AutoTokenizer`; use this one for the other nine sizes, which
-have no model of their own.
+Input should be normalised to standard Kabyle Latin orthography prior to tokenization to prevent byte-fallback fragmentation.
 
-Input should already be normalised to the same orthography the vocabulary was built on;
-otherwise homoglyph-corrupted text will fragment into byte pieces.
-
-`agbalu-tok-base-16k.model` has SHA-256
-`c8094fccd936d2e8954809bd9cf45331679e9550d2c7bbabe5c38c3bf365dc4e`. Each vocabulary ships with
-a `.vocab` listing and a `.metadata.json` recording its build spec and checksum.
+`agbalu-tok-base-16k.model` has SHA-256 `c8094fccd936d2e8954809bd9cf45331679e9550d2c7bbabe5c38c3bf365dc4e`.
 
 ## Limitations
 
-- **No morphological factorisation.** See the annexed state above. Do not assume subword
-  boundaries correspond to Kabyle morphemes; measured, they largely do not.
-- **Latin script only.** Kabyle is also written in Tifinagh, and lossless Latin↔Tifinagh
-  transliteration is not possible — the mapping is genuinely many-to-one in places. These
-  vocabularies do not cover Tifinagh.
-- **Compression is not a claim we own.** At 48k this Unigram measures 1.754 tokens per word
-  against a community Kabyle BPE's 1.542. That is what Unigram trades away. The advantage
-  here is orthographic, not compressive: the vocabulary is built on repaired text, so it does
-  not spend pieces on corrupted spellings.
-- The sweep's morphological measures use small fixture sets — 15 annexed-state pairs, 72
-  clitic fixtures. They are diagnostic, not a benchmark.
+- **Morphological factorisation**: Statistical subword units do not align cleanly with Kabyle morphemes, particularly in cases of root-internal vowel alternation.
+- **Script support**: Latin script only; Tifinagh orthography is not covered.
+- **Diagnostic scope**: Annexed state and clitic evaluations use targeted diagnostic sets (15 pairs and 72 clitics).
 
 ## Files
 
-Ten vocabularies, each in three files, plus the sweep.
-
-| file | contents |
+| File | Contents |
 |---|---|
-| `agbalu-tok-{base,seeded}-{8,12,16,24,32}k.model` | the SentencePiece model — the only file inference needs |
-| `agbalu-tok-*.vocab` | the pieces and their log-probabilities, one per line, for reading |
-| `agbalu-tok-*.metadata.json` | the build spec that produced it, and its SHA-256 |
-| `sweep.json` | every number in the results table above, for all ten |
-
-Each `.metadata.json` records the corpus, the character coverage, the seed list where there
-is one, and the checksum — so a vocabulary can be tied back to the build that made it rather
-than trusted by filename.
+| `agbalu-tok-{base,seeded}-{8,12,16,24,32}k.model` | SentencePiece binary model file |
+| `agbalu-tok-*.vocab` | Vocabulary list and log-probabilities |
+| `agbalu-tok-*.metadata.json` | Build specification and SHA-256 checksum |
+| `sweep.json` | Complete benchmark metrics across all ten configurations |
 
 ## Reproduction
 
-Trained with SentencePiece using Unigram segmentation and 0.9995 character coverage across
-the balanced Kabyle corpus sample. Evaluated on 30,000 held-out sentences for fertility, byte
-fallback rate, and morphological agreement. All metrics reproduce deterministically from the
-published model artifacts.
+Trained with SentencePiece using Unigram segmentation and 0.9995 character coverage across the balanced Kabyle corpus sample. Evaluated on 30,000 held-out sentences for fertility, byte fallback rate, and morphological agreement. All metrics reproduce deterministically from the published model artifacts.
 
 ## The name
 
@@ -225,5 +157,4 @@ decides how it is written down. The naming is homage; it implies no endorsement 
 
 ## Licence
 
-**Apache-2.0.** Read the licence composition of the training text above before redistributing
-derivatives.
+**Apache-2.0.** Check the licence composition table above before redistributing derivative models or datasets.

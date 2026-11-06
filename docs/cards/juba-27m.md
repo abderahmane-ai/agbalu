@@ -38,72 +38,30 @@ model-index:
 
 # Juba-27M
 
-A 26.9M-parameter character-level Conv-Transformer for **Kabyle** (Taqbaylit, `kab`),
-trained from scratch to convert Neo-Tifinagh (`ⵜⴰⵇⴱⴰⵢⵍⵉⵜ`) into standard Kabyle Latin
-(`Taqbaylit`) — and, in doing so, to restore the vowel `e` that Tifinagh does not write.
+A 26.9M-parameter character-level Conv-Transformer sequence-to-sequence model for **Kabyle** (Taqbaylit, `kab`), trained from scratch to convert Neo-Tifinagh (`ⵜⴰⵇⴱⴰⵢⵍⵉⵜ`) into standard Kabyle Latin (`Taqbaylit`) with contextual schwa (`e`) restoration.
 
-**The vowel is the whole task.** Every consonant maps one-to-one between the two scripts,
-so a lookup table converts them in an afternoon. Kabyle Neo-Tifinagh omits the schwa, and
-where it belongs is a function of the surrounding consonants. That is a sequence problem,
-and it is why a character table reaches **1.2% sentence exact match** on the test split
-where this model reaches **94.2%**.
+While consonant mappings between Neo-Tifinagh and Latin are largely one-to-one, standard Kabyle Neo-Tifinagh omits the neutral vowel `e`. Where schwas appear is governed by local phonotactic constraints in consonant clusters. Juba-27M models this context using a convolutional stem and Transformer encoder-decoder, achieving **94.22% sentence exact match**, **0.33% character error rate (CER)**, and **93.51% schwa placement F1** under free-running greedy decoding.
 
 ## Results
 
-Test split of `agbalu/KabTifinagh`: 49,795 sentences, disjoint from train and dev, never
-seen during training or model selection. **Free-running greedy decoding** — the model is
-fed its own output, which is what a caller gets.
+Evaluated on the held-out test split of `agbalu/KabTifinagh` (5,000 sentences, free-running autoregressive decoding):
 
-| system | sentence exact match | character error rate | schwa placement F1 |
+| System | Sentence Exact Match | Character Error Rate (CER) | Schwa Placement F1 |
 |---|---|---|---|
 | **Juba-27M** | **94.22%** | **0.33%** | **93.51%** |
-| deterministic character table | 1.16% | 13.55% | 1.61% |
+| Deterministic Character Lookup | 1.16% | 13.55% | 1.61% |
 
-Both rows are measured on the same 5,000 sentences in the same pass. The character table's figures over the full 49,795 are 1.02% /
-13.49% / 1.72%, so the sample is not flattering it.
+- **Placement Metric:** Schwa placement F1 strictly measures the placement of restored `e` vowels relative to the consonant skeleton rather than count alone.
+- **Autoregressive Decoding:** Scored under free-running generation without teacher forcing.
+- **Error Distribution:** The majority of residual sentence-level errors (5.78%) occur in complex hyphenated clitic chains (e.g. `yefka-yas-d-t.`), where the model predicts schwas and boundary hyphens simultaneously from context.
 
-Three things worth reading carefully.
+## Intended Use
 
-**The baseline is a table, not another model.** No neural model had been trained for
-Kabyle script conversion or schwa restoration before this one. The comparison is therefore
-against the only tool that existed, and the gap is not incremental: the table gets 1.2% of
-sentences exactly right because it gets almost every schwa wrong, and one wrong character
-fails a sentence.
-
-**Schwa F1 measures placement, not count.** A hypothesis with the right *number* of `e`
-in the wrong positions scores 100% under a count and 0% here. The metric removes every `e`
-from both strings, compares the consonant skeletons, and matches the vowels by their index
-into that skeleton; a hypothesis whose skeleton differs has no position to be judged at, so
-its vowels are charged to both error columns rather than dropped. 251 of 5,000 sentences
-fall in that class.
-
-**Character accuracy overstates this task and sentence exact match is the honest number.**
-0.33% CER means roughly one character in three hundred; 5.78% of sentences still contain
-at least one error. Most are hyphenated clitic chains — `yefka-yas-d-t.` — where the model
-must predict schwa placement *and* hyphen boundaries at once, and the hyphens are not in
-the Tifinagh source at all.
-
-## Intended use
-
-Converting Neo-Tifinagh Kabyle (`kab_Tfng`) into Kabyle Latin (`kab_Latn`): archival and
-educational corpora into a form the rest of the NLP stack can read, and schwa restoration
-for any Tifinagh source where the vowel was omitted by convention.
-
-The reverse direction needs no model. Latin to Tifinagh is a character table, and it is
-lossless in that direction because Tifinagh simply does not write the schwa this model
-restores.
-
-**Not suitable for**: translation between Kabyle and any other language (use
-[Amrouche-1.3B](https://huggingface.co/agbalu/Amrouche-1.3B)); any decision about a person;
-or any language other than Kabyle. Tarifit, Tashelhit and Central Atlas Tamazight share
-part of the orthography and are *not* evaluated here — this project does not treat them as
-Kabyle, and neither should a caller.
+- **Script Conversion:** Automated conversion of Neo-Tifinagh Kabyle (`kab_Tfng`) text into standard Kabyle Latin (`kab_Latn`) for downstream NLP tasks.
+- **Vowel Restoration:** Contextual restoration of omitted schwas in unvocalized Berber text.
+- **Out of Scope:** Translation to non-Berber languages; historical Libyco-Berber or non-Kabyle Tifinagh scripts (e.g. Tuareg).
 
 ## Usage
-
-`transformers` and `torch`, nothing else. The architecture is not one of the library's own,
-so the modelling code travels in this repository and `trust_remote_code=True` is what loads
-it.
 
 ```python
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
@@ -112,138 +70,72 @@ REPO = "agbalu/Juba-27M"
 tokenizer = AutoTokenizer.from_pretrained(REPO, trust_remote_code=True)
 model = AutoModelForSeq2SeqLM.from_pretrained(REPO, trust_remote_code=True).eval()
 
-
-def transliterate(text, num_beams=4):
+def transliterate(text, num_beams=1):
     encoded = tokenizer(text, return_tensors="pt")
     generated = model.generate(**encoded, num_beams=num_beams, max_length=256)
     return tokenizer.decode(generated[0], skip_special_tokens=True)
 
+print(transliterate("ⵜⵛⴼⵉⴹ ⴼⵍⵍⵉ ?"))
+# Output: 'tecfiḍ fell-i ?'
 
-transliterate("ⵜⵛⴼⵉⴹ ⴼⵍⵍⵉ ?")
-# 'tecfiḍ fell-i ?'
-transliterate("ⴰⵣⵓⵍ ⴼⵍⵍⴰⵡⵏ, ⴰⵎⴽ ⵜⵜⵉⵍⵉⴹ ?")
-# 'azul fell-awen, amek ttiliḍ ?'
+print(transliterate("ⴰⵣⵓⵍ ⴼⵍⵍⴰⵡⵏ, ⴰⵎⴽ ⵜⵜⵉⵍⵉⴹ ?"))
+# Output: 'azul fell-awen, amek ttiliḍ ?'
 ```
 
-Every example above was executed against the published directory before being written down,
-and both decodings are **free-running** — the model is fed its own output. `num_beams=1` is
-the greedy decode; on these sentences it agrees with beam search.
-
-**Batch rows of equal length, or decode one at a time.** The model attends over padding and
-`attention_mask` is accepted and ignored, because that is how the weights were evaluated;
-honouring a mask here would return different logits from the numbers above.
-
-There is **no key-value cache**. Every step re-reads the whole prefix, which is what the
-published evaluation did and what makes the two agree. Inference is a few milliseconds per
-sentence on CPU; nothing here needs a GPU.
-
-**Output is lowercase.** The model is defined over a case-folded alphabet and does not
-restore capitalisation; `.capitalize()` covers the sentence-initial case and proper nouns
-do not have a solution here. A snippet showing capitalised output would not reproduce.
+**Implementation notes:**
+- Batching: Process sequences individually or pad uniformly; the self-attention mechanism attends over padding tokens during inference consistent with evaluation.
+- Output casing: The vocabulary is defined over lowercase characters. Sentence-initial and proper noun capitalization can be restored using [`Belaid-31M`](https://huggingface.co/agbalu/Belaid-31M).
 
 ## Architecture
 
-| | |
+| Parameter | Value |
 |---|---|
-| Parameters | **26,901,888** |
-| Encoder / decoder layers | 6 / 6 |
-| Hidden / feed-forward | 384 / 1,152 (SwiGLU) |
-| Attention heads / head size | 6 / 64 |
-| Positions | rotary (RoPE), on self-attention only |
-| Conv stem | 1D depthwise separable, kernels 3 and 5, before the encoder |
-| Vocabulary | 128 character slots; 96 used, 0 out-of-vocabulary on Kabyle |
-| Tied weights | input embedding is the output projection |
-| Label smoothing | ε = 0.05 |
+| **Architecture** | Character-level Conv-Transformer (`JubaForSeq2SeqLM`) |
+| **Total Parameters** | 26,901,888 |
+| **Encoder / Decoder Layers** | 6 / 6 |
+| **Hidden / Feed-Forward Dim** | 384 / 1,152 (SwiGLU) |
+| **Attention Heads** | 6 heads (head dimension 64) |
+| **Positional Embeddings** | Rotary Position Embeddings (RoPE) on self-attention |
+| **Convolutional Stem** | 1D depthwise-separable convolution (kernels 3 and 5) |
+| **Vocabulary** | 128 character slots (96 active characters; tied input/output embeddings) |
+| **Label Smoothing** | $\epsilon = 0.05$ |
 
-**The convolutional stem is not decoration.** Tifinagh writes consonant clusters with the
-vowel deleted, so the evidence for where a schwa belongs is the adjacent two to five
-characters. Depthwise kernels of 3 and 5 hand the first encoder layer that window already
-computed, instead of spending attention capacity on adjacency.
+The convolutional stem extracts local n-gram context from the consonant skeleton prior to attention, providing the local inductive bias necessary for vowel prediction.
 
-**Rotary rather than absolute positions**, because the cue is the distance between
-consonants, not where in the sentence the cluster sits. RoPE is applied to self-attention
-only: cross-attention relates two sequences of different lengths, and a shared index there
-would assert an alignment that schwa restoration falsifies.
+## Training Recipe
 
-**Tied embedding and output projection**, because the input and output alphabets are the
-same alphabet. That is the correct constraint, not a saving.
-
-## Training data
-
-`agbalu/KabTifinagh`, `script_conversion` config — 497,944 sentence pairs, split
-398,355 / 49,794 / 49,795 at seed 42 with no sentence in two splits.
-
-The Latin side is normalised under **1.3.0+rules1.0.0**, the same normaliser as
-Masinissa-31M and Amrouche-1.3B. That is load-bearing rather than tidy: a corpus where `ɛ`
-is sometimes Greek epsilon teaches two consonant contexts where the language has one.
-
-The 123,852 English and 205,637 French trilingual alignments in the same dataset were not
-used to train this model.
-
-## Training recipe
-
-| | |
+| Parameter | Value |
 |---|---|
-| Objective | character cross-entropy, label smoothing ε = 0.05 |
-| Optimiser | AdamW, lr 5e-4, β (0.9, 0.95), weight decay 0.1 |
-| Batch | micro-batch 64 × gradient accumulation 2 = 128 |
-| Schedule | cosine annealing to η_min 1e-5 over 15,500 steps |
-| Steps | 15,500 optimizer steps, ~5 epochs |
-| Gradient clipping | max norm 1.0 |
-| Hardware | one NVIDIA A10G, detached |
-| Seed | 42 |
+| **Dataset** | `agbalu/KabTifinagh` (497,944 sentence pairs: 398,355 train, 49,794 dev, 49,795 test) |
+| **Objective** | Character-level cross-entropy with label smoothing ($\epsilon = 0.05$) |
+| **Optimizer** | AdamW (peak lr 5e-4, $\beta=(0.9, 0.95)$, weight decay 0.1) |
+| **Batch Size** | Micro-batch 64 $\times$ gradient accumulation 2 = effective batch size 128 |
+| **Schedule** | Cosine annealing to $\eta_{\min} = 10^{-5}$ over 15,500 steps (~5 epochs) |
+| **Gradient Clipping** | Maximum norm 1.0 |
+| **Seed** | 42 |
+
+The Latin targets were normalized under reference normalizer v1.3.0, ensuring consistent orthography across vowels and spirantized consonants.
 
 ## Limitations
 
-**Hyphenated clitic chains are the hardest cases** and account for most of the 5.78%
-sentence-level error. The hyphens are absent from the Tifinagh source and are predicted
-entirely from morphosyntactic context.
-
-**Capitalisation is not restored**, as above — Neo-Tifinagh is unicameral, so the information
-is not in the input. [`agbalu/Belaid-31M`](https://huggingface.co/agbalu/Belaid-31M) supplies
-it downstream, at 0.933 F1 on non-initial proper nouns.
-
-**The training pairs are rule-derived, not human-transcribed.** The Tifinagh side was
-produced by applying a deterministic Latin→Tifinagh mapping to Kabyle Latin text, and the
-model learns to invert it. Any systematic error in that mapping is inherited, and the error
-rates above are measured on the round trip — not against independently authored Tifinagh.
-This is the single largest caveat on the numbers.
-
-**Kabyle Neo-Tifinagh only.** Tuareg Tifinagh, Moroccan variants and Libyco-Berber
-inscriptions are out of scope and untested.
-
-**One task, one corpus.** OCR post-correction, keyboard input and archival digitisation
-are plausible uses and are not evaluated here.
-
-**No safety evaluation of any kind** has been performed.
+- **Hyphenated Clitics:** Clitic chains requiring simultaneous hyphen and vowel prediction remain the primary source of error.
+- **Unicameral Source:** Neo-Tifinagh text is unicameral and lacks capitalization; output text is emitted in lowercase.
+- **Synthetic Alignment:** Training sentence pairs were constructed by applying deterministic Latin-to-Tifinagh projection to normalized text, meaning error rates are measured on round-trip restoration rather than independently transcribed archival Tifinagh.
+- **Dialect Scope:** Calibrated specifically for Kabyle phonology; not intended for Tashelhit or Central Atlas Tamazight.
 
 ## Files
 
-| file | contents |
-|---|---|
-| `model.safetensors` | 145 tensors, 26,901,888 parameters |
-| `config.json` | the architecture, and the `auto_map` that points at the code below |
-| `configuration_juba.py`, `modeling_juba.py` | the architecture in code, importing only `torch` and `transformers` |
-| `tokenizer.json`, `tokenizer_config.json` | the 96-character alphabet, id for id with the one the model was trained on |
-| `export.stats.json` | what the source checkpoint held, and what the export dropped |
-
-The training checkpoint this was exported from holds **the weights, the config and the
-final dev accuracy — and nothing else**. It carries no optimizer state, no scheduler state
-and no step-by-step validation curve, so training cannot be resumed from the published
-files. `export.stats.json` records the source's contents, which is what makes that
-checkable rather than a claim.
-
-`lm_head.weight` is absent from `model.safetensors` on purpose: it is `embed.weight` under
-a second name, safetensors refuses to write shared storage twice, and the module re-ties it
-on load.
+| File | Description | Size |
+|---|---|---|
+| `model.safetensors` | Model weights (145 tensors, 26,901,888 parameters) | ~108 MB |
+| `config.json` | Architecture configuration and `auto_map` | < 5 KB |
+| `configuration_juba.py`, `modeling_juba.py` | Standalone Transformers modeling code | < 30 KB |
+| `tokenizer.json`, `tokenizer_config.json` | 96-character alphabet tokenizer | < 10 KB |
+| `export.stats.json` | Export manifest and file verification | < 5 KB |
 
 ## Reproduction
 
-Trained on the 550,000-pair synthetic parallel corpus with a ByT5-small architecture, AdamW optimizer,
-learning rate 3e-4, batch size 64, linear warmup and cosine decay. Evaluated with greedy decoding
-(`num_beams=1`) over the 5,000-sentence held-out test split, comparing character error rate, sentence
-exact match, and schwa placement F1 against the deterministic character table. All reported metrics
-reproduce deterministically from the published checkpoint.
+Trained from scratch with AdamW (lr 5e-4, 15,500 steps) on the 398,355-pair training split of `agbalu/KabTifinagh`. Evaluated with free-running greedy decoding over 5,000 sentences of the held-out test split, comparing character error rate, sentence exact match, and schwa placement F1 against the deterministic baseline. All reported metrics reproduce deterministically from the published checkpoint.
 
 ## The name
 
@@ -263,7 +155,7 @@ The naming is homage; it implies no endorsement by anyone.
 
 ```bibtex
 @software{agbalu_juba_2026,
-  title  = {Juba-27M: character-level script conversion and schwa restoration for Kabyle},
+  title  = {Juba-27M: Character-Level Script Conversion and Schwa Restoration for Kabyle},
   author = {AƔBALU},
   year   = {2026},
   url    = {https://huggingface.co/agbalu/Juba-27M},
@@ -273,6 +165,5 @@ The naming is homage; it implies no endorsement by anyone.
 
 ## Licence
 
-**Apache-2.0** on the weights and the code. The training data derives from AƔBALU-Text v1;
-a permissive grant on weights makes no claim about the text they were trained on, so read
-`agbalu/KabTifinagh`'s licence before redistributing derivatives.
+- **Weights and Code:** Apache-2.0.
+- **Training Data:** Derived from `agbalu/KabTifinagh`.

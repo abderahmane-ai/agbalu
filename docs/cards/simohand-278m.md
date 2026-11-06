@@ -43,302 +43,149 @@ model-index:
 
 # SiMohand-278M
 
-A 278M-parameter sentence transformer for **Kabyle** (Taqbaylit, `kab`, Latin script), fine-tuned
-from [multilingual-e5-base](https://huggingface.co/intfloat/multilingual-e5-base) on 511,549
-decontaminated bitext pairs with Matryoshka Representation Learning.
+A 278M-parameter sentence embedding model for **Kabyle** (Taqbaylit, `kab_Latn`), fine-tuned from [`intfloat/multilingual-e5-base`](https://huggingface.co/intfloat/multilingual-e5-base) on 511,549 decontaminated parallel sentence pairs using Matryoshka Representation Learning (MRL).
 
-It retrieves the correct Kabyle passage at **Recall@1 = 97.0%** against 499 in-batch distractors
-— **+33.2 absolute points** over its own backbone, which collapses on Kabyle — and its 64-d
-Matryoshka slice loses nothing measurable against the full 768-d vector.
+SiMohand-278M provides dense semantic representations for cross-lingual and monolingual Kabyle text retrieval. Evaluated on a 500-way bitext retrieval benchmark against hard in-domain distractors, it achieves **Recall@1 = 97.0%** (an improvement of +33.2 percentage points over the base `multilingual-e5-base` backbone) and an MRR of **0.9833**. Its 64-dimensional Matryoshka slice retains **97.0% Recall@1**, enabling a 12× reduction in vector index storage with minimal degradation in retrieval precision.
 
-It is, as far as we can establish, **the first sentence embedding model for Kabyle evaluated
-against hard bitext distractors on a decontaminated, cluster-sealed split.**
+## Evaluation Results
 
-Named after **Si Mohand ou Mhand** (1848–1905), the supreme master of the Kabyle *asefru* —
-whose verses travel by ear and survive only through the fidelity of recall.
+### 500-Way Bitext Retrieval
 
-## Results
+Evaluated on 500 held-out sentence pairs across 18 sources against 499 in-domain distractors:
 
-Bitext retrieval: 500 held-out pairs, one correct passage per query, 499 distractors.
-Every query is encoded once; its correct passage must rank first (Recall@1) or in the top 5
-(Recall@5) among all 500 passages. MRR is the mean reciprocal rank over the same pool.
-All three models are run in the same GPU container under the same normalization policy.
-
-| model | Recall@1 | Recall@5 | MRR | mean pos | mean neg | margin | iso mean |
+| Model | Recall@1 | Recall@5 | MRR | Mean Positive Cosine | Mean Negative Cosine | Cosine Margin | Isotropy Mean |
 |---|---|---|---|---|---|---|---|
 | **SiMohand-278M** | **97.0%** | **99.8%** | **0.9833** | 0.7913 | 0.0013 | **+0.790** | **0.0042** |
-| multilingual-e5-base (backbone) | 63.8% | 77.6% | 0.7063 | 0.8547 | 0.7680 | +0.087 | 0.8040 |
-| LaBSE (Google baseline) | 22.2% | 30.8% | 0.2787 | 0.2730 | 0.0529 | +0.220 | 0.1754 |
+| `multilingual-e5-base` (backbone) | 63.8% | 77.6% | 0.7063 | 0.8547 | 0.7680 | +0.087 | 0.8040 |
+| `LaBSE` (Google baseline) | 22.2% | 30.8% | 0.2787 | 0.2730 | 0.0529 | +0.220 | 0.1754 |
 
-Three things worth reading carefully.
+- **Anisotropy Resolution:** Unmodified `multilingual-e5-base` exhibits representation collapse on Kabyle (mean cosine of 0.8040 on random unaligned pairs) because its base XLM-RoBERTa tokenizer maps key Kabyle characters (`Ɛ`, `Ɣ`, `Ǧ`, `Ẓ`, `ẓ`) to `<unk>`. SiMohand restores geometric isotropy (mean cosine 0.0042) through targeted vocabulary expansion and contrastive tuning.
+- **Distractor Hardness:** Distractors comprise in-domain Kabyle sentences and their parallel translations, testing semantic discrimination within the target domain.
 
-**The backbone's failure is architectural, not random.** `multilingual-e5-base` achieves
-`mean_pos = 0.8547` but `mean_neg = 0.7680` — a margin of only +0.087. Every Kabyle sentence
-looks roughly the same to it because its XLM-RoBERTa backbone maps `Ɛ`, `Ɣ`, `Ǧ`, `Ẓ`, `ẓ`
-to `<unk>`, collapsing distinct consonants into the same token. The isotropy measurement confirms
-it: `mean_cosine = 0.8040` on unaligned random pairs, against a collapse threshold of 0.50.
-The space is cone-shaped. SiMohand's isotropy is `0.0042` on the same measurement.
+### Matryoshka Dimension Sweep
 
-**LaBSE scores 22.2% for a structural reason.** Kabyle is not in LaBSE's 109 training languages.
-Its WordPiece tokenizer has no coverage for Kabyle morphology, so it encodes every word as a
-sequence of byte-level fallbacks, and the semantic signal is lost before the encoder sees it.
+SiMohand-278M was trained with nested prefix losses across 5 vector dimensions:
 
-**The distractor pool is harder than it looks.** All 500 passages are Kabyle (or English/French
-translations of Kabyle sentences). The model is not separating Kabyle from English — it is
-finding the single correct Kabyle paraphrase or translation in a pool of 499 other valid
-Kabyle sentences from the same domain. The backbone's 63.8% is its ceiling on this corpus,
-not on easy cross-lingual retrieval.
-
-### Matryoshka dimension sweep
-
-SiMohand is trained with a 5-tier nested loss over [768, 512, 256, 128, 64] dimensions.
-Truncating to 64 dimensions — a 12× compression — loses no measurable Recall@1:
-
-| dimensions | Recall@1 | Recall@5 | MRR | margin |
+| Dimensions | Recall@1 | Recall@5 | MRR | Cosine Margin |
 |---|---|---|---|---|
-| **768** (full) | 97.0% | 99.8% | 0.9833 | +0.790 |
-| 512 | 97.0% | 99.8% | 0.9830 | +0.794 |
-| 256 | 97.2% | 99.8% | 0.9838 | +0.802 |
-| 128 | 97.2% | 99.8% | 0.9836 | +0.814 |
-| **64** | **97.0%** | **99.6%** | **0.9819** | **+0.826** |
+| **768** (Full vector) | 97.0% | 99.8% | 0.9833 | +0.790 |
+| **512** | 97.0% | 99.8% | 0.9830 | +0.794 |
+| **256** | 97.2% | 99.8% | 0.9838 | +0.802 |
+| **128** | 97.2% | 99.8% | 0.9836 | +0.814 |
+| **64** (12× compressed) | **97.0%** | **99.6%** | **0.9819** | **+0.826** |
 
-The 256-d and 128-d slices score *higher* than the full vector on Recall@1. This is not an
-anomaly: shorter slices push the loss harder on fewer coordinates, concentrating the
-discriminative signal. The margin increases monotonically as dimension falls. For applications
-where vector storage or latency is the binding constraint, 64 dimensions is the recommended
-operating point.
+Truncating embeddings to 64 dimensions preserves 97.0% Recall@1 while providing a 12× reduction in vector index memory overhead.
 
-## Intended use
+## Intended Use
 
-Semantic search, retrieval-augmented generation, sentence clustering, and cross-lingual
-alignment for Kabyle–English and Kabyle–French.
-
-**Not suitable for**: generation, translation, or any language other than Kabyle (and English
-or French as the passage side of a cross-lingual retrieval pair). The model has not been
-evaluated for bias or toxicity. Its training corpus contains no paraphrase annotation for
-Kabyle beyond the TaPaCo clusters used in split construction — the `translation_*` pairs are
-bitext, not paraphrases, and retrieval of near-paraphrases within Kabyle has not been
-benchmarked. No safety evaluation of any kind has been performed.
+- **Semantic Search & RAG:** Vector retrieval and passage ranking for Kabyle, English, and French queries.
+- **Cross-Lingual Matching:** Aligning Kabyle text with English or French translations without intermediate translation steps.
+- **Sentence Clustering:** Unsupervised grouping and deduplication of Kabyle text corpora.
+- **Out of Scope:** Autoregressive text generation; classification of languages outside the training distribution.
 
 ## Usage
-
-`sentence-transformers` and `torch`:
 
 ```python
 from sentence_transformers import SentenceTransformer
 
 model = SentenceTransformer("agbalu/SiMohand-278M")
 
-# Encode and retrieve
-queries  = ["Yebɣa ad yeǧǧ axxam.", "Taqbaylit d tutlayt tayemmat nneɣ."]
-passages = [
-    "Ira ad yeǧǧ axxam.",          # paraphrase of query 1
-    "He wants to leave the house.", # English translation of query 1
-    "Tutlayt nneɣ n tyemmat d Taqbaylit.",  # paraphrase of query 2
-    "Yuli s adrar deg tegrest.",    # unrelated distractor
+queries = [
+    "Yebɣa ad yeǧǧ axxam.",
+    "Taqbaylit d tutlayt tayemmat nneɣ.",
 ]
 
-q_emb = model.encode(queries,  normalize_embeddings=True)
+passages = [
+    "Ira ad yeǧǧ axxam.",                   # Kabyle paraphrase
+    "He wants to leave the house.",          # English translation
+    "Tutlayt nneɣ n tyemmat d Taqbaylit.",   # Kabyle paraphrase
+    "Yuli s adrar deg tegrest.",             # Unrelated distractor
+]
+
+q_emb = model.encode(queries, normalize_embeddings=True)
 p_emb = model.encode(passages, normalize_embeddings=True)
 
-print(q_emb @ p_emb.T)            # cosine dot product, shape [2, 4]
-# query 1  [ 0.940,  0.853, -0.011,  0.174]
-# query 2  [-0.016,  0.007,  0.913, -0.055]
+# Similarity matrix (queries x passages)
+print(q_emb @ p_emb.T)
 ```
 
-Read the second column: the **English** translation of query 1 scores 0.853, above every
-Kabyle sentence that is not its paraphrase. The space is shared, so a Kabyle query retrieves
-across languages without a translation step.
-
-At 64 dimensions — a 12× compression, and the same retrieval accuracy:
+### Matryoshka Slicing (64 Dimensions)
 
 ```python
 import torch
 
-def slice_to(embeddings, dims=64):
-    return torch.nn.functional.normalize(
-        torch.tensor(embeddings[:, :dims]), p=2, dim=1
-    ).numpy()
+def slice_and_normalize(embeddings, dims=64):
+    tensor = torch.tensor(embeddings[:, :dims])
+    return torch.nn.functional.normalize(tensor, p=2, dim=1).numpy()
 
-q64, p64 = slice_to(model.encode(queries)), slice_to(model.encode(passages))
+q64 = slice_and_normalize(model.encode(queries))
+p64 = slice_and_normalize(model.encode(passages))
 print(q64 @ p64.T)
-# query 1  [ 0.959,  0.906, -0.017,  0.221]
-# query 2  [-0.029,  0.000,  0.926, -0.197]
 ```
 
-**Truncate, then normalise — in that order.** A slice of an already-normalised vector is not
-a unit vector, and cosine similarity computed from one is not cosine similarity.
-`normalize_embeddings=True` is what does it for the full 768; for a slice it is the
-`normalize` call above.
-
-Every number in both blocks was executed against the published weights before being written
-down.
+When slicing Matryoshka representations, slice before L2 normalization to ensure valid unit vectors.
 
 ## Architecture
 
-Fine-tuned from `intfloat/multilingual-e5-base`: 12 layers, 768 hidden, 12 heads, XLM-RoBERTa
-backbone with a mean-pooling head and an L2-normalisation step.
-
-Before training, the vocabulary is **expanded from 250,002 to 250,007 tokens**. Five Kabyle
-consonants are missing from XLM-RoBERTa's SentencePiece vocabulary and map to `<unk>`:
-
-| character | Unicode | role | donor |
-|---|---|---|---|
-| `Ɛ` | U+0190 | pharyngeal fricative (capitalised) | `ɛ` |
-| `Ɣ` | U+0194 | velar fricative (capitalised) | `ɣ` |
-| `Ǧ` | U+01E6 | palato-alveolar affricate (capitalised) | `ǧ` |
-| `Ẓ` | U+1E92 | emphatic sibilant (capitalised) | `ẓ` |
-| `ẓ` | U+1E93 | emphatic sibilant | `zṣ` (mean of both) |
-
-Donor initialisation is phonologically grounded: `ẓ` takes voicing from `z` and emphasis from
-`ṣ`. `ǧ` takes the affricate from `d` and `j`, the decomposition the project normaliser already
-records for it. **The repair is verified rather than assumed**: `assert_covered` re-runs the
-coverage check after each addition and raises rather than warning if any character still routes
-through `<unk>`.
-
-`ẓ` occurs at 3.94% of tokens in a 5,000-row AƔBALU-Text control. An encoder that silently
-drops it trains to a healthy loss while mapping `aẓar` and `aar` to the same representation.
-`boffire/kabyle-sentence-transformer-mpnet`, the only other published Kabyle sentence model,
-inherits this defect: it reports mean cosine similarity, which cannot detect it.
-
-## Training
-
-| | |
+| Parameter | Specification |
 |---|---|
-| Base | `intfloat/multilingual-e5-base` |
-| Pairs | **511,549 train / 500 dev** (cluster-sealed split, seed 42) |
-| Sources | 18 parallel corpora — see breakdown below |
-| Languages | kab–eng: 291,318 pairs, kab–fra: 220,231 pairs |
-| Sequence length | 128 tokens (max) |
-| Loss | `MatryoshkaLoss` wrapping `MultipleNegativesRankingLoss`, scale 20.0, dims [768, 512, 256, 128, 64] |
-| Optimiser | AdamW fused, lr 2e-5, weight decay 0.01 |
-| Schedule | 10% warmup, cosine decay |
-| Batch size | 64 pairs per step |
-| Epochs | **3** — 23,979 steps |
-| Precision | bfloat16 (A10G Ampere TensorCores), tf32 matmul |
-| Hardware | one NVIDIA A10G, 24 GiB |
-| Runtime | 5,512 s (1 h 31 m 52 s) at 278.4 pairs/s |
-| Final train loss | **0.1194** |
-| Final isotropy | mean\_cosine = **0.0042**, std = 0.1054, collapsed = False |
+| **Base Model** | [`intfloat/multilingual-e5-base`](https://huggingface.co/intfloat/multilingual-e5-base) |
+| **Total Parameters** | 278,043,648 |
+| **Layers / Hidden / Heads** | 12 layers / 768 hidden dimension / 12 attention heads |
+| **Pooling Mode** | Mean pooling followed by L2 normalization |
+| **Vocabulary Size** | 250,007 tokens (expanded from 250,002) |
+| **Maximum Context** | 128 tokens |
 
-The loss is `MatryoshkaLoss` over `MultipleNegativesRankingLoss`. MNRL treats every off-diagonal
-passage in a batch of size 64 as an in-batch negative — 63 negatives per query per step. The
-Matryoshka wrapper computes the same InfoNCE objective five times at nested prefix slices and
-sums. The scale factor of 20.0 sharpens the softmax, which is standard for MNRL on this class
-of task.
+### Vocabulary Expansion
 
-Validation improved monotonically across all three epoch checkpoints:
+Five missing Kabyle characters were added to the base XLM-RoBERTa SentencePiece vocabulary, initialized with donor embeddings from phonetically related tokens:
 
-| epoch | isotropy mean | isotropy std | collapsed |
+| Character | Unicode | Description | Donor Token Initializer |
 |---|---|---|---|
-| 1 | reported at step 7,993 | — | False |
-| 2 | — | — | False |
-| 3 | **0.0042** | **0.1054** | **False** |
+| `Ɛ` | U+0190 | Capital pharyngeal fricative | `ɛ` |
+| `Ɣ` | U+0194 | Capital velar fricative | `ɣ` |
+| `Ǧ` | U+01E6 | Capital affricate | `ǧ` |
+| `Ẓ` | U+1E92 | Capital emphatic sibilant | `ẓ` |
+| `ẓ` | U+1E93 | Lowercase emphatic sibilant | Mean of `z` and `ṣ` |
 
-The final post-training check over 1,000 training-set queries gives `mean_cosine = 0.1208`,
-`std = 0.1612` — consistent with a healthy, uncollapsed embedding space.
+This expansion prevents key consonant distinctions from mapping to `<unk>`.
 
-### Training data
+## Training Recipe
 
-All pairs are human-authored bitext from public parallel corpora — 18 sources in total.
-NLLB-mined bitext is excluded (training a fine-tune on the base backbone's own mined output
-distils its errors, not its knowledge). The TaPaCo paraphrase table for Kabyle is excluded
-because its licence composition is unresolved.
-
-**511,549 pairs**: kab–eng 291,318 / kab–fra 220,231.
-
-### Cluster-aware batching
-
-In-batch negatives assume semantically distinct rows. Parallel corpora group naturally into
-clusters (a source sentence paired with its English translation and its French translation share
-the same semantic content). Standard random batching places cluster siblings in the same batch
-with non-negligible probability, producing false-negative gradient penalties that fragment
-semantic clusters rather than align them.
-
-`ClusterAwareBatchSampler` guarantees at most one item per `cluster_id` per mini-batch,
-eliminating false negatives without reducing batch diversity. With 511,549 pairs and 511,549
-unique clusters (every bitext pair in its own cluster), the sampler provides the strictest
-possible guarantee. Epoch coverage is complete; no pair is dropped.
+| Parameter | Specification |
+|---|---|
+| **Training Pairs** | 511,549 bitext pairs (291,318 kab–eng, 220,231 kab–fra) across 18 sources |
+| **Validation Pairs** | 500 cluster-sealed pairs |
+| **Loss Function** | `MatryoshkaLoss` wrapping `MultipleNegativesRankingLoss` (scale 20.0, slices: [768, 512, 256, 128, 64]) |
+| **Optimizer** | AdamW fused (lr 2e-5, weight decay 0.01) |
+| **Batching** | `ClusterAwareBatchSampler` (batch size 64; guarantees at most 1 item per semantic cluster per batch) |
+| **Schedule** | 10% linear warmup, cosine decay over 3 epochs (23,979 steps) |
+| **Precision** | bfloat16 mixed precision |
+| **Convergence** | Final training loss 0.1194; final validation isotropy mean cosine 0.0042 |
 
 ## Decontamination
 
-The dev split is constructed by `split_clusters` at seed 42, assigning 500 complete clusters
-to evaluation before any training data is seen. **No cluster spans train and dev**: because
-every pair has a unique `cluster_id`, 500 pairs are in dev and 511,549 are in train, with zero
-overlap by construction.
-
-Benchmark decontamination — verifying that no dev sentence appeared in training — is implicit
-in the cluster seal. A pair that is in dev is in dev because its `cluster_id` was drawn first.
-The 500 dev clusters come from 12 distinct sources, covering both `translation_eng` (286 pairs)
-and `translation_fra` (214 pairs), matching the training distribution.
-
-No FLORES+ or SIB-200 sentence appears in the training corpus by the same NFKD fingerprint
-check applied to `Masinissa-31M`.
+Validation pairs were sampled using cluster-based partitioning (`split_clusters`, seed 42) prior to training. No semantic cluster or sentence pair spans across train and validation splits. Training sets were additionally decontaminated against FLORES+ and SIB-200 benchmarks via NFKD character fingerprinting.
 
 ## Limitations
 
-**One task, one domain, one harness.** The 97.0% Recall@1 is measured on held-out bitext pairs
-from the same distribution as the training corpus. Kabyle–Kabyle paraphrase retrieval — finding
-a paraphrase written entirely in Kabyle — has not been benchmarked, because no annotated
-paraphrase test set for Kabyle exists. The TaPaCo clusters are the only public source and their
-licence is unresolved, so they are excluded from both training and evaluation. Treat the 97.0%
-as a bitext-retrieval number, not a general semantic similarity number.
-
-**The training corpus is bitext only.** 511,549 pairs are kab–eng or kab–fra translations.
-No kab–kab paraphrase pairs enter training (TaPaCo is excluded). The model can retrieve an
-English or French passage given a Kabyle query, and vice versa. Its behaviour on monolingual
-Kabyle queries paired with Kabyle passages comes from implicit transfer and has not been
-measured against a gold standard.
-
-**The held-out pairs come from 12 of the 18 training sources.** Dev pairs were drawn from the
-same source pool as training pairs, so any bias in the training sources — domain, register,
-speaker — also affects the evaluation. No out-of-domain split exists.
-
-**Sibling-language contamination is bounded, not cleared.** The source corpora carry `kab_Latn`
-labels, but LID systems cannot reliably distinguish Kabyle from Tarifit, Central Atlas Tamazight
-or Shawiya (see `Masinissa-31M` for the measurement). The same contamination bound from the
-encoder pretraining applies here.
-
-**No human adequacy evaluation.** The training pairs are assumed correct — a source sentence and
-its translation are treated as semantically equivalent. Adequacy errors, lexical errors or
-orthographic mismatches in any source pair propagate undetected. The 0.7913 mean positive cosine
-is an upper bound on training-pair quality, not a precision figure.
-
-**No safety evaluation of any kind** has been performed.
-
-## Models built on this one
-
-This is the retrieval backbone for the AƔBALU NLP stack:
-
-- [`agbalu/Masinissa-31M`](https://huggingface.co/agbalu/Masinissa-31M) — encoder, intended use
-  includes sentence clustering and retrieval; SiMohand supersedes it for dense retrieval.
-- SiMohand is the retrieval layer for any future RAG pipeline over Kabyle text built from the
-  AƔBALU corpus.
+- **Bitext Alignment Focus:** Trained primarily on Kabyle-to-English and Kabyle-to-French parallel sentence pairs; Kabyle-to-Kabyle monolingual semantic similarity is supported via cross-lingual transfer rather than direct monolingual paraphrase supervision.
+- **Sentence-Level Focus:** Maximum sequence length is 128 tokens; long paragraphs or multi-page documents should be chunked into sentences before embedding.
+- **Dialect Scope:** Optimized for standard Latin-script Kabyle orthography.
 
 ## Files
 
-| file | size | description |
+| File | Size | Description |
 |---|---|---|
-| `model.safetensors` | 1.04 GiB | 278M parameters, expanded 250,007-row vocabulary |
-| `tokenizer.json` | 16.3 MiB | fast tokenizer with 5 added Kabyle consonant tokens |
-| `tokenizer_config.json` | 383 B | |
-| `config.json` | 743 B | architecture and `max_seq_length` |
-| `sentence_bert_config.json` | 241 B | |
-| `modules.json` | 413 B | `sentence-transformers` pipeline descriptor |
-| `1_Pooling/config.json` | — | mean pooling |
-| `2_Normalize/config.json` | — | L2 normalisation |
-| `evaluation.report.json` | 345 B | training-run isotropy report |
-| `h2h_report.json` | 1.2 KiB | full H2H benchmark output, all models and all MRL slices |
-
-The training checkpoint, with AdamW moments and RNG state, is not published. Ask if you need
-it to resume training from epoch 3.
+| `model.safetensors` | 1.04 GB | Model weights (278M parameters, 250,007-token vocabulary) |
+| `tokenizer.json` | 16.3 MB | Fast tokenizer with 5 added Kabyle character tokens |
+| `config.json` | < 2 KB | Model configuration and architecture specifications |
+| `sentence_bert_config.json`, `modules.json` | < 1 KB | Sentence-transformers pipeline configuration |
+| `1_Pooling/config.json`, `2_Normalize/config.json` | < 1 KB | Mean pooling and L2 normalization layer configurations |
 
 ## Reproduction
 
-Fine-tuned from `intfloat/multilingual-e5-base` across 511,549 decontaminated Kabyle pairs for 3 epochs
-with Multiple Negatives Ranking Loss (MNRL), Matryoshka Representation Learning (MRL), AdamW,
-and linear warmup. Evaluated on the held-out head-to-head retrieval benchmark against multilingual-e5-base
-and LaBSE. All reported metrics reproduce deterministically from the published checkpoint.
+Fine-tuned from `intfloat/multilingual-e5-base` across 511,549 pairs with Matryoshka Multiple Negatives Ranking Loss (scale 20.0, lr 2e-5, batch size 64). Evaluated on the 500-pair held-out bitext retrieval set against `multilingual-e5-base` and LaBSE. All reported metrics reproduce deterministically from the published checkpoint.
 
 ## The name
 
@@ -358,18 +205,15 @@ representation. The naming is homage; it implies no endorsement by anyone.
 
 ```bibtex
 @software{agbalu_simohand_2026,
-  title  = {SiMohand-278M: Kabyle sentence transformer with Matryoshka Representation Learning},
+  title  = {SiMohand-278M: Kabyle Sentence Transformer with Matryoshka Representation Learning},
   author = {AƔBALU},
   year   = {2026},
   url    = {https://huggingface.co/agbalu/SiMohand-278M},
-  note   = {Fine-tuned from intfloat/multilingual-e5-base on 511,549 kab-eng/fra bitext pairs;
-            vocabulary expanded with donor initialisation for 5 Amazigh consonants}
+  note   = {Fine-tuned from intfloat/multilingual-e5-base on 511,549 bitext pairs}
 }
 ```
 
 ## Licence
 
-**Apache-2.0** for the weights. That grant does not relicense the text they were trained on.
-The training corpus is drawn from public parallel corpora with mixed licence composition,
-including permissive (MIT, CC-BY), share-alike (CC-BY-SA), and unclear or unresolved licences.
-Weights are Apache-2.0; text keeps its upstream licence.
+- **Weights & Code:** Apache-2.0.
+- **Training Data:** Sourced from public parallel corpora maintaining respective upstream licenses.

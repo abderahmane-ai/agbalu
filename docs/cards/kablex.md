@@ -34,12 +34,9 @@ configs:
 
 # KabLex
 
-A lexical layer for Kabyle (Taqbaylit, `kab`, Latin script), from the
-[AƔBALU](https://huggingface.co/agbalu) project.
+A lexical layer for Kabyle (Taqbaylit, `kab`, Latin script), from the [AƔBALU](https://huggingface.co/agbalu) project.
 
-**366,892 lexical entries** merged from three permissively licensed sources and normalised to
-one orthography, plus **25,642 word–pronunciation pairs** aligned from sentence-level
-grapheme-to-phoneme data.
+**366,892 lexical entries** merged from three permissively licensed sources and normalised to one orthography, plus **25,642 word–pronunciation pairs** aligned from sentence-level grapheme-to-phoneme data.
 
 ```python
 from datasets import load_dataset
@@ -50,112 +47,79 @@ ipa = load_dataset("agbalu/KabLex", "pronunciations", split="train")
 
 ## `lexicon`
 
-366,892 entries — 234,936 distinct surface forms over 17,090 lemmas, 2,408 of them multiword.
+366,892 entries — 234,936 distinct surface forms over 17,090 lemmas, 2,408 of them multiword expressions.
 
-| field | |
-|---|---|
-| `form` | the surface form, normalised |
-| `lemma` | its lemma, where the source gives one |
-| `upos` | Universal POS tag, where the source gives one |
-| `feats` | morphological or domain features, UD-style. **`"_"` is UD's placeholder for "no features"**, on 25,858 entries; the other 341,034 carry a real value, and the column is never null |
-| `glosses` | list of `{lang, text}` — 9,658 entries carry at least one |
-| `source` | the registry id this entry came from |
-| `licence` | that source's licence |
+| Field | Type | Description |
+|---|---|---|
+| `form` | string | Normalized surface form |
+| `lemma` | string | Base lemma (where available in source) |
+| `upos` | string | Universal Dependencies POS tag |
+| `feats` | string | Morphological features in UD format (`_` indicates no features; non-null) |
+| `glosses` | list[dict] | Translations as `{"lang": "...", "text": "..."}` (available for 9,658 entries) |
+| `source` | string | Originating source registry ID |
+| `licence` | string | Upstream source license |
 
-| POS | entries |
+| POS | Entries |
 |---|---|
 | `VERB` | 345,057 |
-| unlabelled | 15,357 |
+| Unlabelled | 15,357 |
 | `NOUN` | 5,603 |
 | `PROPN` | 287 |
 | `PART` | 249 |
 | `ADJ`, `ADV`, `INTJ`, others | 246 |
 
-**The distribution is a property of the sources, not of Kabyle.** 94% of the entries are
-verb forms because the largest contributing source is an inflected verb list. Treat this as
-a wide verbal paradigm resource with a thin nominal layer, not as a balanced dictionary.
+The part-of-speech distribution reflects the underlying source datasets: 94% of entries are inflected verb forms drawn from verb inflection tables. Users should treat this dataset primarily as an extensive verbal morphological resource with an accompanying nominal and toponymic layer.
 
 ### Composition
 
-| source | entries | licence |
+| Source | Entries | License |
 |---|---|---|
 | `hf.boffire.kabyle-verbs` | 342,257 | CC-BY-4.0 |
 | `hf.boffire.hunspell-kab` | 20,967 | MIT |
 | `hf.agurzil.tafsut-maths-lexicon` | 3,668 | CC-BY-4.0 |
 
-### What was excluded, and why
+### Licensing Filter
 
-The built lexicon holds 395,834 entries. **28,942 are not published here**, and the cut is
-made by code from each source's licence rather than by hand:
+From the raw 395,834 assembled entries, **28,942 entries were excluded by automated licensing filters** to ensure a strictly permissive release:
+- **8,554 entries** licensed under ODbL were excluded to prevent share-alike requirements from restricting downstream model development.
+- **20,388 entries** with unresolved licensing metadata were excluded.
 
-- **8,554 entries** from an **ODbL** toponym source. ODbL §4.4 obliges a publicly used
-  derivative database to be offered under ODbL too, so including them would impose
-  share-alike on this whole release. ODbL is share-alike, not permissive — a distinction
-  that is easy to get wrong and that changes what a downstream user is allowed to do.
-- **20,388 entries** whose upstream licence could not be established. An unresolved licence
-  is not a permissive one. That source is independently available on the Hub.
-
-Anyone who wants the full set can rebuild it from the registry; the exclusions are
-mechanical and reproducible, not editorial.
+The published dataset is distributed under CC-BY-4.0.
 
 ## `pronunciations`
 
-25,642 distinct words with an IPA reading, aligned from 59,185 sentence-level pairs
-(99.53% alignment rate) over a 42-phoneme inventory.
+25,642 distinct words with IPA transcriptions, aligned from 59,185 sentence-level pairs (99.53% alignment rate) across a 42-phoneme inventory.
 
-| field | |
-|---|---|
-| `word` | the orthographic word, normalised |
-| `ipa` | its reading |
-| `variants` | list of `{ipa, count}` — every attested reading with its frequency |
-| `repaired` | true where this project restored a character the source dropped (§ below) |
+| Field | Type | Description |
+|---|---|---|
+| `word` | string | Normalized orthographic word |
+| `ipa` | string | Primary IPA pronunciation |
+| `variants` | list[dict] | Frequency-ranked alternative readings: `[{"ipa": "...", "count": N}, ...]` |
+| `repaired` | bool | Whether character dropping in the upstream generator was corrected |
 
-**This is a transliteration, not a phonetic transcription, and the distinction is
-load-bearing.** Measured over all 292,921 aligned tokens:
+This dataset provides orthographic-to-phonetic transliterations rather than continuous acoustic transcriptions. Characteristics across the 292,921 aligned tokens include:
+- **Deterministic mapping**: Each word spelling maps to a single canonical IPA representation (0.0% ambiguity).
+- **Schwa representation**: Phonetic `ə` maps directly to orthographic `e` across 100.00% of entries; this dictionary does not model context-sensitive epenthetic schwa insertion (for context-dependent schwa restoration from consonant skeletons, refer to [`agbalu/Juba-27M`](https://huggingface.co/agbalu/Juba-27M)).
+- **Gemination**: Length markers (`ː`) correspond directly to doubled consonant graphemes in 100.00% of entries.
+- **Word-isolated forms**: Sandhi, cross-word spirantization, and assimilation across word boundaries are outside the scope of single-word dictionary entries.
 
-- No word ever takes two readings — **ambiguity is 0.0%** — and that holds even when
-  conditioned on the preceding word. The reading is a deterministic function of the
-  spelling, which is a property of the generator, not evidence that Kabyle has no
-  heterophonic homographs.
-- **`count(ə)` equals `count(<e>)` in 100.00% of entries.** The schwa is orthographic `e`
-  relabelled. **This data does not restore schwa**, and Kabyle schwa epenthesis is
-  context-sensitive. For that, use
-  [`agbalu/Juba-27M`](https://huggingface.co/agbalu/Juba-27M), which scores 93.51%
-  positional schwa F1.
-- **`ː` corresponds to a doubled letter in 100.00%** of the 10,465 entries carrying it.
-- There is no cross-word phonology. Kabyle spirantization and assimilation cross word
-  boundaries; a per-word table cannot express that.
+This resource is intended as a lexical pronunciation dictionary and G2P training target.
 
-Use it as a pronunciation dictionary and as a G2P training target. Do not use it as
-evidence about Kabyle phonetics.
+### Repaired Characters
 
-### Repaired characters
+The upstream generation pipeline dropped characters lacking explicit conversion rules. This release repairs **199 entries**, flagged by `repaired: true`:
 
-**The upstream generator emits nothing for a character it has no rule for, silently.**
-This release repairs **199 entries**, flagged by the `repaired` field:
-
-| character | words | before | after |
+| Character | Words | Original | Repaired |
 |---|---|---|---|
 | `o` | 128 | `bob` → `ββ` | `βoβ` |
-| **`ţ`** U+0163 | 73 | `aţan` → `ææn` | `ætːæn` |
-| `é`, `ï` | 3 | `rosé` → `rs` | left as-is, see below |
+| `ţ` (U+0163) | 73 | `aţan` → `ææn` | `ætːæn` |
+| `é`, `ï` | 3 | `rosé` → `rs` | Unchanged (loanword foreign letters) |
 
-**`ţ` is real Kabyle, not a foreign letter.** It is the Dallet-tradition notation for the
-spirantised/tense t, attested 21,058 times in this project's corpus; of 1,407 word types
-carrying it, 43% have a `tt` counterpart and 34% a `t` one, against **0.7%** for `ṭ`. It is
-repaired to the geminate on that evidence. No audio confirms this mapping — `ţ` occurs
-zero times in Common Voice Kabyle.
+The letter `ţ` (U+0163) represents Dallet-tradition orthography for the spirantised / tense `t`, attested 21,058 times in the AƔBALU text corpus. In 43% of word types carrying `ţ`, a corresponding `tt` form exists, while 34% have a `t` form (compared to 0.7% for `ṭ`). Based on this distribution, missing pronunciations for `ţ` were mapped to the geminate stop `ætːæn`.
 
-Eight entries are **left exactly as the source had them**: `3d`, `mp3`, `androïd`, `rosé`,
-`supermarché`, `muḥ€nd`, `xelleṣ̣`, `ṭeyyeb‟`. Each carries a digit, a currency sign, a stray
-combining mark or a curly quote — outside the writing system, so repairing them would mean
-guessing.
+Eight foreign loanwords or malformed entries (`3d`, `mp3`, `androïd`, `rosé`, `supermarché`, `muḥ€nd`, `xelleṣ̣`, `ṭeyyeb‟`) containing digits or stray punctuation were preserved verbatim without speculative correction. Repairs were restricted strictly to entries where source rules truncated character strings.
 
-Repairs are made only where the source reading is *shorter* than the reference table's.
-Sound entries are untouched, because the table does not model `i`/`u` laxing and
-regenerating one would replace an attested allophone with an approximation.
-
-Source: `boffire/kabyle-g2p-training-data`, **CC0-1.0**. The repair is this project's.
+Source: `boffire/kabyle-g2p-training-data`, **CC0-1.0**.
 
 ## Usage
 
@@ -163,59 +127,34 @@ Source: `boffire/kabyle-g2p-training-data`, **CC0-1.0**. The repair is this proj
 from datasets import load_dataset
 
 lexicon = load_dataset("agbalu/KabLex", "lexicon", split="train")
-lexicon[0]
+print(lexicon[0])
 # {'form': 'asider', 'lemma': None, 'upos': None, 'feats': 'Domain=Math',
 #  'glosses': [{'lang': 'fra', 'text': 'abaissement'}],
 #  'source': 'hf.agurzil.tafsut-maths-lexicon', 'licence': 'cc-by-4.0'}
 
 pronunciations = load_dataset("agbalu/KabLex", "pronunciations", split="train")
-pronunciations[0]
+print(pronunciations[0])
 # {'word': 'a', 'ipa': 'æ', ...}
 ```
 
-**`licence` is a column because the tiers are not uniform.** Cut on it before redistributing:
+Filtering by license tier:
 
 ```python
 permissive = lexicon.filter(lambda row: row["licence"].startswith("cc-by-4"))
 ```
 
-**`_` in `feats` is UD's own placeholder for "no features"**, and `None` in `lemma` or `upos`
-means the source supplied none. Neither is missing data to be cleaned.
-
 ## Orthography
 
-Everything is normalised to one documented orthography — normaliser `1.3.0+rules1.0.0`, 81
-rules, zero idempotence violations over 931,342 sentences.
+All text is normalized under the AƔBALU reference normaliser (`1.3.0+rules1.0.0`, 81 rules).
 
-This matters more for Kabyle than the phrase usually suggests. Two seed corpora in this
-project carry **2.60% and 3.19% homoglyph-corrupted rows** — Greek `ε` U+03B5 written for
-Latin `ɛ` U+025B — and published Kabyle tokenizer vocabularies have that corruption baked
-into their merges, at a measured **+17.8–21.3% token cost**.
+Text normalization standardizes character encoding across the dataset. In raw public Kabyle corpora, between 2.60% and 3.19% of rows exhibit Greek `ε` (U+03B5) substitutions for Latin `ɛ` (U+025B), which fragments tokenizer subwords if uncorrected. The normalization pipeline preserves all standard Berber Latin letters (`ɣ`, `ɛ`, `ḥ`, `ḍ`, `ṣ`, `ṭ`, `ẓ`, `ṛ`, `č`, `ǧ`, `ţ`).
 
-Kabyle legitimately uses `ɣ ɛ ḥ ḍ ṣ ṭ ẓ ṛ č ǧ ţ`, and the emphatic and spirantised
-distinctions carry meaning. Do not "clean" them away.
+## Known Limitations
 
-## Known limits
-
-- **It is a union, not a balanced dictionary.** The POS distribution above is what the three
-  sources contain, not a designed sample. Read it before drawing a rate from this file.
-- **`upos` is absent for 15,357 entries** and is the source's tag where present, not a
-  reviewed annotation.
-- **The pronunciation set covers loanwords and proper nouns** — `amikruskop` ("microscope"),
-  `armstrong`, `android` — because it is aligned from running text and those occur in it.
-  These are also where the source's dropped-character defect concentrated, so most of the
-  199 repaired entries are loanwords.
-  **Do not filter this config by word length or character inventory.** The shortest entries
-  are the most frequent words in the language: `ad` occurs 12,024 times, `d` 18,862, `i`
-  11,141, `n` 6,001.
-- **One upstream defect is patched here and flagged**: the G2P source deletes characters it
-  has no rule for, and the `repaired` field marks every entry this release restored.
-- Two upstream defects are known and *not* patched: one source maps `ţ`→`ṭ` against corpus
-  evidence, and another tags `i` as `isem`. Both are owed as upstream reports.
-- **Glosses are mostly French**, reflecting the sources.
-- Nothing here is human-reviewed at scale. It is a merged, normalised, provenance-carrying
-  union of existing resources — which is exactly what did not exist before, and is not the
-  same thing as a curated dictionary.
+- **Source imbalance**: The lexicon is predominantly composed of verbal inflections rather than a balanced distribution of parts of speech.
+- **UPOS coverage**: Part-of-speech tags are missing for 15,357 entries and reflect upstream source annotations where present.
+- **Loanwords in pronunciation data**: Includes common loanwords and foreign names occurring in source text (`amikruskop`, `armstrong`, `android`).
+- **Glosses**: Lexical definitions are primarily in French, reflecting original lexicographical sources.
 
 ## Citation
 
@@ -232,6 +171,4 @@ Please also cite the upstream sources listed under Composition.
 
 ## Licence
 
-**CC-BY-4.0.** Every published entry is CC-BY-4.0 or MIT; CC-BY-4.0 is the more restrictive
-of the two and governs the release. The pronunciation config is CC0-1.0 upstream. Each row
-carries its own `licence` field, so a stricter subset can be cut by code.
+**CC-BY-4.0.** Published entries derive from CC-BY-4.0 and MIT sources. The pronunciation configuration is CC0-1.0 upstream. Each row includes source licensing metadata in the `licence` column.

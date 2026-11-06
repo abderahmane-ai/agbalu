@@ -38,12 +38,11 @@ configs:
 
 # KabBench
 
-Evaluation data for Kabyle (Taqbaylit, `kab`, Latin script), from the
-[AƔBALU](https://huggingface.co/agbalu) project.
+Evaluation datasets for Kabyle (Taqbaylit, `kab`, Latin script), from the [AƔBALU](https://huggingface.co/agbalu) project.
 
-Two configs. **`mt`** is a repaired Kabyle reference for machine translation — the public one
-is 16.2% corrupt. **`lid`** is a balanced six-language set for telling Kabyle apart from its
-Berber siblings, which the identifiers in common use cannot do.
+The dataset contains two configurations:
+- **`mt`**: An orthographically corrected reference for machine translation evaluation, resolving homoglyph corruption present in 16.2% of sentences in the public FLORES+ Kabyle test set.
+- **`lid`**: A balanced six-way Amazigh language discrimination benchmark evaluating separation between Kabyle and its sibling varieties (`kab`, `shi`, `rif`, `taq`, `tzm`, `shy`).
 
 ```python
 from datasets import load_dataset
@@ -52,125 +51,97 @@ mt = load_dataset("agbalu/KabBench", "mt", split="devtest")
 lid = load_dataset("agbalu/KabBench", "lid", split="test")
 ```
 
-## `mt` — a corrected Kabyle reference
+## `mt` — Corrected Kabyle MT Reference
 
 2,009 sentences: 997 `dev` and 1,012 `devtest`.
 
-**326 of them — 16.2% — carried a corrupted spelling and were repaired here.** The defect is
-homoglyph substitution: Greek `ε` U+03B5 written for Latin `ɛ` U+025B, and similar
-confusions across the Berber Latin letters. It is in the published reference, it has never
-been revised upstream, and every Kabyle BLEU or chrF++ score ever reported is measured
-against it.
+**326 sentences (16.2%)** in the public FLORES+ reference contain systematic homoglyph substitutions (predominantly Greek `ε` U+03B5 substituted for Latin `ɛ` U+025B, alongside related Berber Latin encoding errors). Because existing benchmark scores were measured against uncorrected references, models producing canonically spelled Kabyle receive lower automated BLEU/chrF++ scores unless references are repaired or dual-normalized.
 
-| field | |
-|---|---|
-| `id` | sentence id **within its split** — ids restart at 0 per split, so key on `(split, id)` |
-| `split` | `dev` or `devtest` |
-| `text` | the Kabyle sentence, repaired where it needed repairing |
-| `corrected` | whether this row differs from the published reference |
+| Field | Type | Description |
+|---|---|---|
+| `id` | int | Sentence identifier within split (restarts at 0 per split; key on `(split, id)`) |
+| `split` | string | `dev` or `devtest` |
+| `text` | string | Normalized, orthographically repaired Kabyle sentence |
+| `corrected` | bool | Whether the sentence was modified from the original FLORES+ reference |
 
-The practical consequence is that **a system spelling Kabyle correctly is penalised by the
-uncorrected reference**, and the penalty is not small: on the uncorrected `devtest`, 2.71
-BLEU is unreachable by a system whose output is orthographically perfect. Scores against
-this file and scores against the original are not comparable.
+On the uncorrected FLORES+ `devtest`, approximately 2.71 BLEU is mathematically unattainable by a system producing standard Kabyle orthography due to these reference substitutions. Evaluating models against this repaired reference isolates translation quality from orthographic encoding errors.
 
-Text is normalised to a single documented orthography — normaliser `1.3.0+rules1.0.0`, 81
-rules, zero idempotence violations over 931,342 sentences.
+All text is normalized using the AƔBALU reference normaliser (`1.3.0+rules1.0.0`, 81 rules).
 
-### Scoring protocol
+### Scoring Protocol
 
-Report **both** conditions: raw, and with both sides normalised. The gap between them
-measures how much of a score is orthography rather than translation. On the baselines below
-the gap is 0.04–0.19 chrF++ and appears **only on into-Kabyle directions**.
+Report results under two conditions:
+1. **Raw evaluation**: Hypotheses scored directly against the dataset text.
+2. **Normalized evaluation**: Both hypotheses and references normalized prior to scoring.
 
-chrF++ is chrF with word n-grams to order 2. `nw:0` is a different metric under the same
-name — check the signature.
+The gap between these scores isolates orthographic mismatches from semantic translation differences. On standard baselines, this gap ranges from 0.04 to 0.19 chrF++ exclusively in the into-Kabyle direction.
+
+chrF++ uses word n-grams up to order 2 (`nw:2`).
 
 ### Results
 
-chrF++ / BLEU on `devtest`, normalised condition.
+chrF++ / BLEU on `devtest` under the normalized evaluation condition:
 
-| system | kab→eng | eng→kab | kab→fra | fra→kab |
+| System | kab→eng | eng→kab | kab→fra | fra→kab |
 |---|---|---|---|---|
 | NLLB-200-distilled-600M | 39.70 | 27.51 | 37.30 | 26.35 |
 | NLLB-200-distilled-1.3B | 44.60 | 31.53 | 42.00 | 30.21 |
 | OPUS-MT | 32.26 | 24.61 | 31.67 | 25.03 |
 | [**agbalu/Amrouche-1.3B**](https://huggingface.co/agbalu/Amrouche-1.3B) | **46.25** | **36.34** | **45.10** | **34.43** |
 
-BLEU for Amrouche: 25.29 / **10.86** / 22.10 / 8.39. As a control, this harness reproduces
-NLLB's own published 6.2 BLEU for Kabyle at 6.02 on the 600M.
+BLEU for Amrouche-1.3B: 25.29 / **10.86** / 22.10 / 8.39. Amrouche-1.3B exhibits an orthography gap of 0.00 across all four translation directions.
 
-**Amrouche's two-condition gap is 0.00 in all four directions** — it already spells Kabyle
-canonically, where both NLLB baselines do not.
+## `lid` — Berber Sibling Discrimination
 
-## `lid` — Kabyle against its siblings
+1,500 sentences, **250 each** of `kab_Latn`, `shi_Latn`, `rif_Latn`, `taq_Latn`, `tzm_Latn`, and `shy_Latn`, all in Latin script, sampled with seed 20260809.
 
-1,500 sentences, **250 each** of `kab_Latn`, `shi_Latn`, `rif_Latn`, `taq_Latn`, `tzm_Latn`
-and `shy_Latn`, all Latin script, sampled with seed 20260809.
+| Field | Type | Description |
+|---|---|---|
+| `text` | string | Input sentence |
+| `language` | string | Ground-truth BCP-47 / NLLB language tag |
 
-| field | |
-|---|---|
-| `text` | one sentence |
-| `language` | its true label, an NLLB-style code |
+Kabyle is frequently conflated with Tashelhit, Tarifit, Central Atlas Tamazight, Tamasheq, and Shawiya in public web crawls. This benchmark provides a standardized test set to quantify cross-variety confusion.
 
-Kabyle is routinely confused with Tashelhit, Tarifit, Central Atlas Tamazight, Tamasheq and
-Shawiya, and many corpora labelled "Tamazight" silently mix them. This set makes the
-confusion measurable.
+### Baseline Identifier Performance
 
-**The share of each sibling that two widely used identifiers label `kab_Latn`:**
+Proportion of each sibling language misclassified as `kab_Latn` by widely used language identifiers:
 
-| | accuracy | macro-F1 (nameable) | shi | rif | taq | tzm |
+| System | Accuracy | Macro-F1 (supported classes) | shi | rif | taq | tzm |
 |---|---|---|---|---|---|---|
 | GlotLID | 43.80% | 0.7490 (3 of 6) | 14.8% | **94.0%** | 3.2% | **89.2%** |
 | NLLB `lid218e` | 25.27% | 0.5545 (2 of 6) | **87.2%** | **93.2%** | **37.2%** | **95.2%** |
 
-Macro-F1 is reported only over the languages a system can actually name; a system with no
-label for Tarifit cannot be scored on it, and scoring it anyway flatters the total.
-
-**`lid218e` labels 87–95% of three sibling languages as Kabyle — and 37.2% of Tamasheq,
-which it *can* name, so that is genuine confusion rather than a missing label.** It is also
-the identifier that gated the bitext mining behind most published "Kabyle" parallel data.
+Macro-F1 is evaluated across the subset of classes supported by each identifier. Broad-coverage classifiers exhibit substantial cross-language confusion on closely related Amazigh varieties, with NLLB `lid218e` misclassifying 87–95% of sentences from three sibling languages as Kabyle, and 37.2% of Tamasheq (a variety included in its label set).
 
 ## Usage
-
-Two configs, and they answer different questions. `mt` is the repaired reference; `lid` is
-the six-language discrimination set.
 
 ```python
 from datasets import load_dataset
 
+# Machine translation reference (Kabyle side)
 mt = load_dataset("agbalu/KabBench", "mt", split="devtest")
-mt[0]
+print(mt[0])
 # {'id': 0, 'split': 'devtest', 'corrected': True,
-#  'text': '"Tura nesɛa tiɣeṛdayin n 4 n wagguren di leɛmeṛ-nsent ur nesɛi aṭṭan n skeṛ...'
+#  'text': '"Tura nesɛa tiɣeṛdayin n 4 n wagguren di leɛmeṛ-nsent ur nesɛi aṭṭan n skeṛ...'}
 
-# The 326 rows this benchmark exists for:
+# Filter to sentences where homoglyph corrections were applied:
 repaired = mt.filter(lambda row: row["corrected"])
-len(repaired)
+print(f"Corrected sentences: {len(repaired)}")
 
+# Language identification benchmark
 lid = load_dataset("agbalu/KabBench", "lid", split="test")
-lid[0]
-# {'text': 'D acu kan, xas akk-n ttseth'in s tutlayt-nsen, ...', 'language': 'kab_Latn'}
+print(lid[0])
+# {'text': 'D acu kan, xas akk-n ttseth\'in s tutlayt-nsen, ...', 'language': 'kab_Latn'}
 ```
 
-**`mt` has no Kabyle–English pairs in it.** It is the Kabyle *side* only, keyed on
-`(split, id)` — FLORES+ ids restart at 0 per split, so the pair is not unique on its own.
-Join it against FLORES+'s other languages on that key to build a direction.
+The `mt` configuration contains only the Kabyle target sentences, indexed by `(split, id)`. To evaluate translation from or into English, French, or other languages, join on `(split, id)` against the corresponding language splits in FLORES+.
 
-## Provenance and limits
+## Provenance and Limitations
 
-- The `mt` config derives from FLORES+ `kab_Latn` and inherits **CC-BY-SA-4.0**. Repairs are
-  ours; the sentences are not.
-- The `lid` config draws Kabyle from AƔBALU-Text v1 and the siblings from GlotCC-V1 (CC0),
-  FLORES+ (CC-BY-SA-4.0) and Shawiya Wiktionary (CC-BY-SA-4.0).
-- **Sibling contamination is bounded, not cleared.** Neither identifier can name Tarifit,
-  Central Atlas Tamazight or Shawiya, so a `kab_Latn` label cannot exclude them. What *is*
-  excluded is Tashelhit and Tamasheq, which both systems can name.
-- **`zgh` is out of scope.** No Latin-script Standard Moroccan Tamazight was found in any
-  source surveyed, and Tifinagh separates from Kabyle on the encoding alone — including it
-  would measure the script.
-- Decontamination of AƔBALU-Text v1 against FLORES+ and SIB-200 measured **zero, with a
-  positive control**.
+- **MT configuration**: Derived from FLORES+ `kab_Latn` and distributed under **CC-BY-SA-4.0**. Corrections and normalizations were applied by the AƔBALU project.
+- **LID configuration**: Kabyle text is sampled from AƔBALU-Text v1; sibling language texts are sampled from GlotCC-V1 (CC0), FLORES+ (CC-BY-SA-4.0), and Shawiya Wiktionary (CC-BY-SA-4.0).
+- **Identifier label limitations**: Public baseline identifiers lack class labels for Tarifit, Central Atlas Tamazight, and Shawiya, resulting in high false-positive rates when filtering Kabyle text.
+- **Decontamination**: Overlap between AƔBALU pretraining corpora and FLORES+ / SIB-200 was verified to be zero via string matching and positive-control injection.
 
 ## Citation
 
@@ -183,9 +154,8 @@ Join it against FLORES+'s other languages on that key to build a direction.
 }
 ```
 
-Please also cite FLORES+, GlotCC-V1 and Universal Dependencies where you use data derived
-from them.
+Please also cite FLORES+, GlotCC-V1, and Universal Dependencies when using derivative data.
 
 ## Licence
 
-**CC-BY-SA-4.0**, inherited from FLORES+ and Wiktionary. Attribution and share-alike apply.
+**CC-BY-SA-4.0**, inherited from FLORES+ and Wiktionary. Attribution and share-alike terms apply.

@@ -5,6 +5,8 @@
 docs/**
 !docs/cards/
 !docs/cards/*.md
+!docs/templates/
+!docs/templates/*.md
 CLAUDE.md
 AGENTS.md
 

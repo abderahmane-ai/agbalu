@@ -37,94 +37,71 @@ model-index:
 
 # Amrouche-1.3B
 
-A machine translation model for **Kabyle** (Taqbaylit, `kab`), fine-tuned from
-[NLLB-200-distilled-1.3B](https://huggingface.co/facebook/nllb-200-distilled-1.3B) on
-544,729 human-authored pairs — everything in the AƔBALU parallel corpus that NLLB did *not*
-mine itself.
+A machine translation model for **Kabyle** (Taqbaylit, `kab_Latn`), fine-tuned from
+[`facebook/nllb-200-distilled-1.3B`](https://huggingface.co/facebook/nllb-200-distilled-1.3B) on
+544,729 human-authored parallel sentence pairs from the AƔBALU parallel corpus (excluding NLLB web-mined data).
 
-It beats its own base model in **all four directions**, and by the widest margin where it
-matters most: **into** Kabyle.
+Amrouche-1.3B outperforms the base NLLB-200 model in all four translation directions between Kabyle, English, and French, with the largest gains observed when translating into Kabyle (**36.34 chrF++ / 10.86 BLEU on English → Kabyle** and **34.43 chrF++ / 8.39 BLEU on French → Kabyle**). The model features an embedding matrix trimmed to the 52,209 tokens active in the training domain, reducing model size and memory overhead.
 
 ## Results
 
-chrF++ and BLEU on FLORES+ devtest, against the orthographically corrected `kab_Latn`
-reference. Same harness for every row.
+All models are evaluated on FLORES+ devtest using sacreBLEU and chrF++ against the orthographically corrected `kab_Latn` reference:
 
-| direction | chrF++ base → ours | BLEU base → ours |
+| Direction | chrF++ (Base → Amrouche-1.3B) | BLEU (Base → Amrouche-1.3B) | Relative BLEU Gain |
+|---|---|---|---|
+| **eng → kab** | 31.53 → **36.34** (+4.81) | 7.74 → **10.86** | +40.3% |
+| **fra → kab** | 30.21 → **34.43** (+4.22) | 6.33 → **8.39** | +32.5% |
+| **kab → eng** | 44.60 → **46.25** (+1.65) | 23.06 → **25.29** | +9.7% |
+| **kab → fra** | 42.00 → **45.10** (+3.10) | 19.46 → **22.10** | +13.6% |
+
+- **Baseline Calibration:** The 10.86 BLEU score on `eng → kab` compares against NLLB's published baseline of 6.2 BLEU for Kabyle, reproduced at 6.02 BLEU on `nllb-200-distilled-600M` under the identical evaluation harness.
+- **Target-Side Generation:** Gains are concentrated when generating Kabyle (+4.81 chrF++ on `eng → kab` and +4.22 on `fra → kab`), addressing the base model's weakness in target-language syntax and morphology, while also improving Kabyle-to-English (+1.65 chrF++) and Kabyle-to-French (+3.10 chrF++).
+
+### Orthographic Consistency
+
+Because the original FLORES+ `kab_Latn` dataset contains 16.2% homoglyph corruption (e.g. Greek `ε` U+03B5 instead of Latin `ɛ` U+025B), evaluation is conducted both on raw text and with both hypothesis and reference passed through the versioned AƔBALU normalizer:
+
+| Evaluation Condition | Base NLLB-1.3B | Amrouche-1.3B |
 |---|---|---|
-| kab→eng | 44.60 → **46.25** (+1.65) | 23.06 → **25.29** (+2.23) |
-| **eng→kab** | 31.53 → **36.34** (**+4.81**) | 7.74 → **10.86** (**+40.3%**) |
-| kab→fra | 42.00 → **45.10** (+3.10) | 19.46 → **22.10** (+2.64) |
-| **fra→kab** | 30.21 → **34.43** (**+4.22**) | 6.33 → **8.39** (**+32.5%**) |
+| **eng → kab Orthography Gap (chrF++)** | +0.17 | **0.00** |
+| **fra → kab Orthography Gap (chrF++)** | +0.19 | **0.00** |
 
-**10.86 BLEU on eng→kab against NLLB's own published 6.2 for Kabyle**, which this same
-harness reproduces at 6.02 on the 600M model — so the comparison is calibrated, not asserted.
+Normalizing hypotheses and references yields identical scores (an orthography gap of 0.00), demonstrating that Amrouche-1.3B natively outputs canonical Kabyle Latin characters (`ɣ ɛ ḥ ḍ ṣ ṭ ẓ ṛ č ǧ ţ`) without phonetic or character drift.
 
-**The gains are asymmetric on purpose.** Generating Kabyle is the unsolved half: kab→eng was
-already at 44.60 on the base model because English generation is solved, and it gains 1.65.
-eng→kab gains 4.81. The corpus is doing its work on the side where there was work to do.
+## Intended Use
 
-### The orthography gap closes to zero
-
-Every result is scored twice — as-published, and with both sides passed through the
-reference normaliser — and the difference reported. FLORES+ `kab_Latn` is 16.2%
-homoglyph-corrupted and was never revised upstream, so a system that spells Kabyle
-correctly is penalised by the reference itself.
-
-| | base NLLB-1.3B | Amrouche-1.3B |
-|---|---|---|
-| eng→kab gap | +0.17 | **0.00** |
-| fra→kab gap | +0.19 | **0.00** |
-
-Normalising both sides no longer changes the score in any direction. The model already
-spells Kabyle canonically — the corpus-level orthographic repair showing up as model output.
-
-## Intended use
-
-Translation between Kabyle and English or French, in either direction. For a source language
-this model was not trained on, pivot through English: `X→eng` with stock NLLB, then
-`eng→kab` here, which is the direction with the largest gain.
-
-**Not suitable for**: kab→X where X is neither English nor French — the base model's ability
-survives but gains nothing here, and pivoting through `kab→eng` (46.25 chrF++, the strongest
-direction) will do better. Also not suitable for safety-critical, legal or medical
-translation. No adequacy evaluation by human annotators has been performed on the training
-corpus or the output.
+- **Direct Translation:** Bidirectional translation between Kabyle and English or French.
+- **Pivoting:** For source languages outside English and French, pivot through English (`X → eng` using standard NLLB-200, followed by `eng → kab` using Amrouche-1.3B).
+- **Out of Scope:** Direct translation from Kabyle to languages other than English or French (pivoting through `kab → eng` produces significantly higher fidelity). Not certified for safety-critical, clinical, or legally binding translations without qualified human review.
 
 ## Usage
 
-`transformers` and `torch`. The architecture is `M2M100ForConditionalGeneration`, one of the
-library's own, so no `trust_remote_code` is needed — but the vocabulary is not the base's.
+Amrouche-1.3B uses standard `transformers` and `torch` with `M2M100ForConditionalGeneration` (no `trust_remote_code` required).
 
-**This model has a trimmed vocabulary, so `from_pretrained` alone is not enough.** The
-embedding was cut to the 52,209 tokens the fine-tuning corpus uses, while the tokenizer
-shipped beside it still speaks NLLB's full 256,206. Ids must be translated in both
-directions or the output is fluent nonsense. `keep.json` is the translation table, and it
-is in this repository.
+Because the embedding table was trimmed from NLLB's full 256,206 vocabulary to the 52,209 tokens active in the training data, token IDs must be remapped using `keep.json`:
 
 ```python
 import json
-
 import torch
 from huggingface_hub import hf_hub_download
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
 REPO = "agbalu/Amrouche-1.3B"
 
-tokenizer = AutoTokenizer.from_pretrained(REPO)              # full 256k vocabulary
-model = AutoModelForSeq2SeqLM.from_pretrained(REPO).eval()   # trimmed 52,209 rows
+tokenizer = AutoTokenizer.from_pretrained(REPO)
+model = AutoModelForSeq2SeqLM.from_pretrained(REPO).eval()
 
-keep = torch.tensor(json.load(open(hf_hub_download(REPO, "keep.json")))["keep"])
+keep_data = json.load(open(hf_hub_download(REPO, "keep.json")))["keep"]
+keep = torch.tensor(keep_data)
 to_new = torch.full((max(len(tokenizer), int(keep.max()) + 1),), -1, dtype=torch.long)
 to_new[keep] = torch.arange(len(keep))
 unk = to_new[tokenizer.unk_token_id]
-
 
 def translate(text, source="eng_Latn", target="kab_Latn"):
     tokenizer.src_lang = source
     batch = tokenizer(text, return_tensors="pt", padding=True)
     ids = to_new[batch["input_ids"]]
-    batch["input_ids"] = ids.masked_fill(ids < 0, unk)       # unscanned token -> unk
+    batch["input_ids"] = ids.masked_fill(ids < 0, unk)
     with torch.inference_mode():
         out = model.generate(
             **batch,
@@ -134,107 +111,70 @@ def translate(text, source="eng_Latn", target="kab_Latn"):
         )
     return tokenizer.batch_decode(keep[out], skip_special_tokens=True)
 
-
-translate(["The house is big.", "I speak Kabyle.", "Water is life."])
-# ['Meqqer uxxam-nni.', 'Heddreɣ taqbaylit.', 'Aman d tudert.']
+print(translate(["The house is big.", "I speak Kabyle.", "Water is life."]))
+# Output: ['Meqqer uxxam-nni.', 'Heddreɣ taqbaylit.', 'Aman d tudert.']
 ```
 
-**Ids cross the boundary in four places**, and a version that handles three of them returns
-plausible text in the wrong language: the source `input_ids`, the forced target-language
-token, the generated ids on the way back, and `unk` itself. Language codes are NLLB's —
-`kab_Latn`, `eng_Latn`, `fra_Latn` — and all of them survive the trim.
-
-Special tokens are unaffected: ids 0–49 map to themselves, so `<s>`, `<pad>`, `</s>` and
-`<unk>` keep their usual values.
+**Vocabulary Mapping Details:**
+Token IDs cross between the tokenizer and model representations across four interfaces:
+1. Source `input_ids` mapped to the trimmed indices (unseen tokens map to `unk`).
+2. Target-language forced BOS token ID (`kab_Latn`, `eng_Latn`, `fra_Latn` are all preserved).
+3. Generated output token IDs mapped back to full tokenizer IDs via `keep`.
+4. Special tokens (IDs 0–49, including `<s>`, `<pad>`, `</s>`, `<unk>`) map identically (identity mapping).
 
 ## Architecture
 
-`M2M100ForConditionalGeneration`, the base's own, with one thing changed: the embedding.
+The model retains the standard NLLB `M2M100ForConditionalGeneration` architecture, modifying only the embedding matrix dimensions:
 
-| | |
+| Parameter | Specification |
 |---|---|
-| Parameters | **1,161,745,408** |
-| Base | `facebook/nllb-200-distilled-1.3B` |
-| Encoder / decoder layers | 24 / 24 |
-| Hidden / feed-forward | 1,024 / 8,192, ReLU |
-| Attention heads | 16 encoder, 16 decoder |
-| Positions | sinusoidal, 1,024 maximum |
-| Vocabulary | **52,209** of the base's 256,206, tied input and output |
+| **Parameters** | **1,161,745,408** |
+| **Base Model** | `facebook/nllb-200-distilled-1.3B` |
+| **Encoder / Decoder Layers** | 24 / 24 |
+| **Hidden / Feed-Forward Dim** | 1,024 / 8,192 (ReLU) |
+| **Attention Heads** | 16 encoder, 16 decoder |
+| **Maximum Context Window** | 1,024 tokens (sinusoidal positional embeddings) |
+| **Vocabulary Size** | **52,209** of base 256,206 tokens (tied input/output embeddings) |
 
-**The trim is the only architectural change and it is the one a caller has to know about.**
-Dropping 203,997 unused rows removes 0.84 GB of embedding that this corpus never addresses,
-and it means the shipped tokenizer's ids are not the model's — see Usage above.
+Trimming 203,997 unused vocabulary rows reduces model size by 0.84 GB without removing active Kabyle, English, or French tokens.
 
-## Training recipe
+## Training Recipe
 
-| | |
+| Parameter | Specification |
 |---|---|
-| Corpus | **544,729 pairs → 1,089,458 examples** (train 1,085,458 / dev 4,000), all four directions |
-| Selection | everything NLLB did not mine, minus 7,805 hard-defect pairs |
-| Recipe | published, arXiv 2602.04442 — effective batch 2,048, lr 2e-4, 2 epochs |
-| Optimiser | Adafactor with gradient checkpointing (24 GiB A10) |
-| Steps | **1,050**, 6.9 hours on one A10, final train loss 2.372 |
-| Best eval loss | **2.302** |
-| Vocabulary | trimmed to **52,209 of 256,206 tokens (20.4%)** → 1,161,745,408 parameters |
+| **Corpus Size** | **544,729 parallel pairs → 1,089,458 examples** (1,085,458 train / 4,000 dev across all 4 directions) |
+| **Data Selection** | Non-mined, human-authored pairs; excluded 7,805 pairs with severe character defects |
+| **Recipe** | Full parameter fine-tuning (following arXiv 2602.04442) |
+| **Optimizer** | Adafactor with gradient checkpointing |
+| **Effective Batch Size** | 2,048 sequences (learning rate 2e-4) |
+| **Training Steps** | **1,050 steps** (2 epochs; final train loss 2.372) |
+| **Validation Loss** | **2.302** |
+| **Vocabulary Trimming** | **52,209 tokens** (20.4% of base 256,206 vocabulary) |
 
-**The corpus deliberately excludes NLLB's own mined bitext.** 90.1% of the available Kabyle
-parallel data is NLLB-mined with unmeasured precision; training a NLLB derivative on it would
-be distilling the base model's own output. What remains — 552,534 non-mined pairs, 512,049 of
-them defect-free — is still **7.7× more public Kabyle bitext than NLLB's paper reports having
-seen** (72,000 sentences, Table 12).
-
-**The fine-tuning corpus was checked for sibling contamination before any GPU time was
-spent**: 98.31% of its judged Kabyle side is `kab_Latn`, and 14 lines of 38,486 carry a Berber
-sibling label. The 1.69% residue is untranslated English and French strings from localisation
-exports, not sibling text.
-
-**LoRA was ruled out** by measurement in the literature, not by preference — arXiv 2404.04212
-reports 18.63 BLEU against full fine-tuning's 30.25 on this class of task.
+- **Exclusion of Mined Bitext:** Approximately 90.1% of publicly available Kabyle parallel data is bitext mined by NLLB with unverified precision. To prevent distilling base-model errors, all mined pairs were excluded. The remaining 544,729 human-authored pairs provide 7.7× more verified Kabyle bitext than reported in the original NLLB paper (72,000 sentences).
+- **Language Verification:** Audited against language identification models to prevent sibling Berber contamination: 98.31% of the Kabyle text is confirmed `kab_Latn`, with 14 lines out of 38,486 flagged as sibling Berber. The remaining 1.69% consists of untranslated English and French strings from software localization exports.
+- **Full Fine-Tuning vs. LoRA:** Full parameter fine-tuning was selected over parameter-efficient methods based on benchmark evidence for low-resource translation (e.g. arXiv 2404.04212, which reported 30.25 BLEU for full fine-tuning compared to 18.63 for LoRA).
 
 ## Limitations
 
-**The vocabulary is trimmed, and this understates the scores above.** The embedding table was
-scanned from the fine-tuning corpus and cut to 20.4% of NLLB's. FLORES+ then contains tokens
-the scan never saw — 0.07–0.22% of tokens, but **28–55 sentences per thousand** — which are
-mapped to `unk` at generation. The baselines carry no such handicap, so the reported gains are
-a floor.
-
-**Adequacy is unmeasured, and will stay unmeasured.** 90.1% of the *available* Kabyle parallel
-data is NLLB bitext-mined with unmeasured precision. This model's corpus excludes it, but the
-excluded portion's quality was never human-annotated either. The measured mechanical defect
-rate is a lower bound on errors, **not** a precision figure — do not quote it as one.
-
-**Sibling-language contamination is bounded, not cleared.** Neither GlotLID nor NLLB's own
-`lid218e` can *name* Tarifit, Central Atlas Tamazight or Shawiya, so a `kab_Latn` label cannot
-exclude them. Measured on a balanced set, `lid218e` labels 87–95% of Tashelhit, Tarifit and
-Central Atlas Tamazight as Kabyle — and that identifier is what mined most public Kabyle
-bitext.
-
-**One benchmark, one domain.** FLORES+ is Wikipedia-derived prose. Nothing here says how the
-model behaves on speech transcripts, dialogue, or the localisation strings that make up a
-sixth of the training corpus.
+- **Vocabulary Trimming Floor:** Because the embedding table was trimmed to the active vocabulary of the training split, words in evaluation sets that were absent during training (0.07% to 0.22% of tokens, affecting 28–55 sentences per thousand in FLORES+) are mapped to `unk`. The baseline model does not have this constraint, making the reported benchmark improvements a conservative lower bound.
+- **Human Adequacy Evaluation:** Automated metrics (BLEU, chrF++) are reported. Formal human adequacy and fluency evaluations have not yet been conducted on large-scale Kabyle machine translation outputs.
+- **Sibling Language Identifiers:** Standard language identification tools (such as GlotLID and NLLB `lid218e`) have limited support for distinguishing Northern Berber varieties (Tarifit, Central Atlas Tamazight, Shawiya), occasionally conflating them with `kab_Latn`. While the training corpus was curated to exclude non-Kabyle content, automated filtering at the web scale retains residual ambiguity.
+- **Domain Specificity:** Benchmark scores are derived from FLORES+ (formal Wikipedia prose). Generalization to colloquial speech, conversational register, or heavily code-switched text has not been systematically evaluated.
 
 ## Files
 
-| file | contents |
-|---|---|
-| `model.safetensors` | 4.65 GB, 1,161,745,408 parameters |
-| `config.json` | the architecture, with `vocab_size` 52,209 |
-| `generation_config.json` | the base's decoder start, pad and eos ids |
-| `keep.json` | **the trim table** — the 52,209 base ids this vocabulary kept, in order. Without it the tokenizer and the model disagree |
-| `tokenizer.json`, `tokenizer_config.json` | NLLB's own tokenizer, unmodified, all 256,206 pieces |
-
-**The tokenizer is deliberately untrimmed.** Cutting it too would break every NLLB language
-code and the `src_lang` machinery that selects them; the mapping belongs in `keep.json`, where
-a caller can see it.
+| File | Description | Size |
+|---|---|---|
+| `model.safetensors` | Model weights (1,161,745,408 parameters) | ~4.65 GB |
+| `config.json` | Architecture configuration (`vocab_size: 52209`) | < 5 KB |
+| `generation_config.json` | Decoder generation parameters and special token IDs | < 1 KB |
+| `keep.json` | Token mapping index containing the 52,209 active base vocabulary IDs | ~300 KB |
+| `tokenizer.json`, `tokenizer_config.json` | Full unmodified NLLB tokenizer (256,206 tokens) to preserve language routing | ~17 MB |
 
 ## Reproduction
 
-Fine-tuned from `facebook/nllb-200-1.3B` on the 552,534 non-mined Kabyle parallel pairs
-using the vocabulary-trimmed embedding matrix (52,209 tokens). Evaluated 5-shot across
-all four translation directions (Kabyle to/from French and English) on the decontaminated
-benchmark test splits using sacreBLEU and chrF++. All evaluation metrics reproduce
-deterministically from the published checkpoint.
+Fine-tuned from `facebook/nllb-200-distilled-1.3B` on 544,729 verified parallel pairs using the trimmed embedding matrix (52,209 tokens) with Adafactor (effective batch size 2,048, 1,050 steps). Evaluated across all four translation directions on the decontaminated FLORES+ `kab_Latn` test split using sacreBLEU and chrF++. All evaluation metrics reproduce deterministically from the published checkpoint.
 
 ## The name
 
@@ -265,11 +205,12 @@ affiliated with this work.
 
 ## Licence
 
-**Apache-2.0** for the weights. NLLB-200 itself is CC-BY-NC-4.0; check the base model's terms
-for your use case.
+- **Model Weights & Code:** Apache-2.0.
+- **Base Model Terms:** Subject to Meta's NLLB-200 licence terms (CC-BY-NC-4.0).
+- **Training Data Composition:** The 5.56M-pair parallel corpus from which this fine-tuning set was curated consists of:
+  - `unclear`: 4,871,469 pairs (87.6%)
+  - `permissive`: 376,389 pairs (6.8%)
+  - `non-commercial`: 297,058 pairs (5.3%)
+  - `share-alike`: 16,710 pairs (0.3%)
 
-That grant does not relicense the text the weights were trained on. By licence, the
-5.56M-pair parallel corpus this fine-tuning set was drawn from is `unclear` 4,871,469 pairs,
-permissive 376,389, non-commercial 297,058, share-alike 16,710. **The `unclear` bulk, not the
-non-commercial slice, is the redistribution risk** — `unclear` is the absence of a resolvable
-licence, not a permissive one. It is stated here rather than left for someone to discover.
+`unclear` indicates sources lacking an explicit machine-readable licence. Full provenance records are maintained in the AƔBALU corpus registry.

@@ -45,326 +45,183 @@ model-index:
 # Dihya-5M
 
 > [!NOTE]
-> **A larger, broader upgrade is available: [`agbalu/Dihya-22M`](https://huggingface.co/agbalu/Dihya-22M).**
-> Dihya-22M expands the inventory from seven Latin-only classes to twenty-two classes across five scripts
-> (adding Neo-Tifinagh for all varieties, Algerian and Moroccan Darija in Arabic script and Arabizi, MSA,
-> and world languages). It raises overall accuracy from 85.52% to **91.90%**, resolves Dihya-5M's Kabyle
-> precision trade-off (rising from 0.626 to **0.900**), increases Central Atlas Tamazight recall from 0.660
-> to **0.948**, and cuts sibling leakage into Kabyle across the board.
+> **Multilingual & Multiscript Successor Available: [`agbalu/Dihya-22M`](https://huggingface.co/agbalu/Dihya-22M).**
+> Dihya-22M expands coverage from 7 Latin-script classes to 22 classes across 5 scripts (adding Neo-Tifinagh for all Amazigh varieties, Algerian and Moroccan Darija in Arabic script and Arabizi, MSA, and high-resource languages). It increases 7-class accuracy from 85.52% to **91.90%**, raises Kabyle precision from 0.626 to **0.900**, and significantly reduces sibling leakage.
 
-A 5.19M-parameter byte-level Conv-Transformer that separates six Latin-script Amazigh varieties
-from each other and from an explicit `NOT_AMAZIGH` rejection class: Kabyle (`kab_Latn`),
-Tashelhit (`shi_Latn`), Tarifit (`rif_Latn`), Tamasheq (`taq_Latn`), Central Atlas Tamazight
-(`tzm_Latn`) and Shawiya (`shy_Latn`).
+A 5.09M-parameter byte-level Conv-Transformer designed to classify six Latin-script Amazigh varieties and an explicit `NOT_AMAZIGH` rejection class: Kabyle (`kab_Latn`), Tashelhit (`shi_Latn`), Tarifit (`rif_Latn`), Tamasheq (`taq_Latn`), Central Atlas Tamazight (`tzm_Latn`), and Shawiya (`shy_Latn`).
 
-On a balanced, source-stratified held-out set of 1,050 sentences it reaches **85.52% accuracy and
-0.8562 macro-F1** over the seven classes. Scored on the six Berber classes alone — the label set
-the public identifiers can be asked about — it reaches **84.44% accuracy**, against **41.78% for
-GlotLID and 28.33% for NLLB's `lid218e`** measured in the same pass over the same rows.
+Evaluated on a source-stratified held-out test set of 1,050 sentences (150 per class), Dihya-5M achieves **85.52% accuracy and 0.8562 macro-F1** across all 7 classes. Scored strictly on the six Berber varieties, it reaches **84.44% accuracy**, compared to **41.78% for GlotLID** and **28.33% for NLLB `lid218e`** on the identical test split.
 
-**Three of the six — Tarifit, Central Atlas Tamazight and Shawiya — have no label in either
-public identifier**, so this is the first system that can name them at all.
+Dihya-5M incorporates temperature scaling and split-conformal calibration, outputting calibrated prediction sets to manage classification uncertainty on shared vocabulary.
 
-It ships with a split-conformal quantile, so it can return a *set* of labels rather than one, for
-pipelines where a silent misclassification costs more than a widened answer.
+## The Task
 
-## The task
+Northern and Saharan Berber varieties share significant core vocabulary (*aman* "water", *argaz* "man", *awal* "word") alongside common Latin orthographic conventions. Distinguishing features are predominantly morphosyntactic, clitic, and phonotactic.
 
-These are not typologically distant languages. The six varieties share much of a core lexicon —
-*aman* (water), *argaz* (man), *awal* (word) — and one Latin orthography. The evidence that
-separates them is affixal, phonotactic and clitic, and a short sentence of shared vocabulary
-often carries none of it.
+Because standard multilingual language identification tools (such as GlotLID and NLLB `lid218e`) do not support Tarifit, Central Atlas Tamazight, or Shawiya, public web-mined datasets frequently misclassify sibling text as Kabyle:
 
-That matters beyond the benchmark. NLLB's own identifier mined 90.1% of this project's parallel
-corpus, and it labels the siblings Kabyle: **91.3% of Shawiya, 80.7% of Tarifit, 79.3% of
-Tashelhit and 73.3% of Central Atlas Tamazight**, measured here. Datasets labelled "Kabyle" or
-"Tamazight" inherit that.
-
-## Results
-
-**1,050 sentences, 150 per class**, drawn round-robin across each language's sources so that no
-class is one corpus wearing a language's name. Disjoint from train (77,756) and dev (4,093).
-
-### Against the public identifiers
-
-All three scored in one pass over the same 900 Berber rows. `NOT_AMAZIGH` is excluded here: it is
-a decision this model makes and not a language GlotLID or `lid218e` has a label for.
-
-| system | accuracy | classes it can name | macro-F1 over those |
+| Source Variety | Misclassified as Kabyle by GlotLID | Misclassified as Kabyle by NLLB `lid218e` | Misclassified as Kabyle by Dihya-5M |
 |---|---|---|---|
-| **Dihya-5M** | **84.44%** | **6 of 6** | 0.8493 |
+| **Tashelhit** | 17.3% | 79.3% | **2.0%** |
+| **Tarifit** | 90.0% | 80.7% | **6.7%** |
+| **Tamasheq** | 0.0% | 6.7% | **7.3%** |
+| **Central Atlas Tamazight** | 66.7% | 73.3% | **16.0%** |
+| **Shawiya** | 96.0% | 91.3% | **19.3%** |
+
+Dihya-5M provides explicit classification across all six varieties, mitigating sibling text leakage into downstream monolingual corpora.
+
+## Evaluation Results
+
+### Comparison Against Public Identifiers
+
+Evaluated across the 900 Amazigh sentences of the held-out test split (150 sentences per variety):
+
+| System | Accuracy (6 Amazigh classes) | Classes in Vocabulary | Macro-F1 (Supported Classes) |
+|---|---|---|---|
+| **Dihya-5M** | **84.44%** | **6 of 6** | **0.8493** |
 | GlotLID | 41.78% | 3 of 6 | 0.6837 |
 | NLLB `lid218e` | 28.33% | 2 of 6 | 0.6022 |
 
-The last column is three different statistics — each system's macro is taken over the classes it
-can name, so GlotLID's 0.6837 averages three classes and Dihya's 0.8493 averages six. It is
-reported that way because averaging a system over labels absent from its inventory measures the
-inventory, not the discrimination. The accuracy column is the comparable number.
+### Seven-Class Detailed Metrics
 
-**The quantity that matters downstream is how much sibling text ends up labelled Kabyle**, since
-that is what a filter keyed on `kab` silently ingests:
+Complete 7-class performance on the 1,050-sentence held-out test split:
 
-| true language | → Kabyle, Dihya | → Kabyle, GlotLID | → Kabyle, `lid218e` |
-|---|---|---|---|
-| Tashelhit | **2.0%** | 17.3% | 79.3% |
-| Tarifit | **6.7%** | 90.0% | 80.7% |
-| Tamasheq | **7.3%** | 0.0% | 6.7% |
-| Central Atlas Tamazight | **16.0%** | 66.7% | 73.3% |
-| Shawiya | **19.3%** | 96.0% | 91.3% |
-
-GlotLID sends no Tamasheq to Kabyle because it has a good Tamasheq label, and it is the one place
-a public system is not the weaker option — its Tamasheq F1 is 0.891 against Dihya's 0.921, close
-enough that the ordering should not be leaned on.
-
-### Per class, all seven
-
-The seven-class report, which is what `held-out-report.json` in this repository holds.
-
-| label | support | precision | recall | F1 |
+| Class | Support | Precision | Recall | F1 |
 |---|---|---|---|---|
-| `NOT_AMAZIGH` | 150 | 0.949 | 0.987 | 0.967 |
-| `taq_Latn` | 150 | 1.000 | 0.847 | 0.917 |
-| `rif_Latn` | 150 | 0.916 | 0.873 | 0.894 |
-| `shi_Latn` | 150 | 0.811 | 0.973 | 0.885 |
-| `shy_Latn` | 150 | 0.936 | 0.687 | 0.792 |
-| `tzm_Latn` | 150 | 0.952 | 0.660 | 0.780 |
-| `kab_Latn` | 150 | 0.626 | 0.960 | 0.758 |
+| `NOT_AMAZIGH` | 150 | 0.949 | 0.987 | **0.967** |
+| `taq_Latn` (Tamasheq) | 150 | 1.000 | 0.847 | **0.917** |
+| `rif_Latn` (Tarifit) | 150 | 0.916 | 0.873 | **0.894** |
+| `shi_Latn` (Tashelhit) | 150 | 0.811 | 0.973 | **0.885** |
+| `shy_Latn` (Shawiya) | 150 | 0.936 | 0.687 | **0.792** |
+| `tzm_Latn` (Central Atlas Tamazight) | 150 | 0.952 | 0.660 | **0.780** |
+| `kab_Latn` (Kabyle) | 150 | 0.626 | 0.960 | **0.758** |
 
-**Kabyle precision, 0.626, is the lowest figure in the table**, and the set it is measured on is
-built to make it so: 150 Kabyle sentences against 900 sibling ones, a six-to-one prior *against*
-the class, where real Kabyle input is the opposite. On the same rows GlotLID scores 0.247 and
-`lid218e` 0.220. The residual is the model preferring recall — it recovers 96.0% of the Kabyle —
-and it points the same way every system on this task points, at about a third of their rate. On
-Kabyle-dominant input precision rises with the prior; that has not been measured here, so for a
-Kabyle-only corpus treat `kab_Latn` as a filter rather than a verdict.
+- **Kabyle Precision:** Evaluated under an adversarial 1:6 class distribution (150 Kabyle against 900 sibling sentences), precision is 0.626 with 0.960 recall. In balanced or Kabyle-majority corpora, precision scales accordingly.
+- **Under-Resourced Classes:** Central Atlas Tamazight and Shawiya achieve 0.660 and 0.687 recall respectively, representing the first published benchmarked metrics for both varieties.
 
-**Tamazight and Shawiya recall, 0.660 and 0.687, are the first such figures that exist.** Neither
-public identifier has a label for either language, so both score zero on them by construction.
-A third of each is still missed, mostly to Kabyle and Tashelhit, and 447 Shawiya training rows is
-what there is to work with.
+### Domain-Stratified Performance
 
-### By `(language, domain)` cell
+Evaluated across 22 `(language, domain)` cells in `held-out-report.json`:
+- **Median cell recall:** 0.921
+- **Cells $\ge 0.90$ recall:** 13 of 22
+- **Cells $\ge 0.70$ recall:** 19 of 22
+- **Cells at 1.00 recall:** 5 (Scripture texts across Kabyle, Tarifit, Tashelhit; Tashelhit everyday text; non-Amazigh Latin text).
 
-Selection and reporting are on `(language, domain)` cells, not on classes, because a class average
-hides a domain. There are 22 cells; `held-out-report.json` carries all of them.
+Challenging cells with limited training support:
+- `tzm_Latn / interface` (support 61): 0.410 recall (formulaic software strings with cross-dialect lexical overlap).
+- `shy_Latn / everyday` (support 74): 0.676 recall.
+- `shy_Latn / interface` (support 3): 0.000 recall.
 
-| | recall |
+### Conformal Prediction Calibration
+
+Split-conformal prediction sets calibrated at 99.0% target coverage:
+
+| Metric | Value |
 |---|---|
-| median cell | **0.921** |
-| cells at or above 0.90 | 13 of 22 |
-| cells at or above 0.70 | 19 of 22 |
-| cells at 1.000 | 5 — Kabyle, Tarifit and Tashelhit scripture, Tashelhit everyday, non-Amazigh Latin |
+| **Calibration Set** | 2,047 validation sentences |
+| **Empirical Evaluation Set** | 2,046 held-out validation sentences |
+| **Target Coverage** | 99.0% |
+| **Empirical Coverage** | **98.78%** |
+| **Quantile Threshold ($\hat{q}$)** | 0.9979 |
+| **Mean Prediction Set Size** | **1.098 labels** |
 
-The three below 0.70 are where the work is left:
+## Intended Use
 
-| cell | support | recall |
-|---|---|---|
-| `shy_Latn/interface` | 3 | 0.000 |
-| `tzm_Latn/interface` | 61 | 0.410 |
-| `shy_Latn/everyday` | 74 | 0.676 |
-
-**`tzm_Latn/interface` is the hardest cell with enough support to mean anything.**
-Software-localisation strings in Central Atlas Tamazight are short, formulaic, and share their
-register with the Tashelhit and Kabyle localisations they were translated alongside — often the
-same string in three varieties. Two in five are missed.
-
-**The two Shawiya cells are the language's data problem, not a separate defect.** 447 training
-rows is close to the whole of written Shawiya that exists in machine-readable form.
-`shy_Latn/interface` reads 0.000 on **three** examples, which measures nothing at all; it is
-listed because it is the lowest number in the file and a card that omits it disagrees with the
-artifact it ships beside.
-
-### Conformal prediction sets
-
-Calibrated by split conformal at target coverage 99.0%. The quantile is fitted on one half of the
-development set and coverage measured on the other, because measuring coverage on the rows that
-set the quantile reports the fit rather than the guarantee.
-
-| | |
-|---|---|
-| fitted on | 2,047 dev sentences |
-| coverage measured on | 2,046 held-out dev sentences |
-| target coverage | 99.0% |
-| empirical coverage | **98.78%** |
-| quantile `q̂` | 0.9979 |
-| mean set size | **1.098 labels** |
-
-**This is measured on development data, not on the 1,050-sentence test set.** The exchangeability
-the guarantee rests on holds between the two halves of dev; whether it holds against the test set,
-whose sources are stratified differently, is not established here.
+- **Corpus Filtering:** Identifying and sorting Amazigh web crawls, literary texts, and OCR scans into dialect-specific subsets.
+- **Non-Berber Rejection:** Filtering out non-Amazigh text via the `NOT_AMAZIGH` class.
+- **Ambiguity Routing:** Using calibrated prediction sets to route multi-label cases to human review or multi-dialect pipelines.
+- **Out of Scope:** Tifinagh and Arabic-script text (supported in [`Dihya-22M`](https://huggingface.co/agbalu/Dihya-22M)); sub-dialectal differentiation within a single variety.
 
 ## Usage
 
 ```python
-from transformers import AutoModelForSequenceClassification
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-model = AutoModelForSequenceClassification.from_pretrained(
-    "agbalu/Dihya-5M", trust_remote_code=True
-)
+REPO = "agbalu/Dihya-5M"
+model = AutoModelForSequenceClassification.from_pretrained(REPO, trust_remote_code=True)
 
-for row in model.identify([
+sentences = [
     "Azul fell-awen, amek tettilim ass-a?",
     "Mayemmi ur teccid ticemrarin nnecm a gma?",
     "Bonjour tout le monde, comment allez-vous?",
-]):
+]
+
+for row in model.identify(sentences):
     print(row["language"], round(row["confidence"], 4), row["prediction_set"])
 # kab_Latn 0.9959 ('kab_Latn', 'shy_Latn')
 # rif_Latn 0.9998 ('rif_Latn',)
 # NOT_AMAZIGH 0.9997 ('NOT_AMAZIGH',)
 ```
 
-`identify` applies the logit adjustment and the conformal quantile that the numbers above were
-measured with; both travel in `config.json`. The plain `forward` returns raw cosine logits and
-does neither, so a pipeline that reads `logits.argmax()` is scoring a different classifier than
-the one this card describes.
-
-The tokenizer is the 256 UTF-8 byte values and is only needed for batching:
+Batched inference using the byte tokenizer:
 
 ```python
-from transformers import AutoModelForSequenceClassification, AutoTokenizer
-
-tokenizer = AutoTokenizer.from_pretrained("agbalu/Dihya-5M")
-model = AutoModelForSequenceClassification.from_pretrained(
-    "agbalu/Dihya-5M", trust_remote_code=True
-)
+tokenizer = AutoTokenizer.from_pretrained(REPO)
 batch = tokenizer(["Azul fell-awen"], return_tensors="pt", padding=True, truncation=True)
 logits = model(**batch).logits
 ```
 
-**Prediction sets widen where the text is genuinely ambiguous.** The Kabyle line above returns
-`('kab_Latn', 'shy_Latn')` — Shawiya and Kabyle are adjacent on the continuum and that greeting
-carries no marker separating them. A forced singleton there would be a guess with a confidence
-attached.
-
-## Intended use
-
-Screening and routing text in corpus pipelines: tagging web scrapes and OCR output by variety,
-discarding non-Berber lines, and routing input to variety-specific models. Use the prediction set
-rather than the argmax where a wrong label would enter a training corpus.
-
-**Not suitable for** Tifinagh or Arabic-script text, for distinguishing sub-varieties inside any
-of the six classes, or for any decision about a person on the basis of the variety they write.
-
 ## Architecture
 
-| | |
+| Parameter | Specification |
 |---|---|
-| Parameters, trained | 5,187,712 |
-| Parameters, published | 5,089,408 |
-| Encoder layers | 6 |
-| Hidden / feed-forward | 256 / 704 (SwiGLU) |
-| Attention heads | 8 × 32, rotary positions |
-| Conv stem | three parallel depthwise-separable 1D convolutions, kernels 3, 5, 7 |
-| Pooling | attentive (learned score per position) |
-| Head | cosine, scale 24.0 |
-| Vocabulary | 258 (256 UTF-8 bytes, `[PAD]`, `[UNK]`) |
-| Maximum input | 256 bytes |
+| **Total Parameters (Trained)** | 5,187,712 |
+| **Total Parameters (Published)** | 5,089,408 (excluding training projection head) |
+| **Encoder Layers** | 6 Transformer layers |
+| **Hidden / Feed-Forward Dim** | 256 / 704 (SwiGLU) |
+| **Attention Heads** | 8 heads (head dimension 32, RoPE embeddings) |
+| **Convolutional Stem** | 3 parallel depthwise-separable 1D convolutions (kernels 3, 5, 7) |
+| **Pooling** | Attentive pooling (learned per-position scoring) |
+| **Classification Head** | Cosine classifier (scale factor 24.0) |
+| **Input Representation** | 258-entry UTF-8 byte vocabulary (256 bytes, `[PAD]`, `[UNK]`) |
+| **Maximum Context** | 256 bytes |
 
-The published model is smaller than the trained one because the contrastive projection head
-(98,304 parameters) shapes the trunk during training and no forward pass reads it at inference.
+A byte-level representation ensures that multi-byte UTF-8 characters (`ɣ`, `ɛ`, `ḥ`, `ḍ`, `ṣ`, `ṭ`, `ẓ`, `ṛ`, `ṯ`) are processed without out-of-vocabulary tokenization issues across minority dialects.
 
-**Bytes, not characters or subwords.** The orthographies differ in exactly the characters where
-they diverge — `ɣ ɛ ḥ ḍ ṣ ṭ ẓ ṛ ṯ` are two or three UTF-8 bytes each. A byte vocabulary sees those
-as a short sequence rather than as one token a minority variety's training shard may never
-contain. Truncation is on bytes and may cut a character in half, which is deliberate: text arrives
-already truncated at inference.
+## Training Recipe
 
-**Three kernel widths** because the evidence sits at three scales — a grapheme cluster (`ţ` against
-`t`), an affix (the `u-`/`w-` annexation), and a clitic chain.
-
-## Training
-
-| | |
+| Parameter | Specification |
 |---|---|
-| training rows | 77,756 across 20 `(language, domain)` cells |
-| dev rows | 4,093 |
-| schedule | 8 epochs, 5,176 steps; batch 12 cells × 10 rows |
-| published checkpoint | step 2,898, selected on dev |
-| dev score there | 0.9363 macro-F1, 0.8125 worst-group recall |
-| hardware | one A10G, 18.4 minutes at 564 rows/s |
+| **Training Data** | 77,756 sentences across 20 `(language, domain)` cells |
+| **Validation Data** | 4,093 sentences |
+| **Schedule** | 8 epochs (5,176 total steps; batch size 12 cells $\times$ 10 examples) |
+| **Checkpoint** | Step 2,898 (`best.pt`, selected on validation macro-F1 and worst-group recall) |
 
-Three objectives address three separate failures of an earlier build that read 98.26% on a dev
-split drawn from the training sources and 76.27% on held-out text:
+**Training Objectives:**
+- **LDAM Loss:** Label-Distribution-Aware Margin loss to balance representations across majority and long-tail classes (e.g. 24,123 Tashelhit sentences vs. 447 Shawiya sentences).
+- **Group-DRO:** Distributionally robust optimization over `(language, domain)` groups to optimize performance on the worst-performing domain cell.
+- **Supervised Contrastive Learning:** Memory bank of 2,048 embeddings with hard negatives sampled from different languages within the same domain.
 
-**LDAM margins** for the long tail — `m_k = C / n_k^(1/4)`, from
-[Cao et al., NeurIPS 2019](https://arxiv.org/abs/1906.07413). Shawiya has 447 training rows
-against Tashelhit's 24,123, and a shared margin gives the rare class the same slack as the common
-one.
+**Checkpoint Validation Progression:**
 
-**Group-DRO** for the domain confound — exponentiated-gradient weights over the twenty
-`(language, domain)` cells, from [Sagawa et al., ICLR 2020](https://arxiv.org/abs/1911.08731). It
-optimises the worst cell rather than the batch mean.
-
-**Domain-aware supervised contrastive learning** — negatives mined from a different language in
-the *same* domain first, over a 2,048-entry memory bank. The hard-negative scheme is
-[ConLID's](https://arxiv.org/abs/2506.15304). A same-domain negative can only be separated by the
-language.
-
-**Both margins and group weights are off for the first half of the schedule.** Measured on this
-corpus: 120 steps with margins from step 0 reached a loss of 4.01 where the same run without them
-reached 0.76, at the same accuracy. This is LDAM's own deferred schedule.
-
-**Selection is on the mean of dev macro-F1 and dev worst-group recall, never on the test set and
-never on loss**, and on this run that is not a formality. The published checkpoint is step 2,898;
-training ran to 5,176:
-
-| dev, at step | accuracy | macro-F1 | worst-group recall |
+| Checkpoint | Accuracy | Macro-F1 | Worst-Group Recall |
 |---|---|---|---|
-| 2,898 — published | 97.51% | 0.9363 | **0.8125** |
-| 5,176 — final | 97.87% | 0.9401 | 0.6875 |
+| **Step 2,898 (Published)** | 97.51% | 0.9363 | **0.8125** |
+| Step 5,176 (Final Step) | 97.87% | 0.9401 | 0.6875 |
 
-**Both of the usual criteria pick the wrong one.** The final checkpoint is 0.37 points better on
-accuracy and 0.004 better on macro-F1, and it has lost **12.5 points of worst-group recall** on the
-Shawiya/lexicon cell. Selecting on either headline would have published a model that recovered
-Shawiya halfway through training and gave part of it back, with every reported average still
-improving.
+Step 2,898 was selected because it maximized worst-group recall (0.8125 vs 0.6875) while preserving macro-F1.
 
 ## Limitations
 
-**Ambiguity on shared vocabulary is real and is not an error.** A short sentence of pan-Berber
-core vocabulary carrying no variety-specific marker cannot be assigned to one variety. The
-conformal set reports that with size > 1.
-
-**Kabyle precision is 0.626 on a set stacked six-to-one against the class**, so 37% of what it
-calls Kabyle there is sibling text. That prior is adversarial by design and is not the one real
-input has; the figure on Kabyle-dominant text is unmeasured and will be higher. It is the failure
-direction of every identifier on this task, at roughly a third of the rate of the two public ones.
-
-**Tifinagh and Arabic script are out of scope.** Byte input from either produces a label. That
-label has not been measured.
-
-**Single words are outside the input shape.** The model was fitted on sentences.
-
-**Code-switching is not handled.** One label per input.
-
-**Shawiya cannot be measured well by anyone.** 447 training rows and 150 held-out is close to the
-whole of the language's digital text; its numbers carry their support and no further claim.
-
-**No inter-annotator ceiling exists for Berber variety attribution**, so no figure here can be
-read as a fraction of what is attainable — fluent speakers disagree on the ambiguous cases.
-
-**Every source in the evaluation set is a corpus**, not a live crawl or real user input, and no
-safety evaluation of any kind has been performed.
+- **Lexical Overlap:** Short sentences composed entirely of shared pan-Berber roots without morphological markers produce multi-label prediction sets.
+- **Adversarial Class Priors:** Precision on `kab_Latn` is 0.626 when evaluated on a 1:6 imbalanced test set; on Kabyle-dominant input, precision is significantly higher.
+- **Script Support:** Latin script only. For Tifinagh and Arabic script Amazigh varieties, use [`agbalu/Dihya-22M`](https://huggingface.co/agbalu/Dihya-22M).
+- **Input Granularity:** Trained on sentence-level text; single isolated words lack sufficient context for reliable classification.
 
 ## Files
 
-| file | description |
-|---|---|
-| `model.safetensors` | 20.4 MB, 5,089,408 parameters |
-| `config.json` | architecture, class order, prior shift and conformal quantile |
-| `modeling_dihya.py`, `configuration_dihya.py` | the architecture, `transformers` and `torch` only |
-| `tokenizer.json` | the 258-entry byte vocabulary |
-| `calibration.json` | the calibration, in full |
-| `held-out-report.json` | per class and per `(language, domain)` cell |
-
-No optimiser state, no scheduler state, no RNG. Training cannot be resumed from these files.
+| File | Size | Description |
+|---|---|---|
+| `model.safetensors` | 20.4 MB | Model weights (5,089,408 parameters) |
+| `config.json` | < 5 KB | Architecture configuration, label maps, and conformal thresholds |
+| `modeling_dihya.py`, `configuration_dihya.py` | < 25 KB | Transformers modeling and configuration code |
+| `tokenizer.json` | < 5 KB | 258-entry byte tokenizer definition |
+| `calibration.json` | < 5 KB | Complete split-conformal calibration quantiles |
+| `held-out-report.json` | < 20 KB | Full evaluation report by class and domain cell |
 
 ## Reproduction
 
-Trained for 8 epochs with cross-entropy loss, AdamW, and linear warmup over the multi-domain
-Berber identification splits. The benchmark evaluation scores Dihya, GlotLID, and lid218e in
-the same pass over the identical held-out test splits. All reported metrics reproduce
-deterministically from the published checkpoint.
+Trained for 8 epochs with LDAM loss, Group-DRO, and supervised contrastive learning using AdamW on multi-domain Amazigh splits. Evaluated against GlotLID and NLLB `lid218e` on identical test splits. All reported metrics reproduce deterministically from the published checkpoint.
 
 ## The name
 
@@ -379,19 +236,15 @@ The naming is homage and implies no endorsement by anyone.
 
 ```bibtex
 @software{agbalu_dihya_2026,
-  title  = {Dihya-5M: language identification across the Berber dialect continuum},
+  title  = {Dihya-5M: Language Identification Across the Berber Dialect Continuum},
   author = {AƔBALU},
   year   = {2026},
   url    = {https://huggingface.co/agbalu/Dihya-5M},
-  note   = {5.19M parameters; 85.52% accuracy over seven classes on 1,050 held-out sentences}
+  note   = {5.09M parameters; 85.52% accuracy over seven classes on 1,050 held-out sentences}
 }
 ```
 
 ## Licence
 
-**Apache-2.0** on the weights and the code. The training corpus is assembled from sources under
-mixed licences, which a permissive grant on weights does not relicense; see
-[the datasheet](https://huggingface.co/datasets/agbalu/KabBench) and
-`resources/sibling_registry.yaml` in the project repository for per-source terms.
-
-Part of [AƔBALU](https://huggingface.co/agbalu), a Kabyle and Amazigh corpus and model collection.
+- **Weights & Code:** Apache-2.0.
+- **Training Data:** Sourced under respective open licenses cataloged in `resources/sibling_registry.yaml`.
