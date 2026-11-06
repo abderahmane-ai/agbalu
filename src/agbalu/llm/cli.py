@@ -18,7 +18,7 @@ from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Final, TextIO
+from typing import TYPE_CHECKING, Any, Final, TextIO
 
 from agbalu.llm import (
     documents,
@@ -212,17 +212,44 @@ class HubCounter:
         return [len(ids) for ids in self._tokenizer.encode_batch(texts)]
 
 
+class _HubDihyaMeta:
+    def __init__(self, revision: str) -> None:
+        self.revision = revision
+
+
 class DihyaScorer:
-    """Dihya-5M's prior-adjusted class probabilities, one mapping per text."""
+    """Dihya-22M (or legacy Dihya-5M) class probabilities, one mapping per text."""
 
     def __init__(self, run: Path, device: str) -> None:
+        import torch
+
+        from agbalu.hub.dihya.configuration_dihya import DihyaConfig
+        from agbalu.hub.dihya.modeling_dihya import DihyaForSequenceClassification
         from agbalu.lid.infer import Identifier
 
-        self.identifier = Identifier.load(run, device=device)
+        self._hub_model: DihyaForSequenceClassification | None = None
+        candidates = (
+            run,
+            Path("artifacts/release/Dihya-22M"),
+            Path("artifacts/hub_models/dihya_22m"),
+        )
+        hub_dir = next((p for p in candidates if (p / "model.safetensors").is_file()), None)
+        if hub_dir is not None:
+            cfg = DihyaConfig.from_pretrained(hub_dir)
+            placed: torch.nn.Module = DihyaForSequenceClassification.from_pretrained(
+                hub_dir, config=cfg
+            )
+            self._hub_model = placed.to(torch.device(device)).eval()  # type: ignore[assignment]
+            self.identifier: Any = _HubDihyaMeta(str(hub_dir))
+        else:
+            self.identifier = Identifier.load(run, device=device)
 
     def probabilities(self, texts: Sequence[str]) -> list[dict[str, float]]:
-        rows = self.identifier.probabilities(texts, batch_size=IDENTIFIER_BATCH).tolist()
-        return [dict(zip(self.identifier.classes, row, strict=True)) for row in rows]
+        if self._hub_model is not None:
+            rows = self._hub_model.identify(list(texts), batch_size=IDENTIFIER_BATCH)
+            return [dict(row["probabilities"]) for row in rows]
+        raw = self.identifier.probabilities(texts, batch_size=IDENTIFIER_BATCH).tolist()
+        return [dict(zip(self.identifier.classes, row, strict=True)) for row in raw]
 
 
 def identifier_device() -> str:

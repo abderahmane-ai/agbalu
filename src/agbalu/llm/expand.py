@@ -1,10 +1,10 @@
-"""HPC corpus expansion: fetch, OCR/ASR/Boulifa/Dihya extraction, and full compilation.
+"""HPC corpus expansion: fetch, OCR/ASR/Belaid-75M/Dihya-22M extraction, and full compilation.
 
 Downloads new PDF, audio, text, and parallel repositories directly on the HPC pod, extracts
 full-document text via PyMuPDF + Feraoun-Pro OCR (for scanned pages) and Fadhma-300M ASR +
-Belaid-31M punctuation + Boulifa-48M orthography standardisation (for Radio Chaine 2 and
-audiobooks), repairs legacy 8-bit Amazigh font encodings, filters every document and aligned
-pair with Normaliser 1.3.0 and Dihya-5M, and compiles the full CPT dataset (`kab-docs.jsonl`,
+Belaid-75M (Masinissa-73M) punctuation (for Radio Chaine 2 and audio corpora, with zero
+Boulifa-48M), repairs legacy 8-bit Amazigh font encodings, filters every document and aligned
+pair with Normaliser 1.3.0 and Dihya-22M, and compiles the full CPT dataset (`kab-docs.jsonl`,
 `aligned.jsonl`, 10-source `replay.jsonl`, and packed `cpt-v2.npy`).
 """
 
@@ -134,8 +134,9 @@ TEXT_AND_PARALLEL_REPOS: Final[tuple[tuple[str, str, tuple[str, ...]], ...]] = (
 
 HUB_MODEL_REPOS: Final[tuple[tuple[str, str], ...]] = (
     ("fadhma", "agbalu/Fadhma-300M"),
-    ("belaid", "agbalu/Belaid-31M"),
-    ("boulifa", "agbalu/Boulifa-48M"),
+    ("belaid_75m", "agbalu/Belaid-75M"),
+    ("masinissa_73m", "agbalu/Masinissa-73M"),
+    ("dihya_22m", "agbalu/Dihya-22M"),
     ("feraoun_pro", "agbalu/Feraoun-Pro"),
     ("mammeri_tok", "agbalu/Mammeri-Tok"),
 )
@@ -954,10 +955,15 @@ def extract_audio_corpora(
     out_path: Path = EXPANDED_AUDIO_OUT,
     device: str = "cuda",
 ) -> list[ExpandTally]:
-    """Transcribe Chaine 2 (`rradyu-tis-snat`) and `Tughalin` with Fadhma + Belaid + Boulifa."""
+    """Transcribe audio corpora with Fadhma-300M + Belaid-75M + Dihya-22M (no Boulifa)."""
     import sentencepiece as spm
     import torch
-    from transformers import Wav2Vec2FeatureExtractor, Wav2Vec2ForCTC
+    from transformers import (
+        AutoModelForTokenClassification,
+        AutoTokenizer,
+        Wav2Vec2FeatureExtractor,
+        Wav2Vec2ForCTC,
+    )
 
     from agbalu.hub.belaid.configuration_belaid import BelaidConfig
     from agbalu.hub.belaid.modeling_belaid import BelaidForTokenClassification
@@ -966,8 +972,12 @@ def extract_audio_corpora(
     from agbalu.speech.vocabulary import decode
 
     fadhma_dir = models_root / "fadhma"
-    belaid_dir = models_root / "belaid"
-    boulifa_dir = models_root / "boulifa"
+    belaid_75m_dir = (
+        models_root / "belaid_75m"
+        if (models_root / "belaid_75m" / "config.json").is_file()
+        else Path("artifacts/release/Belaid-75M")
+    )
+    belaid_31m_dir = models_root / "belaid"
     tok_dir = models_root / "mammeri_tok"
 
     if not (fadhma_dir / "config.json").is_file():
@@ -987,33 +997,37 @@ def extract_audio_corpora(
     asr_model = placed_asr.to(torch_device).eval()
     extractor = Wav2Vec2FeatureExtractor.from_pretrained(fadhma_dir)
 
-    belaid_model: BelaidForTokenClassification | None = None
+    belaid_model: object | None = None
     belaid_tok: object | None = None
-    spm_candidates = list(tok_dir.rglob("*16k*.model")) or list(
-        Path("artifacts/tokenizer").glob("*16k*.model")
-    )
-    if (belaid_dir / "config.json").is_file() and spm_candidates:
-        b_cfg = BelaidConfig.from_pretrained(belaid_dir)
-        placed_belaid: torch.nn.Module = BelaidForTokenClassification.from_pretrained(
-            belaid_dir, config=b_cfg
+    if (belaid_75m_dir / "config.json").is_file():
+        placed_75m: torch.nn.Module = AutoModelForTokenClassification.from_pretrained(
+            belaid_75m_dir, trust_remote_code=True, local_files_only=True
         )
-        belaid_model = placed_belaid.to(torch_device).eval()  # type: ignore[assignment]
-        proc = spm.SentencePieceProcessor()
-        proc.load(str(spm_candidates[0]))
+        belaid_model = placed_75m.to(torch_device).eval()
+        belaid_tok = AutoTokenizer.from_pretrained(belaid_75m_dir, local_files_only=True)
+    else:
+        spm_candidates = list(tok_dir.rglob("*16k*.model")) or list(
+            Path("artifacts/tokenizer").glob("*16k*.model")
+        )
+        if (belaid_31m_dir / "config.json").is_file() and spm_candidates:
+            b_cfg = BelaidConfig.from_pretrained(belaid_31m_dir)
+            placed_belaid: torch.nn.Module = BelaidForTokenClassification.from_pretrained(
+                belaid_31m_dir, config=b_cfg
+            )
+            belaid_model = placed_belaid.to(torch_device).eval()
+            proc = spm.SentencePieceProcessor()
+            proc.load(str(spm_candidates[0]))
 
-        class _SpmAdapter:
-            cls_token_id = 2
-            sep_token_id = 3
+            class _SpmAdapter:
+                cls_token_id = 2
+                sep_token_id = 3
 
-            def encode(self, text: str, add_special_tokens: bool = False) -> list[int]:
-                _ = add_special_tokens
-                return [int(i) for i in proc.encode(text)]
+                def encode(self, text: str, add_special_tokens: bool = False) -> list[int]:
+                    _ = add_special_tokens
+                    return [int(i) for i in proc.encode(text)]
 
-        belaid_tok = _SpmAdapter()
+            belaid_tok = _SpmAdapter()
 
-    boulifa = (
-        HubBoulifaEngine(boulifa_dir, device) if (boulifa_dir / "config.json").is_file() else None
-    )
     normaliser = Normaliser()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     tallies: list[ExpandTally] = []
@@ -1064,17 +1078,13 @@ def extract_audio_corpora(
                         if len(raw_hyp) < 15:
                             continue
                         if belaid_model is not None and belaid_tok is not None:
-                            restored = belaid_model.restore(
-                                [raw_hyp],
-                                belaid_tok,  # type: ignore[arg-type]
-                            )
-                            if restored and restored[0]:
-                                raw_hyp = restored[0]
-                        # ASR output is always bare Latin (no diacritics); always
-                        # apply Boulifa unconditionally rather than gating on a
-                        # threshold that is unreliable for zero-diacritic text.
-                        if boulifa is not None:
-                            raw_hyp = boulifa.standardise_lines(raw_hyp)
+                            restore_fn = getattr(belaid_model, "restore", None)
+                            if callable(restore_fn):
+                                restored = restore_fn([raw_hyp], belaid_tok)
+                                if restored and isinstance(restored[0], str) and restored[0]:
+                                    raw_hyp = restored[0]
+                        # Fadhma-300M + 5gram.klm already outputs canonical Kabyle
+                        # diacritics; Boulifa-48M is never applied here.
                         normed = clean(raw_hyp, normaliser)
                         if is_kabyle_window(normed, scorer):
                             utterances.append(normed)
