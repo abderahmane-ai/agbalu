@@ -51,6 +51,12 @@ test: ## Full pytest suite. UNIT=1 skips integration, COV=1 adds the coverage re
 check: lint typecheck dead test ## The gate: lint + typecheck + dead-code detection + test
 	@echo "All checks passed."
 
+video: ## Render or verify private speech-launch previews. TASK=render|verify CONFIG=path OUTPUT=path
+	$(PY) -m tools.produce_video $(if $(TASK),--task $(TASK),) $(if $(CONFIG),--config $(CONFIG),) $(if $(OUTPUT),--output $(OUTPUT),)
+
+showcase: ## Build the four-voice demo. TASK=generate|curate|align|preview|render VOICE=name SETTINGS=path FFMPEG=path
+	PYTHONPATH=src $(PY) -m $(if $(filter preview render,$(TASK)),tools.video_showcase,tools.speech_showcase) $(if $(TASK),--task $(TASK),) $(if $(VOICE),--voice $(VOICE),) $(if $(MANIFEST),--manifest $(MANIFEST),) $(if $(SETTINGS),--settings $(SETTINGS),) $(if $(FFMPEG),--ffmpeg $(FFMPEG),) $(if $(TIME),--time $(TIME),)
+
 dead: ## Detect unused code across all source directories
 	vulture $(SRC) --min-confidence 100
 
@@ -516,6 +522,7 @@ HF_mt          := models   agbalu/Amrouche-1.3B  $(RELEASE)/Amrouche-1.3B $(CARD
 HF_juba        := models   agbalu/Juba-27M       $(RELEASE)/Juba-27M      $(CARDS)/juba-27m.md
 HF_fadhma      := models   agbalu/Fadhma-300M    $(RELEASE)/Fadhma-300M   $(CARDS)/fadhma-300m.md
 HF_belaid      := models   agbalu/Belaid-31M     $(RELEASE)/Belaid-31M    $(CARDS)/belaid-31m.md
+HF_belaid-75m  := models   agbalu/Belaid-75M     $(RELEASE)/Belaid-75M    $(CARDS)/belaid-75m.md
 HF_boulifa     := models   agbalu/Boulifa-48M    $(RELEASE)/Boulifa-48M   $(CARDS)/boulifa-48m.md
 HF_matoub      := models   agbalu/Matoub-82M     $(RELEASE)/Matoub-82M    $(CARDS)/matoub-82m.md
 HF_feraoun     := models   agbalu/Feraoun-36M    $(RELEASE)/Feraoun-36M   $(CARDS)/feraoun-36m.md
@@ -543,7 +550,7 @@ release-matoub-4b-gguf:
 HF_INCLUDE_matoub-4b-gguf = $(if $(FORMAT),--include "Matoub-4B-$(FORMAT).gguf" --include "Matoub-4B-$(FORMAT).stats.json" --include README.md --include LICENSE --include NOTICE,)
 
 ALL_REPOS := kabbench kablex kabsentiment kabinflect kabtifinagh kabpunct kabg2p \
-	kabstandard kabliterary encoder tokenizer mt juba fadhma belaid boulifa matoub matoub-4b matoub-4b-gguf \
+	kabstandard kabliterary encoder tokenizer mt juba fadhma belaid belaid-75m boulifa matoub matoub-4b matoub-4b-gguf \
 	feraoun feraoun-pro simohand dihya dihya-22m masinissa-sentiment jugurtha jugurtha-gguf jugurtha-4bit \
 	jugurtha-2-9b jugurtha-2-9b-gguf
 

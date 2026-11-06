@@ -1,10 +1,44 @@
-"""Verify speech release selection and corrupted artifact rejection."""
+"""Verify speech release selection and the published one-sample sampler."""
 
 import json
 from pathlib import Path
 
 import pytest
-from tools.stage_speech import link_weight, select_formats, verify_digest, verify_existing
+
+from agbalu.codec_tts.artifacts import digest_file, write_json
+from tools.stage_speech import (
+    link_weight,
+    refresh_published_code,
+    select_formats,
+    verify_digest,
+    verify_existing,
+)
+
+
+def test_refresh_replaces_the_candidate_sampler(tmp_path: Path) -> None:
+    project = Path(__file__).resolve().parents[2]
+    release = tmp_path / "Matoub-4B"
+    release.mkdir()
+    weights = release / "model.safetensors"
+    weights.write_bytes(b"weights")
+    (release / "config.json").write_text(
+        json.dumps({"architectures": ["SpeechModel"], "inference": {"candidates": 8}}),
+        encoding="utf-8",
+    )
+    write_json(
+        release / "export.stats.json",
+        {"files": {"model.safetensors": digest_file(weights)}, "weights_sha256": "unchanged"},
+    )
+    report = refresh_published_code(release, project, project / "docs/cards/matoub4b.md")
+    config = json.loads((release / "config.json").read_bytes())
+    inference = config["inference"]
+    assert inference["adapter_multiplier"] == 1
+    assert inference["decoding"]["alignment_strength"] == 0
+    assert inference["decoding"]["recover_loops"] is True
+    assert "candidates" not in inference
+    assert "render_speech" in (release / "modeling_speech.py").read_text(encoding="utf-8")
+    assert report["files"]["model.safetensors"] == digest_file(weights)
+    assert report["weights_sha256"] == "unchanged"
 
 
 def test_default_release_contains_only_qualified_formats() -> None:

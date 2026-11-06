@@ -1,6 +1,5 @@
-"""Verify complete teacher artifacts and interrupted-candidate recovery."""
+"""Verify one-pass speech keeps the text, the peak, and a repeated request."""
 
-import json
 from pathlib import Path
 
 import numpy as np
@@ -12,7 +11,7 @@ from agbalu.codec_tts import synthesis
 from agbalu.codec_tts.backbone import Generator
 from agbalu.codec_tts.codec import Codec
 from agbalu.codec_tts.configuration import Geometry
-from agbalu.codec_tts.inference import Decoding, GenerationError, Sampling
+from agbalu.codec_tts.inference import Decoding, Sampling
 from agbalu.codec_tts.layout import SPECIALS, SequenceLayout
 from agbalu.codec_tts.synthesis import (
     InferenceSettings,
@@ -117,8 +116,9 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> list[int]:
         assert isinstance(model, Generator)
         assert prompt.positions > 0
         assert isinstance(decoding, Decoding)
-        assert contrast is not None
-        assert deadline_monotonic is not None
+        assert contrast is None
+        assert deadline_monotonic is None
+        assert settings.max_new_positions == 1500
         result.append(settings.seed)
         return torch.ones(4, 8, dtype=torch.long), {"terminated": True, "frames": 4}
 
@@ -126,105 +126,38 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> list[int]:
     return result
 
 
-def test_complete_output_conservation_and_cached_recovery(
+def test_one_sample_is_cached_and_peak_normalized(
     tmp_path: Path, engine: SpeechSynthesis, speech_request: SpeechRequest, calls: list[int]
 ) -> None:
-    settings = InferenceSettings(candidates=2, max_segment_characters=32)
+    settings = InferenceSettings()
     output = tmp_path / "speech.wav"
     report = engine.synthesize(speech_request, settings, output)
     assert report["complete"] is True
-    assert report["samples"] == 192
-    assert report["attempts_this_run"] == 4
-    assert len(calls) == 4
+    assert report["samples"] == 96
+    assert len(report["segments"]) == 1
+    assert calls == [settings.sampling.seed]
     wave = synthesis.read_waveform(output)
-    assert wave.size == 192
+    assert wave.size == 96
     assert float(np.abs(wave).max()) == pytest.approx(0.99)
     again = engine.synthesize(speech_request, settings, output)
-    assert again["attempts_this_run"] == 0
-    assert again["cached_attempts_this_run"] == 4
     assert again["output_sha256"] == report["output_sha256"]
-    assert len(calls) == 4
+    assert calls == [settings.sampling.seed]
 
 
-def test_changed_request_and_corrupt_candidate_are_detected(
+def test_changed_request_and_corrupt_output_are_detected(
     tmp_path: Path, engine: SpeechSynthesis, speech_request: SpeechRequest, calls: list[int]
 ) -> None:
     output = tmp_path / "speech.wav"
-    settings = InferenceSettings(candidates=1)
+    settings = InferenceSettings()
     engine.synthesize(speech_request, settings, output)
     with pytest.raises(FileExistsError, match="different speech request"):
         engine.synthesize(
             speech_request.model_copy(update={"text": "Different."}), settings, output
         )
-    candidate_path = output.with_suffix(".candidates") / "segment-0000-candidate-00.wav"
-    candidate_path.write_bytes(b"corrupt")
+    output.write_bytes(b"corrupt")
     with pytest.raises(ValueError, match="checksum mismatch"):
         engine.synthesize(speech_request, settings, output)
     assert len(calls) == 1
-
-
-def test_interrupt_keeps_finished_candidates_and_no_final_wave(
-    tmp_path: Path, engine: SpeechSynthesis, speech_request: SpeechRequest, calls: list[int]
-) -> None:
-    class InterruptedCodec(TestCodec):
-        def __init__(self) -> None:
-            super().__init__()
-            self.calls = 0
-
-        def decode(self, codes: Tensor) -> Tensor:
-            self.calls += 1
-            if self.calls == 2:
-                raise KeyboardInterrupt
-            return super().decode(codes)
-
-    engine.codec = InterruptedCodec()
-    output = tmp_path / "speech.wav"
-    settings = InferenceSettings(candidates=2)
-    with pytest.raises(KeyboardInterrupt):
-        engine.synthesize(speech_request, settings, output)
-    assert not output.exists()
-    assert json.loads(output.with_suffix(".stats.json").read_bytes())["complete"] is False
-    report = engine.synthesize(speech_request, settings, output)
-    assert report["complete"] is True
-    assert report["cached_attempts_this_run"] == 1
-    assert len(calls) == 3
-
-
-def test_failed_native_generation_uses_bounded_recovery(
-    tmp_path: Path,
-    engine: SpeechSynthesis,
-    speech_request: SpeechRequest,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    attempted: list[bool] = []
-
-    def generate(
-        model: Generator,
-        prompt: SequenceLayout,
-        settings: Sampling,
-        decoding: Decoding,
-        contrast: SequenceLayout | None = None,
-        *,
-        deadline_monotonic: float | None = None,
-    ) -> tuple[Tensor, dict[str, object]]:
-        assert isinstance(model, Generator)
-        assert prompt.positions > 0
-        assert settings.max_new_positions > 0
-        assert contrast is not None
-        assert deadline_monotonic is not None
-        attempted.append(decoding.recover_loops)
-        if not decoding.recover_loops:
-            message = "native cap"
-            raise GenerationError(message, {"terminated": False})
-        return torch.ones(4, 8, dtype=torch.long), {"terminated": True, "frames": 4}
-
-    monkeypatch.setattr(synthesis, "generate_codes", generate)
-    report = engine.synthesize(
-        speech_request, InferenceSettings(candidates=1), tmp_path / "recovered.wav"
-    )
-    assert report["complete"] is True
-    assert attempted == [False, True]
-    assert report["attempts_this_run"] == 2
 
 
 def test_silent_reference_is_rejected_before_generation(

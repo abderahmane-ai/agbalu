@@ -330,9 +330,11 @@ def merge_transformers(model: Path, output: Path) -> dict[str, object]:
     output.mkdir(parents=True, exist_ok=True)
     config = json.loads((model / "config.json").read_bytes())
     config["has_adapter"] = False
-    config["inference"]["strategies"] = [
-        value for value in config["inference"]["strategies"] if value["adapter_multiplier"] == 1.0
-    ]
+    strategies = config["inference"].get("strategies")
+    if isinstance(strategies, list):
+        config["inference"]["strategies"] = [
+            value for value in strategies if value["adapter_multiplier"] == 1.0
+        ]
     values: dict[str, torch.Tensor] = {}
     prefix = "tied.embedding.modality_embeddings.0.model."
     with safe_open(native, framework="pt") as source:

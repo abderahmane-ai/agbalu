@@ -57,7 +57,7 @@ model-index:
 
 Belaid-75M is fine-tuned from [`agbalu/Masinissa-73M`](https://huggingface.co/agbalu/Masinissa-73M) over a **1,024-token context window**. Unlike sentence-level models that process only single isolated utterances, Belaid-75M restores punctuation and capitalization across **continuous multi-sentence discourse**, identifying clause boundaries, sentence terminations, questions, colons, acronyms, and hyphenated clitic capitalisation throughout extended passages.
 
-**It never edits spelling.** Words are preserved character-for-character with zero hallucination risk, making it safe for corpus ingestion, speech transcription pipelines, and publication workflows.
+**It never edits spelling.** Every word returns exactly as it arrived, so the restorer can sit behind a recogniser without rewriting a word that was right. What it adds is the page: internal periods, commas, questions, colons, capitals and acronyms, across a 1,024-subword window.
 
 ## Results
 
@@ -86,25 +86,29 @@ Evaluation is conducted on a held-out diagnostic split of continuous multi-sente
 | `COLON` | 178 | 172 | 0.610 | 0.590 | 0.600 |
 | `QUESTION` | 91 | 80 | 0.563 | 0.495 | 0.526 |
 
-Interrogative marks in Kabyle are driven by lexical markers (`acu`, `anida`, `amek`, `melmi`, `ayɣer`) and syntactic inversion, reaching **0.526 F1** within continuous discourse. Acronym and initialism detection reaches **0.755 F1 at 0.971 precision**, reliably identifying political, cultural, and administrative entities (`MCB`, `HCA`, `FFS`, `RCD`) without inflating standard nouns.
+The rule writes one capital and one final period. On this split that scores **0.000 F1 on every mark**, because 1,033 of the periods are spread through 128 windows and a single trailing stop never touches the internal ones. Belaid-75M is the model that places them: **0.630 period F1**, **0.623 comma F1**, **0.600 colon F1**, **0.526 question F1**, **0.755 acronym F1**. Sentence-final accuracy moves from 0.925 to **0.961**. Word casing moves from 0.000 to **0.940**. Acronym precision is **0.971** — `MCB`, `HCA`, `FFS`, `RCD` come back in capitals, ordinary nouns stay nouns.
 
 ## Comparison with Belaid-31M
 
-| Capability | Belaid-31M | **Belaid-75M** |
+[`Belaid-31M`](https://huggingface.co/agbalu/Belaid-31M) owns the utterance. Belaid-75M owns the paragraph. Each number below is that model's score on the split it was built for.
+
+| | Belaid-31M | **Belaid-75M** |
 |---|---|---|
-| **Backbone** | Masinissa-31M (6 layers) | **Masinissa-73M (20 layers)** |
-| **Context window** | 128 subwords | **1,024 subwords** |
-| **Input scope** | Single isolated utterance | **Continuous multi-sentence discourse** |
-| **Sentence boundary segmentation** | ❌ (memorized "one period at end") | **✅ (0.630 period F1 across paragraphs)** |
-| **Acronym truecasing (`ALL_CAPS`)** | ❌ | **✅ (0.755 F1, 0.971 precision)** |
-| **Hyphenated clitic casing** | Limited | **✅ Component-level (`d-Taqbaylit`)** |
-| **Exact word casing accuracy** | 0.863 (single-sentence) | **0.940 (continuous discourse)** |
+| Backbone | Masinissa-31M, **12 layers**, hidden 384 | **Masinissa-73M, 20 layers, hidden 512** |
+| Context | 128 subwords, one utterance | **1,024 subwords, continuous discourse** |
+| Period F1 | **0.977** on 5,160 sentences | **0.630** on internal and terminal periods in running prose |
+| What "exact" means here | **86.3%** of sentences fully correct, marks and capitals | **94.0%** of words cased correctly |
+| Questions | **0.898 F1** on 861 questions | **0.526 F1** inside continuous discourse |
+| `ALL_CAPS` | Held by the utterance model to two casing classes | **0.755 F1, 0.971 precision** |
+| Marks on words the reference leaves bare | | **29.9 per 1,000 words** |
+
+One utterance from Fadhma belongs on Belaid-31M, which scores **0.793** there. A paragraph, a subtitle roll, or a page of prose belongs here.
 
 ## Intended use
 
-- **Speech recognition post-processing**: Turning raw acoustic transcripts from CTC or Whisper-style recognizers into readable, publication-quality text.
-- **Subtitling and captioning**: Automatically inserting pauses, clause commas, question marks, and sentence terminators into streaming subtitles.
-- **Archival text normalization**: Restoring standard capitalization, proper names, and syntactic punctuation to uncased or raw OCR transcripts.
+- **Speech recognition post-processing**: turn a raw transcript into cased, punctuated Kabyle ready to read.
+- **Subtitling and captioning**: clause commas, question marks and sentence terminators across a running passage.
+- **Archival text**: capitals, proper names, acronyms and syntactic marks on uncased prose and OCR, in canonical Kabyle Latin.
 
 **Not suitable for**:
 - Languages other than Kabyle (Tamazight variants such as Tashelhit, Tarifit, or Shawiya have distinct lexical and syntactic markers).
@@ -198,9 +202,10 @@ Strict decontamination was enforced across all stages:
 
 ## Limitations
 
-- **Comma placement variance**: Comma precision is 0.620. In Kabyle literature, comma usage varies significantly between individual authors and translators, as no single standardized manual of style dictates clause punctuation. Disagreements with reference texts often represent valid stylistic alternatives.
-- **Acoustic pause absence**: This model operates strictly on written text. In natural speech, prosodic pauses and pitch contours provide crucial boundary cues; without audio input, sentence boundary prediction on highly ambiguous run-on utterances must rely purely on lexical and syntactic indicators.
-- **Single language**: Evaluated solely on Kabyle. Other Berber varieties (Tashelhit, Tarifit, Tamasheq, Shawiya) possess differing clitic inventories, interrogative particles, and word-formation rules.
+- **Commas.** Precision is 0.620 on a language with no single comma convention. The references disagree with each other, and the model is scored against that written practice. Spelling is untouched either way.
+- **Operating point.** 29.9 marks per 1,000 words land on tokens the reference labels `NONE`. That is the rate at which a discourse model recovers boundaries the baseline scores at 0.000.
+- **Text.** The model reads the words. Prosody is a separate signal.
+- **Kabyle.** Tashelhit, Tarifit, Tamasheq and Shawiya keep their own lexicons and their own interrogatives.
 
 ## What was not measured
 

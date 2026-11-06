@@ -214,16 +214,13 @@ def synthesize(
     if not text.strip():
         message = f"empty synthesis text at {args.text_file}"
         raise ValueError(message)
-    from agbalu.codec_tts.synthesis import InferenceSettings, SpeechRequest, SpeechSynthesis
-    from agbalu.codec_tts.verification import SpeechVerifier
+    from agbalu.codec_tts.synthesis import InferenceSettings, SpeechRequest, render_speech
 
     logging.basicConfig(format="%(message)s")
     logging.getLogger("agbalu.codec_tts.synthesis").setLevel(logging.INFO)
     settings = InferenceSettings.model_validate_json(args.inference_config.read_bytes())
     if args.reference is None or args.reference_text_file is None:
-        message = (
-            "verified synthesis requires a reference and its exact original-language transcript"
-        )
+        message = "synthesis requires a reference and its exact original-language transcript"
         raise ValueError(message)
     codec, _ = load_codec(
         recipe.base_directory / "model.safetensors",
@@ -242,9 +239,14 @@ def synthesize(
         reference_text=args.reference_text_file.read_text(encoding="utf-8"),
         checkpoint_sha256=checkpoint,
     )
-    return SpeechSynthesis(
-        model, codec, tokenizer, SpeechVerifier(model.audio_embedding.weight.device)
-    ).synthesize(request, settings, args.output or Path("artifacts/codec_tts/synthesis.wav"))
+    return render_speech(
+        model,
+        codec,
+        tokenizer,
+        request,
+        settings,
+        args.output or Path("artifacts/codec_tts/synthesis.wav"),
+    )
 
 
 def execute_model_action(

@@ -13,6 +13,7 @@ from huggingface_hub import ModelCard
 
 from agbalu.codec_tts.artifacts import digest_file, provenance, sync_directory, write_json
 from agbalu.codec_tts.release import remote_sources, verify_stage
+from agbalu.codec_tts.synthesis import InferenceSettings
 
 ROOT = Path("artifacts/runs/matoub-quantization")
 FORMATS = ("bf16", "q8_0", "q4_k")
@@ -93,13 +94,54 @@ def _stage_gguf(project: Path, temporary: Path) -> dict[str, object]:
     return {"formats": audits}
 
 
+def install_inference(directory: Path, project: Path) -> None:
+    config_path = directory / "config.json"
+    if not config_path.is_file():
+        return
+    payload = json.loads((project / "resources/codec_tts/inference.json").read_bytes())
+    InferenceSettings.model_validate(payload)
+    config = json.loads(config_path.read_bytes())
+    config["inference"] = payload
+    config_path.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def refresh_published_code(destination: Path, project: Path, card: Path) -> dict[str, object]:
+    """Replace the remote code, baked sampler and card without touching the weights."""
+    weights = destination / "model.safetensors"
+    if not weights.is_file() or not (destination / "export.stats.json").is_file():
+        message = f"incomplete speech release at {destination}"
+        raise FileNotFoundError(message)
+    for name, content in remote_sources(project).items():
+        (destination / name).write_text(content, encoding="utf-8")
+    install_inference(destination, project)
+    shutil.copy2(card, destination / "README.md")
+    report: dict[str, object] = json.loads((destination / "export.stats.json").read_bytes())
+    raw_files = report.get("files")
+    files: dict[str, str] = (
+        {str(key): str(value) for key, value in raw_files.items()}
+        if isinstance(raw_files, dict)
+        else {}
+    )
+    files.pop("export.stats.json", None)
+    for path in sorted(destination.iterdir()):
+        if path.is_file() and path.name != "export.stats.json":
+            files[path.name] = digest_file(path)
+    report["files"] = files
+    report["card_sha256"] = digest_file(card)
+    report["inference_config_sha256"] = digest_file(project / "resources/codec_tts/inference.json")
+    report.update(provenance(digest_file(card)))
+    write_json(destination / "export.stats.json", report)
+    verify_stage(destination)
+    return report
+
+
 def stage_package(kind: str, destination: Path, project: Path) -> dict[str, object]:
     source = project / "artifacts/runs/codec-tts-r32-stage/model"
     card = project / "docs/cards" / ("matoub4b.md" if kind == "bf16" else "matoub4b-gguf.md")
     ModelCard.load(card)
-    if kind == "bf16":
-        verify_stage(source)
     if destination.exists() and (destination / "export.stats.json").is_file():
+        if kind == "bf16":
+            return refresh_published_code(destination, project, card)
         report: dict[str, object] = json.loads((destination / "export.stats.json").read_bytes())
         shutil.copy2(card, destination / "README.md")
         raw_files = report.get("files")
@@ -112,6 +154,8 @@ def stage_package(kind: str, destination: Path, project: Path) -> dict[str, obje
         verify_existing(destination, report["files"])
         write_json(destination / "export.stats.json", report)
         return report
+    if kind == "bf16":
+        verify_stage(source)
     destination.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(
         prefix=".speech-release-", dir=destination.parent
@@ -122,6 +166,8 @@ def stage_package(kind: str, destination: Path, project: Path) -> dict[str, obje
             if kind == "bf16"
             else _stage_gguf(project, temporary)
         )
+        if kind == "bf16":
+            install_inference(temporary, project)
         for name in ("LICENSE", "NOTICE"):
             shutil.copy2(source / name, temporary / name)
         shutil.copy2(card, temporary / "README.md")

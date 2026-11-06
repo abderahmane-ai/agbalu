@@ -21,15 +21,13 @@ tags:
 
 # Matoub-4B
 
-A 4B-parameter neural speech synthesis and voice cloning foundation model for **Kabyle** (Taqbaylit, `kab`, Latin script), trained on 384,960 curated speech pairs from Common Voice Kabyle. Given Kabyle text and a short reference recording with its transcript, it synthesises broadcast-quality **24 kHz audio** that reproduces the vocal timbre, prosodic contours, and acoustic presence of the target speaker.
+A 4B-parameter text-to-speech model for **Kabyle** (Taqbaylit, `kab`, Latin script), trained on 384,960 curated speech pairs from Common Voice Kabyle. It synthesises broadcast-quality **24 kHz audio** from Kabyle text. Voice cloning is a feature of that model: a short reference recording, with its transcript kept in the original language, sets the speaker.
 
-Matoub-4B brings zero-shot, reference-conditioned voice cloning to Kabyle, supporting both native and cross-lingual cloning out of the box. A speaker recorded in English, French, Arabic, or any other supported language can speak fluent Taqbaylit with their natural vocal identity and expressive dynamics preserved. Generating speech across an 8-codebook discrete audio representation, the model faithfully captures Kabyle's rich phonology — including spirantised, pharyngealised, emphatic, and geminated consonants.
+The reference can be Kabyle or another language. `generate()` produces one utterance at the trained adapter scale, for every reference language. An 8-codebook discrete audio representation carries Kabyle's phonology, including spirantised, pharyngealised, emphatic, and geminated consonants.
 
 ## Results
 
-Validation was conducted across 16 utterances spanning six speakers. Speaker similarity
-is evaluated using WeSpeaker 256-dimensional speaker embeddings, and transcription fidelity
-is verified using Fadhma-300M ASR.
+Validation was conducted across 16 utterances spanning six speakers. Each utterance was generated once with the packaged sampler. Speaker similarity is the cosine of WavLM embeddings (`microsoft/wavlm-base-plus-sv`), and transcription fidelity is measured with Fadhma-300M.
 
 | metric | value |
 |---|---|
@@ -83,8 +81,10 @@ sf.write("speech.wav", speech.waveform[0].numpy(), speech.sampling_rate, subtype
 - Use clear, continuous speech from one speaker, without background music, overlapping voices or heavy reverberation. No single optimal reference duration has been established for this release.
 - `reference_text`: exact transcript of the words spoken in `reference_audio` in their original language.
 - For an English or French reference, provide the exact English or French transcript; do not translate it into Kabyle.
+- `generate()` writes one utterance. It does not search candidates or download an ASR or speaker verifier.
+- A text that cannot fit in the 8,192-position context with its reference is split, then joined. Leading and trailing silence is removed, and an internal silence longer than 320 ms is shortened to 140 ms.
 - The returned waveform is a CPU float tensor sampled at 24,000 Hz.
-- The generation pipeline can verify candidate outputs for transcript accuracy (Fadhma-300M CER), speaker similarity (WeSpeaker cosine), and audio quality (TorchAudio SQUIM) before returning the final waveform. Longer texts are handled via automatic sentence segmentation. All inference and sampling parameters are configured in `model.config.inference`.
+- Sampling, decoding and the adapter scale live in `model.config.inference`.
 
 ### Generation settings and return value
 
@@ -100,19 +100,15 @@ model.config.inference["sampling"].update(
 )
 ```
 
-These are the packaged sampling defaults. `max_new_positions` limits each
-candidate's generated codec positions; it is not a waveform sample count.
-The return value is `SpeechOutput`:
+These are the packaged sampling defaults. `max_new_positions` limits generated codec positions; it is not a waveform sample count. The return value is `SpeechOutput`:
 
 | Attribute | Value |
 |---|---|
 | `.waveform` | CPU float tensor with shape `[1, N]` |
 | `.sampling_rate` | `24000` |
-| `.report` | Generation audit with segment-level candidate scores, selection and verification results |
+| `.report` | Generation audit: duration, checksum, sampler, and one trace per segment |
 
-The engine evaluates CER, speaker cosine and predicted SQUIM quality when
-selecting candidates. These checks can reject a request; they do not guarantee
-perfect pronunciation or voice identity.
+The audit records the sample that was produced. It does not select among several takes.
 
 ### 4-bit Quantization (NF4)
 
@@ -220,7 +216,7 @@ distinct same-speaker reference recordings sharing no text or audio overlap.
 
 | file | description |
 |---|---|
-| `model.safetensors` | Model weights with merged LoRA adaptation and audio codec |
+| `model.safetensors` | Model weights, the rank-32 LoRA factors at the trained scale, and the audio codec |
 | `config.json` | Model configuration and AutoClass mapping |
 | `tokenizer.json`, `tokenizer_config.json`, `chat_template.jinja` | Text tokenizer and template |
 | `modeling_speech.py` and supporting modules | Transformers model implementation |
@@ -256,6 +252,6 @@ The naming is homage; it implies no affiliation or endorsement.
 
 The model weights are distributed under the **Boson Higgs TTS 3 Research and Non-Commercial License**, inheriting the terms of the base model ([`bosonai/higgs-tts-3-4b`](https://huggingface.co/bosonai/higgs-tts-3-4b)). The weights are strictly for non-commercial research use.
 
-The training data derives from Mozilla Common Voice Kabyle (CC0-1.0, public domain). The supporting evaluation models ([Fadhma-300M](https://huggingface.co/agbalu/Fadhma-300M), [WeSpeaker](https://huggingface.co/Wespeaker/wespeaker-voxceleb-resnet34-LM)) retain their respective licences (Apache-2.0 and CC BY 4.0).
+The training data derives from Mozilla Common Voice Kabyle (CC0-1.0, public domain). Fadhma-300M, used for the transcription measurement, is Apache-2.0. The similarity figure uses WavLM (`microsoft/wavlm-base-plus-sv`).
 
 Part of [AƔBALU](https://huggingface.co/agbalu), a Kabyle and Amazigh corpus and model collection.

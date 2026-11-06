@@ -1,10 +1,9 @@
-"""Produce verified reference-conditioned speech with resumable candidate selection."""
+"""Produce one reference-conditioned utterance for any reference language."""
 
 from __future__ import annotations
 
 import hashlib
 import json
-import logging
 import math
 import re
 import time
@@ -15,6 +14,7 @@ from typing import Protocol
 import numpy as np
 import soundfile as sf
 from pydantic import Field, model_validator
+from torch import Tensor
 
 from agbalu.codec_tts.adaptation import scaled_adapter
 from agbalu.codec_tts.artifacts import atomic_binary, digest_file, provenance, run_lock, write_json
@@ -30,7 +30,7 @@ from agbalu.codec_tts.inference import (
     generate_codes,
 )
 from agbalu.codec_tts.layout import SPECIALS, SequenceLayout, prompt_layout
-from agbalu.codec_tts.verification import INSTRUMENTS, Quality, spoken_text
+from agbalu.codec_tts.verification import Quality, spoken_text
 from agbalu.codec_tts.waveforms import Waveform, measure_signal, resample_waveform
 
 DEFAULT_INFERENCE = Path("resources/codec_tts/inference.json")
@@ -195,6 +195,242 @@ def save_waveform(path: Path, waveform: Waveform) -> None:
         sf.write(stream, waveform, 24000, format="WAV", subtype="FLOAT")
 
 
+def trim_edges(audio: Waveform) -> Waveform:
+    """Drop only the silence before the first sound and after the last."""
+    rate = 24000
+    frame = int(0.02 * rate)
+    hop = frame // 2
+    if audio.size <= frame:
+        return audio
+    count = 1 + (audio.size - frame) // hop
+    rms = np.empty(count, dtype=np.float32)
+    for index, start in enumerate(range(0, audio.size - frame + 1, hop)):
+        chunk = audio[start : start + frame]
+        rms[index] = float(np.sqrt(np.mean(np.square(chunk))))
+    threshold = max(0.005, float(np.percentile(rms, 90)) * 0.08)
+    active = np.flatnonzero(rms > threshold)
+    if active.size == 0:
+        return audio
+    margin = int(0.04 * rate)
+    first = max(0, int(active[0] * hop) - margin)
+    last = min(int(audio.size), int((active[-1] + 1) * hop + frame) + margin)
+    if last - first < frame:
+        return audio
+    return np.asarray(audio[first:last], dtype=np.float32)
+
+
+def close_gaps(audio: Waveform) -> Waveform:
+    """Shorten an internal silence longer than 320 ms to 140 ms."""
+    rate = 24000
+    frame = int(0.02 * rate)
+    hop = frame // 2
+    if audio.size <= frame:
+        return audio
+    count = 1 + (audio.size - frame) // hop
+    rms = np.empty(count, dtype=np.float32)
+    for index, start in enumerate(range(0, audio.size - frame + 1, hop)):
+        chunk = audio[start : start + frame]
+        rms[index] = float(np.sqrt(np.mean(np.square(chunk))))
+    threshold = max(0.005, float(np.percentile(rms, 90)) * 0.08)
+    silent = rms <= threshold
+    keep = int(0.14 * rate)
+    minimum = int(0.32 * rate)
+    spans: list[tuple[int, int]] = []
+    index = 0
+    while index < silent.size:
+        if not bool(silent[index]):
+            index += 1
+            continue
+        start_index = index
+        while index < silent.size and bool(silent[index]):
+            index += 1
+        start = int(start_index * hop)
+        end = min(int(audio.size), int((index - 1) * hop) + frame)
+        if start > hop and end < audio.size - hop and end - start >= minimum:
+            spans.append((start, end))
+    if not spans:
+        return np.asarray(audio, dtype=np.float32)
+    pieces: list[Waveform] = []
+    cursor = 0
+    for start, end in spans:
+        pieces.append(np.asarray(audio[cursor:start], dtype=np.float32))
+        pieces.append(np.asarray(audio[start : start + keep], dtype=np.float32))
+        cursor = end
+    pieces.append(np.asarray(audio[cursor:], dtype=np.float32))
+    return join_segments(pieces)
+
+
+def join_segments(waves: Sequence[Waveform]) -> Waveform:
+    if not waves:
+        message = "speech assembly received no audio"
+        raise ValueError(message)
+    fade = int(0.01 * 24000)
+    joined = np.asarray(waves[0], dtype=np.float32)
+    for nxt in waves[1:]:
+        following = np.asarray(nxt, dtype=np.float32)
+        width = min(fade, joined.size // 2, following.size // 2)
+        if width < 2:
+            joined = np.concatenate((joined, following))
+            continue
+        ramp = np.linspace(0.0, 1.0, width, dtype=np.float32)
+        mixed = joined[-width:] * (1.0 - ramp) + following[:width] * ramp
+        joined = np.concatenate((joined[:-width], mixed, following[width:]))
+    return np.asarray(joined, dtype=np.float32)
+
+
+def prompt_fits(
+    tokenizer: TextTokenizer,
+    specials: Mapping[str, int],
+    text: str,
+    reference_codes: Tensor,
+    reference_ids: Sequence[int],
+    max_new_positions: int,
+) -> bool:
+    prompt = prompt_layout(
+        specials, tokenizer.encode(text, add_special_tokens=False), reference_codes, reference_ids
+    )
+    remaining = MAX_CONTEXT_POSITIONS - prompt.positions
+    return remaining >= 8 and min(max_new_positions, remaining) >= 8
+
+
+def partition_text(
+    tokenizer: TextTokenizer,
+    specials: Mapping[str, int],
+    text: str,
+    reference_codes: Tensor,
+    reference_ids: Sequence[int],
+    max_new_positions: int,
+) -> tuple[str, ...]:
+    if prompt_fits(tokenizer, specials, text, reference_codes, reference_ids, max_new_positions):
+        return (text,)
+    parts = split_text(text, max(32, len(text) // 2))
+    if len(parts) == 1:
+        message = "speech text does not fit the context and has no split point"
+        raise ValueError(message)
+    return tuple(
+        piece
+        for part in parts
+        for piece in partition_text(
+            tokenizer, specials, part, reference_codes, reference_ids, max_new_positions
+        )
+    )
+
+
+def speech_identity(
+    request: SpeechRequest, settings: InferenceSettings, reference_sha256: str
+) -> str:
+    payload = {
+        "request": request.model_dump(mode="json"),
+        "sampling": settings.sampling.model_dump(),
+        "decoding": settings.decoding.model_dump(),
+        "adapter_multiplier": settings.adapter_multiplier,
+        "reference_sha256": reference_sha256,
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+
+def render_speech(
+    model: Generator,
+    codec: Codec,
+    tokenizer: TextTokenizer,
+    request: SpeechRequest,
+    settings: InferenceSettings,
+    output: Path,
+    provenance_stamp: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    """Sample one utterance. The reference language does not change the decode."""
+    started = time.monotonic()
+    spoken_text(request.reference_text)
+    specials = tokenizer.get_added_vocab()
+    for tag in re.findall(r"<\|[^<>]*\|>", request.text):
+        if tag not in specials or re.fullmatch(
+            r"<\|(?:emotion|style|prosody|sfx):[a-z_]+\|>", tag
+        ) is None:
+            message = f"unsupported delivery tag {tag!r}"
+            raise ValueError(message)
+    reference_sha = digest_file(request.reference)
+    identity = speech_identity(request, settings, reference_sha)
+    audit = output.with_suffix(".stats.json")
+    with run_lock(output.parent):
+        if audit.is_file():
+            previous = json.loads(audit.read_bytes())
+            if previous.get("identity") == identity and previous.get("complete") is True:
+                if not output.is_file() or digest_file(output) != previous.get("output_sha256"):
+                    message = f"checksum mismatch at {output}"
+                    raise ValueError(message)
+                return dict(previous)
+            if previous.get("identity") not in (None, identity):
+                message = f"different speech request already occupies {output}"
+                raise FileExistsError(message)
+        reference = read_waveform(request.reference)
+        if measure_signal(reference, 24000).rms_dbfs is None:
+            message = f"reference audio is silent: {request.reference}"
+            raise ValueError(message)
+        reference_codes = codec.encode(reference)
+        reference_ids = tokenizer.encode(request.reference_text, add_special_tokens=False)
+        parts = partition_text(
+            tokenizer,
+            specials,
+            request.text,
+            reference_codes,
+            reference_ids,
+            settings.sampling.max_new_positions,
+        )
+        prefix = re.match(
+            r"(?:\s*<\|(?:emotion|style|prosody):(?!pause\|>|long_pause\|>)[^<>]+\|>)*",
+            request.text,
+        )
+        delivery = prefix.group() if prefix else ""
+        decoding = settings.decoding.model_copy(
+            update={"alignment_strength": 0, "recover_loops": True}
+        )
+        waves: list[Waveform] = []
+        segments: list[dict[str, object]] = []
+        for number, text in enumerate(parts):
+            conditioning = (delivery if number else "") + text
+            prompt = prompt_layout(
+                specials,
+                tokenizer.encode(conditioning, add_special_tokens=False),
+                reference_codes,
+                reference_ids,
+            )
+            remaining = MAX_CONTEXT_POSITIONS - prompt.positions
+            positions = min(settings.sampling.max_new_positions, remaining)
+            sampling = settings.sampling.model_copy(
+                update={"max_new_positions": positions, "seed": settings.sampling.seed + number}
+            )
+            with scaled_adapter(model, settings.adapter_multiplier):
+                codes, trace = generate_codes(model, prompt, sampling, decoding, None)
+            waves.append(np.asarray(codec.decode(codes).numpy(), dtype=np.float32))
+            segments.append({"text": text, "seed": sampling.seed, **trace})
+        joined = close_gaps(trim_edges(join_segments(waves)))
+        peak = measure_signal(joined, 24000).peak
+        gain = min(1.0, 0.99 / peak) if peak else 1.0
+        save_waveform(output, np.asarray(joined * gain, dtype=np.float32))
+        report: dict[str, object] = {
+            **(
+                {**provenance_stamp, "config_hash": identity}
+                if provenance_stamp is not None
+                else provenance(identity)
+            ),
+            "identity": identity,
+            "complete": True,
+            "segments": segments,
+            "samples": joined.size,
+            "sample_rate_hz": 24000,
+            "duration_s": joined.size / 24000,
+            "peak_gain": gain,
+            "output": str(output),
+            "output_sha256": digest_file(output),
+            "elapsed_s": time.monotonic() - started,
+            "adapter_multiplier": settings.adapter_multiplier,
+            "sampling": settings.sampling.model_dump(),
+            "decoding": decoding.model_dump(),
+        }
+        write_json(audit, report)
+    return report
+
+
 def contrast_layout(prompt: SequenceLayout, specials: Mapping[str, int]) -> SequenceLayout:
     keep = prompt.audio_mask.clone()
     for token in SPECIALS:
@@ -324,202 +560,13 @@ class SpeechSynthesis:
     def synthesize(
         self, request: SpeechRequest, settings: InferenceSettings, output: Path
     ) -> dict[str, object]:
-        started = time.monotonic()
-        spoken_text(request.reference_text)
-        specials = self.tokenizer.get_added_vocab()
-        for tag in re.findall(r"<\|[^<>]*\|>", request.text):
-            if (
-                tag not in specials
-                or re.fullmatch(r"<\|(?:emotion|style|prosody|sfx):[a-z_]+\|>", tag) is None
-            ):
-                message = f"unsupported delivery tag {tag!r}"
-                raise ValueError(message)
-        parts = split_text(request.text, settings.max_segment_characters)
-        source = {
-            name: digest_file(Path(__file__).with_name(name))
-            for name in (
-                "synthesis.py",
-                "inference.py",
-                "adaptation.py",
-                "verification.py",
-                "layout.py",
-            )
-        }
-        identity_data = {
-            "request": request.model_dump(mode="json"),
-            "settings": settings.model_dump(),
-            "reference_sha256": digest_file(request.reference),
-            "source": source,
-        }
-        identity = hashlib.sha256(json.dumps(identity_data, sort_keys=True).encode()).hexdigest()
-        root, audit = output.with_suffix(".candidates"), output.with_suffix(".stats.json")
-        with run_lock(root):
-            marker = root / "request.json"
-            if marker.exists() and json.loads(marker.read_bytes()).get("sha256") != identity:
-                message = f"different speech request already occupies {root}"
-                raise FileExistsError(message)
-            if not marker.exists() and (output.exists() or audit.exists()):
-                message = f"refusing to replace existing speech output {output}"
-                raise FileExistsError(message)
-            write_json(marker, {"sha256": identity})
-            reference = read_waveform(request.reference)
-            if measure_signal(reference, 24000).rms_dbfs is None:
-                message = f"reference audio is silent: {request.reference}"
-                raise ValueError(message)
-            ref_codes = self.codec.encode(reference)
-            ref_ids = self.tokenizer.encode(request.reference_text, add_special_tokens=False)
-            report: dict[str, object] = {
-                **(
-                    {**self.provenance_stamp, "config_hash": identity}
-                    if self.provenance_stamp is not None
-                    else provenance(identity)
-                ),
-                **identity_data,
-                "complete": False,
-                "attempts_this_run": 0,
-                "cached_attempts_this_run": 0,
-                "segments": [],
-                "instruments": INSTRUMENTS,
-                "output": str(output),
-                "audit": str(audit),
-            }
-            segment_reports: list[dict[str, object]] = []
-            report["segments"] = segment_reports
-            write_json(audit, report)
-            waves: list[Waveform] = []
-            generated, cached, offset = 0, 0, 0
-            prefix = re.match(
-                r"(?:\s*<\|(?:emotion|style|prosody):(?!pause\|>|long_pause\|>)[^<>]+\|>)*",
-                request.text,
-            )
-            delivery = prefix.group() if prefix else ""
-            for number, text in enumerate(parts):
-                conditioning = (delivery if number else "") + text
-                prompt = prompt_layout(
-                    specials,
-                    self.tokenizer.encode(conditioning, add_special_tokens=False),
-                    ref_codes,
-                    ref_ids,
-                )
-                budget = MAX_CONTEXT_POSITIONS - prompt.positions
-                if settings.sampling.max_new_positions > budget:
-                    message = f"reference/text exceeds context budget at character={offset}"
-                    message += f": remaining={budget}"
-                    raise ValueError(message)
-                values: list[Candidate] = []
-                paths: list[Path] = []
-                segment: dict[str, object] = {
-                    "text": text,
-                    "char_start": offset,
-                    "char_end": offset + len(text),
-                    "candidates": [],
-                    "selected": None,
-                }
-                segment_reports.append(segment)
-                for index in range(settings.candidates + settings.fallback_candidates):
-                    if (
-                        index >= settings.candidates
-                        and choose_candidate(values, settings) is not None
-                    ):
-                        break
-                    active = candidate_settings(
-                        settings,
-                        text,
-                        reference.size / 24000,
-                        len(spoken_text(request.reference_text)),
-                        index,
-                    )
-                    initial = values[: len(settings.strategies)]
-                    if (
-                        settings.strategies
-                        and len(initial) == len(settings.strategies)
-                        and all(value.trace.get("terminated") is False for value in initial)
-                    ):
-                        active = active.model_copy(
-                            update={"decoding": Decoding(recover_loops=True)}
-                        )
-                    seed_index = index // max(1, len(settings.strategies))
-                    seed = (
-                        settings.sampling.seed
-                        + number * (settings.candidates + settings.fallback_candidates)
-                        + seed_index
-                    )
-                    path = root / f"segment-{number:04d}-candidate-{index:02d}.wav"
-                    report.update(
-                        active_candidate=str(path),
-                        attempts_this_run=generated,
-                        cached_attempts_this_run=cached,
-                    )
-                    write_json(audit, report)
-                    value, reused = self.candidate(
-                        text,
-                        prompt,
-                        reference,
-                        active,
-                        seed,
-                        path,
-                        identity,
-                        started + settings.timeout_s,
-                    )
-                    cached += int(reused)
-                    generated += int(not reused)
-                    logging.getLogger(__name__).info(
-                        json.dumps(
-                            {
-                                "event": "speech_candidate",
-                                "segment": number,
-                                "candidate": index,
-                                "cached": reused,
-                                "adapter_multiplier": active.adapter_multiplier,
-                                "alignment_strength": active.decoding.alignment_strength,
-                                "recover_loops": active.decoding.recover_loops,
-                                "quality": value.quality.model_dump() if value.quality else None,
-                                "error": value.error,
-                                "elapsed_s": time.monotonic() - started,
-                            }
-                        )
-                    )
-                    values.append(value)
-                    paths.append(path)
-                    segment["candidates"] = [
-                        {
-                            **item.model_dump(mode="json"),
-                            "rejected": rejection_reasons(item.quality, settings)
-                            if item.quality
-                            else (),
-                        }
-                        for item in values
-                    ]
-                    report.update(attempts_this_run=generated, cached_attempts_this_run=cached)
-                    write_json(audit, report)
-                chosen = choose_candidate(values, settings)
-                segment["selected"] = chosen
-                write_json(audit, report)
-                if chosen is None:
-                    message = (
-                        f"no candidate passed content, voice and quality limits at segment={number}"
-                    )
-                    message += f"; see {audit}"
-                    raise RuntimeError(message)
-                waves.append(read_waveform(paths[chosen]))
-                offset += len(text)
-            joined = np.concatenate(waves).astype(np.float32)
-            if offset != len(request.text) or joined.size != sum(wave.size for wave in waves):
-                message = "speech text/sample conservation failed during assembly"
-                raise AssertionError(message)
-            peak = measure_signal(joined, 24000).peak
-            gain = min(1.0, 0.99 / peak) if peak else 1.0
-            save_waveform(output, np.asarray(joined * gain, dtype=np.float32))
-            report.update(
-                complete=True,
-                active_candidate=None,
-                samples=joined.size,
-                sample_rate_hz=24000,
-                duration_s=joined.size / 24000,
-                peak_gain=gain,
-                output_sha256=digest_file(output),
-                elapsed_s=time.monotonic() - started,
-                naturalness="predicted quality only; no human rating",
-            )
-            write_json(audit, report)
-        return report
+        return render_speech(
+            self.model,
+            self.codec,
+            self.tokenizer,
+            request,
+            settings,
+            output,
+            provenance_stamp=self.provenance_stamp,
+        )
+

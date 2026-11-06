@@ -51,13 +51,9 @@ model-index:
 # Belaid-31M
 
 > [!TIP]
-> **A newer, larger, and significantly more capable model is available: [`agbalu/Belaid-75M`](https://huggingface.co/agbalu/Belaid-75M).**
+> **Two restorers, two jobs.** This model is the utterance restorer. [`Belaid-75M`](https://huggingface.co/agbalu/Belaid-75M) is the discourse restorer.
 >
-> While Belaid-31M was designed for single isolated utterances (128-token context window, trained primarily on individual sentence clips from speech), **Belaid-75M** solves several fundamental limitations:
-> 1. **Discourse-level context**: 1,024-token context window (vs 128) capable of processing and punctuating extended running paragraphs and continuous multi-sentence transcripts.
-> 2. **Paragraph segmentation**: Eliminates the single-utterance bias ("one period at the end"), achieving 0.630 period F1 across continuous prose by identifying internal sentence terminations.
-> 3. **True acronym support**: Predicts `ALL_CAPS` for initialisms and acronyms (`MCB`, `HCA`, `FFS`) at 0.971 precision, plus component-level casing for hyphenated clitics (`d-Taqbaylit`).
-> 4. **Stronger representation**: Built on the 75M-parameter Masinissa-73M backbone (20 layers vs 6), reaching 94.0% exact word casing accuracy across continuous discourse.
+> Belaid-31M runs a **12-layer** [`Masinissa-31M`](https://huggingface.co/agbalu/Masinissa-31M) at 128 subwords and returns **86.3% of held-out sentences exactly right**, at **0.793 macro-F1** and **0.977 period F1**. Belaid-75M runs a **20-layer** [`Masinissa-73M`](https://huggingface.co/agbalu/Masinissa-73M) at 1,024 subwords and, on continuous prose, places internal periods at **0.630 F1**, commas at **0.623**, word casing at **94.0%**, and acronyms at **0.755 F1** with **0.971 precision**. Pair the model with the input. An utterance from Fadhma comes here. A paragraph goes to 75M.
 
 **Punctuation and capitalisation for Kabyle** (Taqbaylit, `kab`, Latin script). It reads an
 unpunctuated, uncased Kabyle sentence — the form every speech recogniser produces — and
@@ -238,10 +234,11 @@ habit, and training on it teaches transcriber style rather than Kabyle.
 out-of-domain record carries 1.75 periods on average and the model predicts 1.04. It learned
 *one period, at the end* from Common Voice, where every record is one sentence by construction,
 and question recall follows the same pattern — 0.408 out of domain against 0.886 on test,
-because a question inside running prose is mid-record. **This is the input shape the model was
-built for**: ASR emits one utterance at a time, and that is where 0.793 applies. Segmenting a
-paragraph into sentences is a separate problem and this model does not solve it. For multi-sentence
-text and continuous discourse, use [`agbalu/Belaid-75M`](https://huggingface.co/agbalu/Belaid-75M).
+because a question inside running prose is mid-record. **This is the shape it was built to
+own**: a recogniser emits one utterance, and **0.793** is the score on that utterance.
+[`Belaid-75M`](https://huggingface.co/agbalu/Belaid-75M) takes the paragraph, with eight times
+the context and a 20-layer backbone, and scores **0.630 period F1** and **94.0% word-casing
+accuracy** on continuous discourse.
 
 **Comma placement is the weakest mark, and its ceiling is unknown.** Precision is 0.680 on test
 and 0.537 out of domain. Kabyle has no codified comma convention, and the references come from

@@ -26,10 +26,9 @@ from agbalu.codec_tts.configuration import Geometry
 from agbalu.codec_tts.synthesis import (
     InferenceSettings,
     SpeechRequest,
-    SpeechSynthesis,
     read_waveform,
+    render_speech,
 )
-from agbalu.codec_tts.verification import SpeechVerifier
 
 
 def compute_weight_identity(checkpoint: str, quantization: object, has_adapter: bool) -> str:
@@ -83,8 +82,6 @@ class SpeechModel(PreTrainedModel):
         self.audio_tokenizer = HiggsAudioV2TokenizerModel(
             HiggsAudioV2TokenizerConfig(**config.audio_configuration)
         )
-        self._verifier: SpeechVerifier | None = None
-        self._verifier_device: torch.device | None = None
         self.post_init()
 
     def save_pretrained(self, save_directory: str | Path, **kwargs: object) -> None:
@@ -130,26 +127,24 @@ class SpeechModel(PreTrainedModel):
             raise FileNotFoundError(message)
         settings = InferenceSettings.model_validate(self.config.inference)
         device = self.generator.audio_embedding.weight.device
-        if self._verifier is None or self._verifier_device != device:
-            self._verifier = SpeechVerifier(device)
-            self._verifier_device = device
         commit: object = getattr(self.config, "_commit_hash", None)
         tokenizer = AutoTokenizer.from_pretrained(
             self.config.name_or_path,
             revision=commit if isinstance(commit, str) else "main",
             trust_remote_code=True,
         )
-        engine = SpeechSynthesis(
-            self.generator,
-            Codec(self.audio_tokenizer, device),
-            tokenizer,
-            self._verifier,
-            provenance_stamp=self.config.source_stamp,
-        )
         with tempfile.TemporaryDirectory(prefix="speech-") as temporary:
             destination = (
                 Path(output_path) if output_path is not None else Path(temporary) / "speech.wav"
             )
-            report = engine.synthesize(request, settings, destination)
+            report = render_speech(
+                self.generator,
+                Codec(self.audio_tokenizer, device),
+                tokenizer,
+                request,
+                settings,
+                destination,
+                provenance_stamp=self.config.source_stamp,
+            )
             waveform = torch.from_numpy(read_waveform(destination)).unsqueeze(0)
         return SpeechOutput(waveform=waveform, sampling_rate=24000, report=report)

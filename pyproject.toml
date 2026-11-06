@@ -168,6 +168,9 @@ ignore = [
 # The benchmark executes fixed native argument lists and inspects Transformers flags.
 # Keep the measured load/generate transaction together so timing scopes stay explicit.
 "tools/quantize_speech.py" = ["S603", "PLR0912", "PLR0915", "SLF001"]
+# Execute only local FFmpeg/ffprobe binaries with explicit argument lists and no shell.
+"tools/produce_video.py" = ["S603"]
+"tools/video_showcase.py" = ["S603"]
 # Keep each codec-cache transaction and ordered training/evaluation lifecycle auditable.
 "src/agbalu/codec_tts/dataset.py" = ["PLR0915"]
 "src/agbalu/codec_tts/evaluation.py" = ["PLR0915"]

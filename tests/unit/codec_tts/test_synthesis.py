@@ -1,5 +1,6 @@
 """Verify joint selection and lossless text boundaries."""
 
+import numpy as np
 import pytest
 
 from agbalu.codec_tts.inference import Decoding
@@ -9,6 +10,7 @@ from agbalu.codec_tts.synthesis import (
     InferenceSettings,
     candidate_settings,
     choose_candidate,
+    close_gaps,
     split_text,
 )
 from agbalu.codec_tts.verification import Quality
@@ -92,3 +94,13 @@ def test_strategy_pool_and_recovery_are_explicit_and_duration_bounded() -> None:
     assert settings.sampling.max_new_positions == 1500
     with pytest.raises(ValueError, match="reference_characters"):
         candidate_settings(settings, "Azul.", 3, 0, 0)
+
+
+def test_internal_silence_longer_than_a_breath_is_shortened() -> None:
+    rate = 24000
+    tone = np.full(rate, 0.2, dtype=np.float32)
+    audio = np.concatenate((tone, np.zeros(rate, dtype=np.float32), tone))
+    result = close_gaps(audio)
+    assert rate * 2 < result.size < rate * 2 + int(0.25 * rate)
+    brief = np.concatenate((tone, np.zeros(int(0.1 * rate), dtype=np.float32), tone))
+    assert close_gaps(brief).size == brief.size
